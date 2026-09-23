@@ -293,7 +293,7 @@
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
-              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', listed: null,
+              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', listed: null, lastSeen: e.l || null,
               inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
           });
@@ -1620,7 +1620,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   const EMPTY_INTRO = 'Set your dates, then search.<br>Every result page is merged and sorted by availability.';
   const setEmpty = (html) => { ui.list.innerHTML = `<div class="rf-empty">${html}</div>`; };
-  const setLaunchCount = (n) => { ui.launch.textContent = n == null ? 'Availability filter' : `Availability filter (${n})`; };
+  const setLaunchCount = (n) => {
+    ui.launchN = n;
+    const star = marks.counts().starred;
+    ui.launch.textContent = `Availability filter${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
+  };
   const currentKey = () => (isSearchPage(location.href) ? searchKey(location.href) : null);
 
   let cfg = { ...DEFAULT_CFG, ...loadCfg() };
@@ -1744,7 +1748,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-floorplanOnly">Has a floorplan</label>
           <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies</span><span class="rf-ag-list"></span></div>
-          <label class="rf-check"><input type="checkbox" id="rf-annotate">Show availability on REA's result cards</label>
+        </details>
+        <details class="rf-more rf-settings">
+          <summary>Settings</summary>
+          <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
         </details>
@@ -2193,6 +2200,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   const updateCounts = () => {
+    if (ui.launch) setLaunchCount(ui.launchN ?? null);
     const ags = marks.hiddenAgencies();
     const box = ui.panel.querySelector('.rf-agencies');
     box.hidden = !ags.length;
@@ -2267,12 +2275,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     render(rows);
     renderActive();
     const st = diffStats(cache);
+    const matchHint = cfg.sort === 'match' && !rows.some((r) => r.score != null)
+      ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '';
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
     const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`,
       !cfg.showHidden && st.hidden && `${st.hidden} hidden`].filter(Boolean).join(' · ');
     setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
-      (note ? ` ${note}` : ''));
+      (note ? ` ${note}` : '') + matchHint);
     const warn = schemaWarnings(cache);
     if (warn.length) setStatus(`REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.`, true);
   }
@@ -2367,7 +2377,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
           ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
-          ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
+          ${r.inspections?.length || r.listed || r.lastSeen ? `<div class="rf-meta">${esc([
+            r.lastSeen && ui.view === 'shortlist' ? `seen ${ago(Date.now() - r.lastSeen)}` : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
             r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',
           ].filter(Boolean).join(' · '))}</div>` : ''}

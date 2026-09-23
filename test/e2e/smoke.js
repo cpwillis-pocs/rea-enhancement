@@ -309,6 +309,7 @@ const html = (n) => {
     await p2.uncheck('#rf-newOnly');
     await p2.check('#rf-showGone');
     assert.match(await p2.textContent('.rf-item[data-id="148000001"] .rf-avail'), /no longer listed/);
+    await p2.click('.rf-settings summary');
     await p2.uncheck('#rf-remember');
     assert.equal(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'opt-out clears');
     await cov.collect(p2, SCRIPT);

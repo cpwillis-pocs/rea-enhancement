@@ -10,8 +10,8 @@ labels: rea-drift
 **Search URL**
 <!-- A realestate.com.au/rent/... URL that reproduces it. Strip anything personal. -->
 
-**`reaFilter.probe()` output**
-<!-- DevTools console on the results page: run reaFilter.probe() and paste the table (or the returned object). -->
+**`reaFilter.selfcheck()` and `reaFilter.probe()` output**
+<!-- DevTools console on the results page after running a search: reaFilter.selfcheck() copies a report to the clipboard; paste it here. Then run reaFilter.probe() and paste the table (or returned object). Neither includes listing text or your notes. -->
 
 ```
 ```

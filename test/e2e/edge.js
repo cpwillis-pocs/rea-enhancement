@@ -280,6 +280,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.fill('#rf-maxKm', ''); await page.dispatchEvent('#rf-maxKm', 'change');
     await page.fill('#rf-priceMax', '1500'); await page.dispatchEvent('#rf-priceMax', 'change');
     await page.selectOption('#rf-sort', 'match');
+    // (with a budget + distance there are scores; the "needs two of" hint only shows without)
     const scores = await page.$$eval('.rf-score', (e) => e.map((x) => +x.textContent.replace(/\D/g, '')));
     assert.ok(scores.length > 3 && scores.every((v, i) => i === 0 || v <= scores[i - 1]), `best match sorted desc: ${scores.slice(0, 5)}`);
     assert.match(await page.getAttribute('.rf-score', 'title'), /rent vs budget \d+/);
@@ -357,6 +358,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.waitForFunction((i) => document.querySelector(`article[data-rf-id="${i}"]`)?.dataset.rfMatch === '0', id);
     await page.click('#rf-launch');
     assert.match(await page.textContent('.rf-count'), /\(1\)/);
+    assert.match(await page.textContent('#rf-launch'), /★1/, 'launcher shows shortlist count');
     console.log('card quick actions: ok');
     await done(page); await ctx.close();
   }
