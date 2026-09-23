@@ -8,8 +8,11 @@ Issues and PRs welcome. The script is one file with no dependencies, so the bar 
 git clone <this repo>
 cd rea-enhancement
 npm run check   # syntax check + unit tests, exactly what CI runs first
-npm run e2e     # Chromium smoke test; needs `npm i --no-save playwright` + `npx playwright install chromium`
+npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js); needs `npm i --no-save playwright` + `npx playwright install chromium`
+npm run coverage   # unit coverage of the pure half, then V8 coverage of the UI half across both e2e files -> coverage-e2e.txt
 ```
+
+Every line of the userscript should be executed by some test: pure functions by `test/*.test.js`, UI code by `test/e2e/*.js`. `npm run coverage` lists any UI line no e2e run reached; add a scenario for it rather than leaving it unexercised. Tests freeze the clock (`test/clock.js`, `page.clock.install`), so fixture dates keep their meaning on any day.
 
 To try a change in the browser, paste the file into a Tampermonkey script (or point a local-file `@require` at it) and reload a `realestate.com.au/rent/...` search.
 

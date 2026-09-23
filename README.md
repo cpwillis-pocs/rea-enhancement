@@ -70,7 +70,8 @@ No dependencies; Node 20+.
 
 ```sh
 npm run check   # syntax check + unit tests (what CI runs first)
-npm run e2e     # Chromium smoke test against fixture pages on the REA origin (needs playwright)
+npm run e2e     # Chromium tests against fixture pages on the REA origin (needs playwright)
+npm run coverage   # unit + e2e line coverage
 node test/e2e/screenshots.js   # regenerate docs/screenshots
 ```
 
