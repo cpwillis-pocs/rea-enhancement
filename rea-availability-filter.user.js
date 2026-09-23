@@ -518,6 +518,10 @@
     const panel = document.createElement('div');
     panel.id = 'rf-panel';
     panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Availability filter');
+    launch.setAttribute('aria-controls', 'rf-panel');
+    launch.setAttribute('aria-expanded', 'false');
     panel.innerHTML = `
       <div class="rf-head">
         <h2>Availability filter</h2>
@@ -567,7 +571,7 @@
           <button class="rf-btn sec" data-export="copy" disabled title="Copy as TSV - pastes into Sheets/Excel">Copy</button>
         </div>
       </div>
-      <div class="rf-status"></div>
+      <div class="rf-status" role="status" aria-live="polite"></div>
       <div class="rf-list"><div class="rf-empty">Set your dates, then search.<br>Every result page is merged and sorted by availability.</div></div>`;
 
     document.body.append(launch, panel);
@@ -596,10 +600,12 @@
     ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
-    launch.addEventListener('click', () => { panel.hidden = false; ui.run.focus(); });
-    panel.querySelector('.rf-x').addEventListener('click', () => { panel.hidden = true; });
+    const setOpen = (open) => { panel.hidden = !open; launch.setAttribute('aria-expanded', String(open)); };
+    ui.setOpen = setOpen;
+    launch.addEventListener('click', () => { setOpen(true); ui.run.focus(); });
+    panel.querySelector('.rf-x').addEventListener('click', () => setOpen(false));
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !panel.hidden) { panel.hidden = true; launch.focus(); }
+      if (e.key === 'Escape' && !panel.hidden) { setOpen(false); launch.focus(); }
     });
     panel.querySelector('.rf-clear').addEventListener('click', () => {
       // Resets filters only; display preferences (sort, annotate, dim) are kept.
@@ -633,8 +639,18 @@
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
         else {
-          try { await navigator.clipboard.writeText(toTsv(rows)); setStatus(`Copied ${rows.length} rows.`); }
-          catch { setStatus('Clipboard blocked - use TSV download instead.', true); }
+          const text = toTsv(rows);
+          let ok = false;
+          try { await navigator.clipboard.writeText(text); ok = true; } catch {
+            // Async clipboard needs focus/permission; fall back to the legacy copy command.
+            const ta = Object.assign(document.createElement('textarea'), { value: text });
+            ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { ok = document.execCommand('copy'); } catch { /* unsupported */ }
+            ta.remove();
+          }
+          setStatus(ok ? `Copied ${rows.length} rows.` : 'Clipboard blocked - use TSV download instead.', !ok);
         }
       });
     }
@@ -648,6 +664,15 @@
   };
 
   function showResults(note = '') {
+    if (cfg.from && cfg.to && cfg.from > cfg.to) {
+      render([]);
+      return setStatus('"Available from" is after "Available to".', true);
+    }
+    const priceMin = +cfg.priceMin, priceMax = +cfg.priceMax;
+    if (cfg.priceMin !== '' && cfg.priceMax !== '' && priceMin > priceMax) {
+      render([]);
+      return setStatus('Min $/wk is above max $/wk.', true);
+    }
     const rows = applyFilters(cache, cfg);
     render(rows);
     setStatus(`${rows.length} of ${cache.length} listings match.` +
@@ -742,6 +767,8 @@
     } catch (err) {
       if (id !== runId) return;
       cache = null;
+      cacheKey = null;
+      ui.launch.textContent = 'Availability filter';
       setStatus(err.message, true);
       ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
     } finally {
@@ -858,7 +885,7 @@
     window.addEventListener('rf:navigate', () => {
       const active = isSearchPage(location.href);
       ui.launch.hidden = !active;
-      if (!active) ui.panel.hidden = true;
+      if (!active) ui.setOpen(false);
       setTimeout(ensureVisiblePage, 400); // let REA render the new page first
       const key = active ? searchKey(location.href) : null;
       if (key === lastKey) return; // same search, different page/view

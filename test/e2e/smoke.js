@@ -104,6 +104,12 @@ const html = (n) => {
   await page.fill('#rf-keyword', '');
   await page.dispatchEvent('#rf-keyword', 'change');
 
+  await page.fill('#rf-to', '2026-09-01');
+  await page.dispatchEvent('#rf-to', 'change');
+  assert.match(await page.textContent('.rf-status'), /after/);
+  await page.fill('#rf-to', '');
+  await page.dispatchEvent('#rf-to', 'change');
+
   await page.click('.rf-clear');
   assert.equal(await page.inputValue('#rf-from'), '');
   assert.equal(await page.$$eval('.rf-card', (els) => els.length), PAGES * 2 + 1);
@@ -135,6 +141,7 @@ const html = (n) => {
   await page.click('#rf-launch');
   await page.keyboard.press('Escape');
   assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), true);
+  assert.equal(await page.getAttribute('#rf-launch', 'aria-expanded'), 'false');
 
   const probed = await page.evaluate(() => window.reaFilter.probe());
   assert.equal(probed['availableDate.display'] !== '(missing)', true);
