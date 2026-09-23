@@ -571,6 +571,23 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 26. Re-check: listing pages update price / mark 404s as no longer listed.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const ids = await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id));
+    const pickGone = ids.find((i) => i.endsWith('3')), pickOk = ids.find((i) => !i.endsWith('3'));
+    for (const id of [pickGone, pickOk]) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    await page.click('[data-sl=recheck]');
+    await waitStatus(page, /Re-checked 2: 1 updated, 1 no longer listed/, 20000);
+    assert.match(await page.textContent(`.rf-item[data-id="${pickGone}"]`), /no longer listed/);
+    assert.match(await page.textContent(`.rf-item[data-id="${pickOk}"]`), /\$999 per week/);
+    console.log('re-check shortlist: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

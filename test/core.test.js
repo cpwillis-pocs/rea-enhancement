@@ -382,3 +382,16 @@ test('planDay / inspectDays: order, clash, tight by distance, ok', () => {
   assert.equal(plan[2].flag, '', '11:00 after 10:25, ~6.6 km: 35 min gap is fine');
   assert.equal(plan[3].flag, 'tight', '45 min gap but ~39 km away');
 });
+
+test('parseListingPage: nested JSON, id match, gone on 404/redirect, unknown otherwise', () => {
+  const l = listing({ id: '146500777', _links: { canonical: { href: 'https://www.realestate.com.au/property-x-146500777' } }, price: { display: '$810 per week' } });
+  const ex = { someApp: { cache: JSON.stringify({ a: { data: JSON.stringify({ deep: { listing: l }, other: { id: '999', price: { display: '$1' } } }) } }) } };
+  const html = `<script>window.ArgonautExchange=${JSON.stringify(ex)};</script>`;
+  const out = core.parseListingPage(html, '146500777');
+  assert.equal(out.status, 'ok');
+  assert.equal(out.listing.price.display, '$810 per week');
+  assert.equal(core.parseListingPage(html, '146500000').status, 'unknown');
+  assert.equal(core.parseListingPage('', '1', { status: 404 }).status, 'gone');
+  assert.equal(core.parseListingPage('', '1', { redirectedTo: 'https://www.realestate.com.au/rent/in-bondi/list-1' }).status, 'gone');
+  assert.equal(core.parseListingPage('<html>captcha</html>', '1').status, 'unknown');
+});

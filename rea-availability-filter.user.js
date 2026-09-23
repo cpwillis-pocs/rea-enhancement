@@ -214,6 +214,7 @@
           if (!r.id) continue;
           const e = m[r.id] || (m[r.id] = { f: t });
           e.l = t;
+          delete e.x; // seen again, so not gone
           if (e.s) e.d = summary(r); // keep the shortlist's copy current
           if (Number.isFinite(r.priceNum)) {
             if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; e.pt = t; }
@@ -275,6 +276,13 @@
         if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; }
         save();
       },
+      // Re-check outcome: gone (REA took it down) or seen again (clears gone).
+      setGone(id, gone) {
+        const { m } = fresh();
+        const e = entry(m, id);
+        if (gone) e.x = now(); else delete e.x;
+        save();
+      },
       setNote(id, text) {
         const { m } = fresh();
         const e = entry(m, id);
@@ -294,6 +302,7 @@
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', listed: null, lastSeen: e.l || null,
+              gone: !!e.x, goneAt: e.x || null,
               inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
           });
@@ -303,7 +312,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {} };
       },
@@ -321,6 +330,7 @@
           const cur = entry(m, id);
           if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
           if (e.h) cur.h = 1;
+          if (typeof e.x === 'number') cur.x = e.x;
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           n++;
@@ -638,6 +648,44 @@
   }
 
   const PAGE_SEG = /\/(?:list|map)-(\d+)/; // results page segment, eg /list-3 or /map-1
+  // Listing (property) pages: their hydration blob belongs to a different REA app whose shape
+  // we don't know, so nested JSON strings are unpacked and the listing is found by shape:
+  // an object with a price/availability display whose canonical id matches.
+  // Two limits: JSON-in-string unpacking (the blob nests 2-3 levels) and plain object nesting.
+  const UNPACK_PARSES = 4, UNPACK_NEST = 40;
+  const unpackJson = (v, parses = 0, nest = 0) => {
+    if (nest > UNPACK_NEST) return v;
+    if (typeof v === 'string' && parses < UNPACK_PARSES && /^\s*[[{]/.test(v)) {
+      try { return unpackJson(JSON.parse(v), parses + 1, nest + 1); } catch { return v; }
+    }
+    if (Array.isArray(v)) return v.map((x) => unpackJson(x, parses, nest + 1));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, unpackJson(x, parses, nest + 1)]));
+    return v;
+  };
+  const LISTING_SCAN_NODES = 20000;
+  function findListing(root, id) {
+    const queue = [root];
+    for (let qi = 0; qi < queue.length && qi < LISTING_SCAN_NODES; qi++) {
+      const o = queue[qi];
+      if (!o || typeof o !== 'object') continue;
+      const own = listingId(str(o._links?.canonical?.href)) || (o.id != null ? String(o.id) : '');
+      if (own === id && (o.price || o.availableDate)) return o;
+      for (const v of Object.values(o)) if (v && typeof v === 'object') queue.push(v);
+    }
+    return null;
+  }
+  // -> { status: 'ok', listing } | { status: 'gone' } | { status: 'unknown' }
+  function parseListingPage(html, id, { status = 200, redirectedTo = '' } = {}) {
+    if (status === 404 || status === 410) return { status: 'gone' };
+    if (redirectedTo && !/\/property-/.test(new URL(redirectedTo).pathname)) return { status: 'gone' }; // bounced to a search
+    const m = html.match(/window\.ArgonautExchange=(\{.*?\});?<\/script>/s);
+    if (!m) return { status: 'unknown' };
+    try {
+      const listing = findListing(unpackJson(JSON.parse(m[1])), id);
+      return listing ? { status: 'ok', listing } : { status: 'unknown' };
+    } catch { return { status: 'unknown' }; }
+  }
+
   const pageUrl = (base, n) => {
     const u = new URL(base);
     u.hash = '';
@@ -1399,7 +1447,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1705,6 +1753,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+        <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
         <button class="rf-btn sec" data-sl="share" title="Copy a link that shares these listings (no server involved)">Share</button>
         <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
         <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
@@ -2106,6 +2155,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdLocal(new Date(i.at)) === day) }));
       downloadIcs(rows);
     });
+    ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
     ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
       const rows = shortlistRows();
       if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
@@ -2178,6 +2228,42 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const f = ui.slFilter.value;
     return marks.shortlist().filter((r) => !f || (f === '-' ? !r.appStatus : r.appStatus === f));
   };
+
+  // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
+  const RECHECK_MAX = 30;
+  async function recheckShortlist(btn) {
+    if (busy) return;
+    const rows = shortlistRows().slice(0, RECHECK_MAX);
+    if (!rows.length) return setStatus('Nothing on the shortlist to re-check.', true);
+    runCtrl?.abort();
+    const ctrl = runCtrl = new AbortController();
+    setBusy(true);
+    btn.setAttribute('aria-disabled', 'true');
+    const tally = { ok: 0, gone: 0, unknown: 0 };
+    try {
+      for (const [i, r] of rows.entries()) {
+        setStatus(`Re-checking ${i + 1} of ${rows.length}…`);
+        let res;
+        try { res = await fetch(r.url, { credentials: 'include', signal: withTimeout(ctrl.signal, FETCH_TIMEOUT_MS) }); } catch (err) {
+          if (ctrl.signal.aborted) throw err;
+          tally.unknown++; continue;
+        }
+        const out = parseListingPage(res.ok ? await res.text() : '', r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
+        tally[out.status]++;
+        if (out.status === 'gone') marks.setGone(r.id, true);
+        if (out.status === 'ok') { const row = safeRow(out.listing, false); if (row) learn([row]); }
+        if (i < rows.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
+      }
+      refreshMarks();
+      setStatus(`Re-checked ${rows.length}: ${tally.ok} updated, ${tally.gone} no longer listed${tally.unknown ? `, ${tally.unknown} couldn't be read` : ''}.`);
+    } catch {
+      setStatus('Re-check stopped.');
+    } finally {
+      setBusy(false);
+      btn.removeAttribute('aria-disabled');
+      if (runCtrl === ctrl) runCtrl = null;
+    }
+  }
 
   function renderShortlist() {
     const rows = shortlistRows();
@@ -2361,7 +2447,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.gone ? '<span class="rf-tag rf-gone">no longer listed</span>' : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(Date.now() - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([

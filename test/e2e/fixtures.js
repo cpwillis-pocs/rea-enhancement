@@ -81,6 +81,17 @@ const serve = (hits = [], opts) => (route) => {
     return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: photo(i) });
   }
   if (u.origin !== ORIGIN) return route.fulfill({ status: 204, body: '' });
+  // Listing pages: a different app key and nested JSON strings, as a real property page may use.
+  // Ids ending in 3 are gone (404); others report a new price.
+  const prop = u.pathname.match(/^\/property-.*-(\d+)$/);
+  if (prop) {
+    const id = prop[1];
+    if (id.endsWith('3')) return route.fulfill({ status: 404, contentType: 'text/html', body: 'Not found' });
+    const l = pageResults(1, { pages: 4, perPage: 24 }).exact.items.map((i) => i.listing).find((x) => x.id === id) || listing({ id });
+    const data = { details: { listing: { ...l, price: { display: '$999 per week' } } } };
+    const ex = { 'resi-property_details-web': { urqlClientCache: JSON.stringify({ q1: { data: JSON.stringify(data) } }) } };
+    return route.fulfill({ status: 200, contentType: 'text/html', body: `<html><body><script>window.ArgonautExchange=${JSON.stringify(ex)};</script></body></html>` });
+  }
   if (!u.pathname.startsWith('/rent/')) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><main>home</main>' });
   const n = +(u.pathname.match(/list-(\d+)/)?.[1] || 1);
   hits.push(n);
