@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      1.0.0
+// @version      1.1.0
 // @description  Adds available-from/to filtering, availability sorting, cross-page merging and TSV export to realestate.com.au rental searches.
 // @author       cpwillis
 // @match        https://www.realestate.com.au/rent/*
@@ -37,15 +37,38 @@
     try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch { /* private mode */ }
   };
 
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  const safeUrl = (u) => (/^https:\/\//i.test(u || '') ? u : '');
+
   // ------------------------------------------------------------ extraction
+
+  const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
   // "Available now" -> today, so it survives a from-date of today or earlier
   // and is correctly excluded by a future from-date.
+  // Parsed by hand: Date() on "Mon 12th Oct" is engine-specific and, lacking a year,
+  // Chrome yields 2001. A year-less date more than ~2 months past rolls to next year.
   const parseAvail = (display) => {
     if (!display) return null;
-    if (/now/i.test(display)) { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
-    const d = new Date(display.replace(/^Available\s+/i, ''));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (/\bnow\b/i.test(display)) return today;
+    // "12th Oct 2026" or "October 12, 2026"
+    const dm = display.match(/(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3})[a-z]*\.?(?:,?\s+(\d{4}))?/i);
+    const md = !dm && display.match(/\b([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?/i);
+    const [day, mon, yr] = dm ? [dm[1], dm[2], dm[3]] : md ? [md[2], md[1], md[3]] : [];
+    if (!mon || !(mon.toLowerCase() in MONTHS)) return null;
+    const month = MONTHS[mon.toLowerCase()];
+    let year = yr ? +yr : today.getFullYear();
+    let d = new Date(year, month, +day);
+    if (!yr && today - d > 60 * 864e5) d = new Date(++year, month, +day);
     return isNaN(d) ? null : d;
+  };
+
+  const parsePrice = (display) => {
+    const m = (display || '').replace(/,/g, '').match(/\$\s*(\d+(?:\.\d+)?)/);
+    return m ? +m[1] : Infinity;
   };
 
   function extractResults(html) {
@@ -62,48 +85,57 @@
     throw new Error('No rentSearch results found in cache.');
   }
 
-  const pageUrl = (n) => {
-    const u = new URL(location.href);
+  const pageUrl = (base, n) => {
+    const u = new URL(base);
     u.pathname = /\/(list|map)-\d+/.test(u.pathname)
       ? u.pathname.replace(/\/(list|map)-\d+/, `/list-${n}`)
       : u.pathname.replace(/\/?$/, `/list-${n}`);
     return u.href;
   };
 
-  const toRow = (listing, surrounding) => ({
-    avail: parseAvail(listing.availableDate?.display),
-    available: (listing.availableDate?.display || '').replace(/^Available\s*/i, '') || '-',
-    price: listing.price?.display || '',
-    bond: listing.bond?.display || '',
-    address: listing.address?.display?.fullAddress || listing.address?.display?.shortAddress || '',
-    suburb: listing.address?.suburb || '',
-    beds: listing.generalFeatures?.bedrooms?.value ?? '',
-    baths: listing.generalFeatures?.bathrooms?.value ?? '',
-    cars: listing.generalFeatures?.parkingSpaces?.value ?? '',
-    type: listing.propertyType?.display || '',
-    img: listing.media?.mainImage?.templatedUrl?.replace('{size}', IMG_SIZE) || '',
-    url: listing._links?.canonical?.href || '',
-    surrounding,
-  });
+  const toRow = (listing, surrounding) => {
+    const display = listing.availableDate?.display || '';
+    const price = listing.price?.display || '';
+    return {
+      avail: parseAvail(display),
+      available: display.replace(/^Available\s*/i, '') || '-',
+      price,
+      priceNum: parsePrice(price),
+      bond: listing.bond?.display || '',
+      address: listing.address?.display?.fullAddress || listing.address?.display?.shortAddress || '',
+      suburb: listing.address?.suburb || '',
+      beds: listing.generalFeatures?.bedrooms?.value ?? '',
+      baths: listing.generalFeatures?.bathrooms?.value ?? '',
+      cars: listing.generalFeatures?.parkingSpaces?.value ?? '',
+      type: listing.propertyType?.display || '',
+      img: safeUrl(listing.media?.mainImage?.templatedUrl?.replace('{size}', IMG_SIZE)),
+      url: safeUrl(listing._links?.canonical?.href),
+      surrounding,
+    };
+  };
 
-  async function fetchAllPages(onProgress) {
+  async function fetchAllPages(base, onProgress) {
     const rows = [];
-    let page = 1, max = 1;
+    let page = 1, max = 1, total = 1;
     do {
-      onProgress(`Reading page ${page}${max > 1 ? ` of ${Math.min(max, MAX_PAGES)}` : ''}…`);
-      const html = await fetch(pageUrl(page)).then((r) => r.text());
-      const results = extractResults(html);
-      max = Math.min(results.pagination?.maxPageNumberAvailable || 1, MAX_PAGES);
+      onProgress(`Reading page ${page}${max > 1 ? ` of ${max}` : ''}…`);
+      const res = await fetch(pageUrl(base, page), { credentials: 'include' });
+      if (!res.ok) throw new Error(`Page ${page} returned HTTP ${res.status}${res.status === 429 ? ' (rate limited - wait and retry)' : ''}.`);
+      const results = extractResults(await res.text());
+      total = results.pagination?.maxPageNumberAvailable || 1;
+      max = Math.min(total, MAX_PAGES);
       for (const it of results.exact?.items || []) if (it.listing) rows.push(toRow(it.listing, false));
       for (const it of results.surrounding?.items || []) if (it.listing) rows.push(toRow(it.listing, true));
       page++;
       if (page <= max) await new Promise((r) => setTimeout(r, PAGE_DELAY_MS));
     } while (page <= max);
-    return rows;
+    return { rows, truncated: total > MAX_PAGES };
   }
 
   // --------------------------------------------------------------- filter
 
+  // Undated listings ("Contact agent") can't satisfy a date bound, but are kept
+  // (sorted last) when no bound is set so an empty filter never hides data.
   function applyFilters(rows, cfg) {
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
     const to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
@@ -111,11 +143,11 @@
     return rows
       .filter((r) => r.url && !seen.has(r.url) && seen.add(r.url))
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
-      .filter((r) => r.avail && (!from || r.avail >= from) && (!to || r.avail <= to))
-      .sort((a, b) => a.avail - b.avail || String(a.price).localeCompare(String(b.price)));
+      .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
+      .sort((a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity) || a.priceNum - b.priceNum);
   }
 
-  const TSV_COLS = ['available', 'price', 'bond', 'address', 'beds', 'baths', 'cars', 'type', 'url'];
+  const TSV_COLS = ['available', 'price', 'bond', 'address', 'suburb', 'beds', 'baths', 'cars', 'type', 'url'];
   const toTsv = (rows) =>
     [TSV_COLS.join('\t')]
       .concat(rows.map((r) => TSV_COLS.map((c) => String(r[c] ?? '').replace(/\s+/g, ' ')).join('\t')))
@@ -180,6 +212,8 @@
   let cfg = Object.assign({ from: '', to: '', exactOnly: false }, loadCfg());
   let cache = null; // raw rows for the current search URL
   let cacheUrl = null;
+  let truncated = false;
+  let runId = 0; // bumped on navigation so an in-flight run can't write stale rows
   let ui = null;
 
   function build() {
@@ -236,7 +270,7 @@
     const onChange = () => {
       cfg = { from: ui.from.value, to: ui.to.value, exactOnly: ui.exact.checked };
       saveCfg(cfg);
-      if (cache) render(applyFilters(cache, cfg)); // re-filter without refetching
+      if (cache) showResults(); // re-filter without refetching
     };
     ui.from.addEventListener('change', onChange);
     ui.to.addEventListener('change', onChange);
@@ -253,6 +287,13 @@
     ui.status.classList.toggle('err', !!isErr);
   };
 
+  function showResults() {
+    const rows = applyFilters(cache, cfg);
+    render(rows);
+    setStatus(`${rows.length} of ${cache.length} listings match.` +
+      (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : ''));
+  }
+
   function render(rows) {
     ui.exportBtn.disabled = rows.length === 0;
     if (!rows.length) {
@@ -260,43 +301,48 @@
       return;
     }
     ui.list.innerHTML = rows.map((r) => `
-      <a class="rf-card" href="${r.url}" target="_blank" rel="noopener">
-        ${r.img ? `<img src="${r.img}" alt="" loading="lazy">` : '<div></div>'}
+      <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
+        ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${r.available}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
-          <div class="rf-price">${r.price}</div>
-          <div class="rf-addr">${r.address}</div>
-          <div class="rf-meta">${[
+          <div class="rf-avail">${esc(r.available)}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-price">${esc(r.price)}</div>
+          <div class="rf-addr">${esc(r.address)}</div>
+          <div class="rf-meta">${esc([
             r.beds !== '' ? `${r.beds} bed` : '',
             r.baths !== '' ? `${r.baths} bath` : '',
             r.cars !== '' ? `${r.cars} car` : '',
             r.bond ? `bond ${r.bond}` : '',
-          ].filter(Boolean).join(' · ')}</div>
+          ].filter(Boolean).join(' · '))}</div>
         </div>
       </a>`).join('');
     ui.list.scrollTop = 0;
   }
 
   async function run() {
+    const id = ++runId;
+    const base = location.href;
     ui.run.disabled = true;
     ui.exportBtn.disabled = true;
     try {
-      cache = await fetchAllPages((m) => setStatus(m));
-      cacheUrl = location.href;
-      const rows = applyFilters(cache, cfg);
-      render(rows);
-      setStatus(`${rows.length} of ${cache.length} listings match.`);
+      const res = await fetchAllPages(base, (m) => { if (id === runId) setStatus(m); });
+      if (id !== runId) return; // search changed mid-run; navigation handler already reported it
+      cache = res.rows;
+      truncated = res.truncated;
+      cacheUrl = base;
+      showResults();
     } catch (err) {
+      if (id !== runId) return;
       cache = null;
       setStatus(err.message, true);
       ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
     } finally {
-      ui.run.disabled = false;
+      if (id === runId) ui.run.disabled = false;
     }
   }
 
-  // REA is an SPA - invalidate cached rows when the search URL changes.
+  // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
   function watchNavigation() {
+    let lastUrl = location.href;
     const fire = () => window.dispatchEvent(new Event('rf:navigate'));
     for (const fn of ['pushState', 'replaceState']) {
       const orig = history[fn];
@@ -304,12 +350,17 @@
     }
     window.addEventListener('popstate', fire);
     window.addEventListener('rf:navigate', () => {
-      if (cacheUrl && location.href !== cacheUrl) {
-        cache = null;
-        cacheUrl = null;
-        ui.exportBtn.disabled = true;
-        setStatus('Search changed - run again to refresh.');
-      }
+      if (location.href === lastUrl) return;
+      lastUrl = location.href;
+      const inFlight = ui.run.disabled;
+      if (!cacheUrl && !inFlight) return;
+      if (cacheUrl && location.href === cacheUrl) return;
+      runId++;
+      cache = null;
+      cacheUrl = null;
+      ui.run.disabled = false;
+      ui.exportBtn.disabled = true;
+      setStatus('Search changed - run again to refresh.');
     });
   }
 
