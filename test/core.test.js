@@ -265,7 +265,7 @@ test('cfgError: conflicting settings explained', () => {
 test('diffStats / ago / isFresh', () => {
   const a = core.toRow(listing({ id: 'a' }), false), b = core.toRow(listing({ id: 'b' }), true), b2 = core.toRow(listing({ id: 'b' }), false);
   a.sinceLast = true; b.hidden = b2.hidden = true; b2.prevPrice = '$1';
-  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 1, hidden: 1 });
+  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 1, redated: 0, hidden: 1 });
   assert.equal(core.ago(30e3), 'just now');
   assert.equal(core.ago(5 * 60e3), '5 min ago');
   assert.equal(core.ago(3 * 36e5), '3h ago');
@@ -468,4 +468,10 @@ test('incomePct and income-based budget for Best match', () => {
   core.withScores(rows, { ...core.DEFAULT_CFG, income: '104000', maxKm: '10' });
   assert.match(rows[0].scoreWhy, /rent vs budget/);
   assert.ok(rows[0].score > rows[1].score);
+});
+
+test('changedOnly keeps listings with a recent price or date change', () => {
+  const rows = [{ id: '1', url: 'a', prevPrice: '$1' }, { id: '2', url: 'b', prevAvail: '5 Oct' }, { id: '3', url: 'c' }];
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, changedOnly: true }).map((r) => r.id), ['1', '2']);
+  assert.equal(core.activeFilters({ ...core.DEFAULT_CFG, changedOnly: true })[0].label, 'Changed only');
 });

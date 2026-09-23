@@ -684,6 +684,9 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     });
     await page.click('#rf-refresh'); await waitStatus(page, /listings match/);
     await page.waitForSelector(`.rf-item[data-id="${id}"] .rf-avail .rf-was.up`);
+    assert.match(await status(page), /1 date changed/);
+    await page.click('#rf-more summary'); await page.check('#rf-changedOnly');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), [id], 'changed-only filter');
     await page.waitForFunction(() => [...document.querySelectorAll('.rf-badge span')].some((b) => /^Avail was /.test(b.textContent)), null, { timeout: 5000 });
     console.log('availability change: ok,', await page.textContent(`.rf-item[data-id="${id}"] .rf-avail`));
     await done(page); await ctx.close();

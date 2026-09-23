@@ -1104,7 +1104,7 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
-    remember: true, newOnly: false, showGone: false, income: '',
+    remember: true, newOnly: false, changedOnly: false, showGone: false, income: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1116,9 +1116,9 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'staleOnly', 'amenities', 'maxKm', 'floorplanOnly'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'staleOnly', 'amenities', 'maxKm', 'floorplanOnly'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
+    'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'income']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -1217,7 +1217,7 @@
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
     bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
     keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has photo',
-    exactOnly: () => 'No nearby suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only',
+    exactOnly: () => 'No nearby suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only',
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
   const activeFilters = (cfg) => {
@@ -1322,9 +1322,9 @@
 
   // Counts for the status line over the deduped rows.
   const diffStats = (rows) => {
-    let fresh = 0, moved = 0, hidden = 0;
-    for (const r of dedupe(rows)) { fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; hidden += r.hidden ? 1 : 0; }
-    return { fresh, moved, hidden };
+    let fresh = 0, moved = 0, redated = 0, hidden = 0;
+    for (const r of dedupe(rows)) { fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; redated += r.prevAvail ? 1 : 0; hidden += r.hidden ? 1 : 0; }
+    return { fresh, moved, redated, hidden };
   };
 
   const ago = (ms) => {
@@ -1365,6 +1365,7 @@
       .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
+      .filter((r) => !cfg.changedOnly || !!(r.prevPrice || r.prevAvail))
       .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
       .filter((r) => kmMax == null || !anchor || (r.km != null && r.km <= kmMax)) // no location fails a distance cap
       .filter((r) => amenReq.every(([id, st]) => (st === 'yes' ? r.amen?.[id] === 'yes' : r.amen?.[id] !== 'yes')))
@@ -1996,6 +1997,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Listed over 3 weeks ago</label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
           <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
+          <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price or date changed recently</label>
           <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
           <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
@@ -2687,7 +2689,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const matchHint = cfg.sort === 'match' && !rows.some((r) => r.score != null)
       ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '';
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
-    const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`,
+    const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`, st.redated && `${st.redated} date changed`,
       !cfg.showHidden && st.hidden && `${st.hidden} hidden`].filter(Boolean).join(' · ');
     setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
