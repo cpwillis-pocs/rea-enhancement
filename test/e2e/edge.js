@@ -786,6 +786,21 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24g. Listing bar when REA's app already consumed the page-data global: read from the <script> tag.
+  {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await cov.track(page);
+    await page.route('**/*', serve());
+    await page.goto(`${ORIGIN}/property-unit-nsw-bondi-146500104`);
+    await page.evaluate(() => { delete window.ArgonautExchange; });
+    await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-lbar');
+    assert.equal(await page.evaluate(() => document.getElementById('rf-lbar')._row.price), '$999 per week');
+    console.log('listing bar from script tag: ok');
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
