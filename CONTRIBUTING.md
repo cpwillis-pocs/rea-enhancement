@@ -18,14 +18,14 @@ npm run ci      # check + e2e, the whole gate locally
 
 ## CI
 
-`.github/workflows/ci.yml` runs on PRs, weekly (to catch Chromium or Node changes), and on demand from **Actions → ci → Run workflow**. It deliberately doesn't run on pushes to `main`, to keep within the repo's monthly Actions minutes: run `npm run ci` locally, or the workflow on demand, before releasing.
+`.github/workflows/ci.yml` runs on pull requests and on demand from **Actions → ci → Run workflow**. It deliberately has no push or schedule triggers, to keep within the repo's monthly Actions minutes: run `npm run ci` locally before opening a PR (maintainers: before releasing, or run the workflow on demand).
 
 | Job | What | When |
 |---|---|---|
 | lint | `npm run lint` | always (first) |
-| unit | unit tests on Node 20, 22, 24, with a JUnit report | PR, schedule, on demand `all`/`unit` |
-| e2e | `smoke.js` and `edge.js` in parallel; failure screenshots and logs as artifacts | PR, schedule, on demand `all`/`e2e` |
-| coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | schedule, on demand `all`/`coverage` |
+| unit | unit tests on Node 20, 22, 24, with a JUnit report | PR, on demand `all`/`unit` |
+| e2e | `smoke.js` and `edge.js` in parallel; failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
+| coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | on demand `all`/`coverage` (run `npm run coverage` locally for new UI code) |
 | screenshots | regenerates `docs/screenshots` and uploads them (nothing committed) | on demand `screenshots` |
 | version-bump | a script change must raise `@version` | PR |
 
@@ -59,6 +59,10 @@ Put new logic above the guard where you can, and give it a unit test.
 ## Reporting REA format changes
 
 If a search fails or fields go blank, open an issue with the "REA data format changed" template and paste `reaFilter.selfcheck()` and `reaFilter.probe()` output from the DevTools console. That shows which paths still exist and which fields usually fill.
+
+## Pull requests
+
+The PR template lists the checks: `npm run ci` passes, new UI code has an e2e scenario, and a script change bumps `@version` with a CHANGELOG section. CI runs the same gate on the PR.
 
 ## Commits
 

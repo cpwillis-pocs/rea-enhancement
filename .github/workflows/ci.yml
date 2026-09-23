@@ -1,13 +1,11 @@
 name: ci
 
-# Gate for PRs, a weekly run to catch Chromium/Node drift, and an on-demand run (Actions tab ->
-# ci -> Run workflow) that can pick a suite, repeat e2e to hunt flakes, or regenerate the README
-# screenshots as an artifact. Deliberately not run on push: pushes to main would use up the
-# repo's monthly Actions minutes; run it on demand before releasing instead.
+# Gate for contributors' PRs, plus an on-demand run (Actions tab -> ci -> Run workflow) that can
+# pick a suite, repeat e2e to hunt flakes, or regenerate the README screenshots as an artifact.
+# Deliberately no push or schedule triggers, to keep within the repo's monthly Actions minutes:
+# run `npm run ci` locally, or this workflow on demand, before releasing.
 on:
   pull_request:
-  schedule:
-    - cron: '0 20 * * 0' # Mondays 06:00 AEST
   workflow_dispatch:
     inputs:
       suite:
@@ -28,7 +26,7 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR supersedes the older run; scheduled and on-demand runs always finish.
+# A newer push to the same PR supersedes the older run; on-demand runs always finish.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -126,9 +124,7 @@ jobs:
 
   # UI line coverage from both e2e files, held to a floor so new UI code comes with a scenario.
   coverage:
-    if: >-
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && contains(fromJSON('["all","coverage"]'), inputs.suite))
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["all","coverage"]'), inputs.suite)
     needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 25
