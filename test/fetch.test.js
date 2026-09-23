@@ -66,3 +66,23 @@ test('searchKey / pageNum', () => {
   assert.equal(core.pageNum('https://www.realestate.com.au/rent/in-bondi/list-4'), 4);
   assert.equal(core.pageNum('https://www.realestate.com.au/rent/in-bondi/'), 1);
 });
+
+test('fetchResults: abort is not retried; Retry-After capped', async () => {
+  const ctrl = new AbortController();
+  let calls = 0;
+  const fetchImpl = async () => { calls++; ctrl.abort(); throw new DOMException('aborted', 'AbortError'); };
+  await assert.rejects(core.fetchResults(BASE, { fetchImpl, wait: noWait, signal: ctrl.signal }));
+  assert.equal(calls, 1);
+  const waits = [];
+  const seq = [resp(429, '', { 'Retry-After': '3600' }), resp(200, page(results()))];
+  await core.fetchResults(BASE, { fetchImpl: async () => seq.shift(), wait: async (ms) => waits.push(ms) });
+  assert.equal(waits[0], 60000);
+});
+
+test('fetchAllPages: abort mid-crawl stops further fetches', async () => {
+  const ctrl = new AbortController();
+  const urls = [];
+  const fetchImpl = async (u) => { urls.push(u); if (urls.length === 2) ctrl.abort(); return resp(200, page(results({ exact: [listing()], maxPage: 10 }))); };
+  await assert.rejects(core.fetchAllPages(BASE, () => {}, { fetchImpl, wait: noWait, signal: ctrl.signal }));
+  assert.equal(urls.length, 2);
+});

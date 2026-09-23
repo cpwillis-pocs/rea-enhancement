@@ -36,6 +36,8 @@
   const MAX_PAGES = 20;
   const RETRIES = 3;
   const RETRY_BASE_MS = 1000;
+  const RETRY_AFTER_MAX_S = 60;
+  const FETCH_TIMEOUT_MS = 20000;
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
   const ROWS_VERSION = 4; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -259,42 +261,57 @@
   const str = (v) => (typeof v === 'string' ? v : typeof v?.display === 'string' ? v.display : '');
   const scalar = (v) => (typeof v === 'number' || typeof v === 'string' ? v : '');
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms, signal) => new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason); }, { once: true });
+  });
+  // Per-request timeout combined with the caller's cancel signal (AbortSignal.any: Chrome 116+).
+  const withTimeout = (signal, ms) => {
+    const t = AbortSignal.timeout?.(ms);
+    if (!t) return signal;
+    if (!signal) return t;
+    return AbortSignal.any ? AbortSignal.any([signal, t]) : signal;
+  };
   const jitter = (ms) => Math.round(ms * (0.75 + Math.random() * 0.75));
 
   // Retries 429/5xx/network errors with exponential backoff, honouring Retry-After.
   // Any other non-2xx, or a page without the blob (bot check), fails immediately.
-  async function fetchResults(url, { fetchImpl = fetch, wait = sleep, onRetry = () => {} } = {}) {
+  // Cancelling via `signal` rejects immediately and is never retried; a timeout is.
+  async function fetchResults(url, { fetchImpl = fetch, wait = sleep, onRetry = () => {}, signal } = {}) {
     for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted();
       let res, err;
-      try { res = await fetchImpl(url, { credentials: 'include' }); } catch (e) { err = e; }
+      try { res = await fetchImpl(url, { credentials: 'include', signal: withTimeout(signal, FETCH_TIMEOUT_MS) }); } catch (e) { err = e; }
+      signal?.throwIfAborted();
       const retryable = err || res.status === 429 || res.status >= 500;
       if (!retryable) {
         if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
         return extractResults(await res.text());
       }
       if (attempt >= RETRIES) {
-        throw new Error(err ? `Network error: ${err.message}` :
+        throw new Error(err ? `Network error: ${err.name === 'TimeoutError' ? 'timed out' : err.message}` :
           res.status === 429 ? 'Rate limited by REA (HTTP 429) - wait a minute and retry.' : `HTTP ${res.status} from ${url}`);
       }
-      const after = +res?.headers?.get?.('Retry-After');
+      const after = Math.min(+res?.headers?.get?.('Retry-After') || 0, RETRY_AFTER_MAX_S);
       const ms = after > 0 ? after * 1000 : jitter(RETRY_BASE_MS * 2 ** attempt);
       onRetry(attempt + 1, ms);
-      await wait(ms);
+      await wait(ms, signal);
     }
   }
 
   // `seed` = { key, page, results } from the already-loaded document, reused instead of refetching.
-  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null } = {}) {
+  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal } = {}) {
     const rows = [];
     const key = searchKey(base);
     let page = 1, max = 1, total = 1, sample = null;
     do {
+      signal?.throwIfAborted();
       const label = `page ${page}${max > 1 ? ` of ${max}` : ''}`;
       onProgress(`Reading ${label}…`);
       const seeded = seed && seed.key === key && seed.page === page;
       const results = seeded ? seed.results : getPage ? await getPage(pageUrl(base, page)) : await fetchResults(pageUrl(base, page), {
-        fetchImpl, wait,
+        fetchImpl, wait, signal,
         onRetry: (n, ms) => onProgress(`Retrying ${label} in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`),
       });
       total = results.pagination?.maxPageNumberAvailable || 1;
@@ -303,7 +320,7 @@
       sample ??= results.exact?.items?.find((i) => i.listing)?.listing ?? null;
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
-      if (page <= max && !seeded && !nextSeeded) await wait(jitter(PAGE_DELAY_MS));
+      if (page <= max && !seeded && !nextSeeded) await wait(jitter(PAGE_DELAY_MS), signal);
     } while (page <= max);
     return { rows, truncated: total > MAX_PAGES, sample };
   }
@@ -771,8 +788,11 @@
     return !!hit;
   }
 
+  let runCtrl = null; // AbortController of the in-flight search, aborted on navigation
   async function run(force = false) {
     if (!force && restore()) return;
+    runCtrl?.abort();
+    const ctrl = runCtrl = new AbortController();
     const id = ++runId;
     const base = location.href;
     const key = searchKey(base);
@@ -784,14 +804,15 @@
       // Refresh means "newer than what I'm looking at", so the load-time seed is skipped too.
       const res = await fetchAllPages(base, onProgress, {
         seed: force || Date.now() - bootAt > ROWS_TTL_MS ? null : boot,
-        getPage: (url) => getPage(url, { onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
+        signal: ctrl.signal,
+        getPage: (url) => getPage(url, { signal: ctrl.signal, onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
       if (res.sample) rawSample = res.sample;
       store.set(key, res.rows, res.truncated);
       adopt(key, res.rows, res.truncated);
     } catch (err) {
-      if (id !== runId) return;
+      if (id !== runId || ctrl.signal.aborted) return;
       cache = null;
       cacheKey = null;
       ui.launch.textContent = 'Availability filter';
@@ -799,6 +820,7 @@
       ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
     } finally {
       if (id === runId) ui.run.disabled = ui.refresh.disabled = false;
+      if (runCtrl === ctrl) runCtrl = null;
     }
   }
 
@@ -812,10 +834,11 @@
   const pageMemo = new Map();
   const getPage = (url, opts) => {
     const hit = pageMemo.get(url);
-    if (hit && Date.now() - hit.at < ROWS_TTL_MS) return hit.p;
-    const p = fetchResults(url, opts).catch((e) => { pageMemo.delete(url); throw e; });
+    // An entry whose run was aborted is about to reject; don't hand it to a new caller.
+    if (hit && !hit.signal?.aborted && Date.now() - hit.at < ROWS_TTL_MS) return hit.p;
+    const p = fetchResults(url, opts).catch((e) => { if (pageMemo.get(url)?.p === p) pageMemo.delete(url); throw e; });
     pageMemo.delete(url); // re-insert so Map order stays oldest-first for eviction
-    pageMemo.set(url, { at: Date.now(), p });
+    pageMemo.set(url, { at: Date.now(), p, signal: opts?.signal });
     if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
     return p;
   };
@@ -913,8 +936,9 @@
       const key = active ? searchKey(location.href) : null;
       if (key === lastKey) return; // same search, different page/view
       lastKey = key;
-      if (cacheKey === key) return;
+      if (cacheKey && cacheKey === key) return;
       const hadState = cacheKey || ui.run.disabled;
+      runCtrl?.abort(); // stop crawling the old search
       runId++;
       cache = null;
       cacheKey = null;

@@ -146,6 +146,33 @@ const html = (n) => {
   const probed = await page.evaluate(() => window.reaFilter.probe());
   assert.equal(probed['availableDate.display'] !== '(missing)', true);
 
+  // Navigating to another search mid-crawl aborts it: no further page fetches, UI usable.
+  {
+    const slow = await browser.newPage();
+    const got = [];
+    await slow.route('**/*', async (route) => {
+      const u = new URL(route.request().url());
+      if (u.origin !== ORIGIN) return route.fulfill({ status: 204, body: '' });
+      got.push(u.pathname);
+      if (got.length > 1) await new Promise((r) => setTimeout(r, 400));
+      const n = +(u.pathname.match(/list-(\d+)/)?.[1] || 1);
+      const r = results({ exact: [listing({ id: `14700000${n}` })], maxPage: 10 });
+      return route.fulfill({ status: 200, contentType: 'text/html', body: `<html><body><script>window.ArgonautExchange=${JSON.stringify(exchange(r))};</script></body></html>` }).catch(() => {});
+    });
+    await slow.goto(SEARCH);
+    await slow.addScriptTag({ content: SCRIPT });
+    await slow.click('#rf-launch');
+    await slow.click('#rf-run');
+    await slow.waitForFunction(() => /page 2/.test(document.querySelector('.rf-status').textContent));
+    await slow.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
+    const at = got.length;
+    await slow.waitForTimeout(2500);
+    console.log('fetches after nav-abort:', got.length - at, '| status:', await slow.textContent('.rf-status'));
+    assert.ok(got.length - at <= 2, 'crawl stopped (annotation may fetch the new page once)');
+    assert.equal(await slow.$eval('#rf-run', (b) => b.disabled), false);
+    await slow.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   await browser.close();
   console.log('e2e smoke: ok');
