@@ -15,10 +15,11 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await pw.chromium.launch();
-  const shot = async (name, { dark = false, width = 1280, height = 860, act }) => {
+  const shot = async (name, { dark = false, width = 1280, height = 860, act, seed }) => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: dark ? 'dark' : 'light', timezoneId: 'Australia/Sydney', locale: 'en-AU' });
     const page = await ctx.newPage();
     await page.route('**/*', serve());
+    if (seed) await page.addInitScript((v) => localStorage.setItem('rea-avail-filter/marks/v1', v), JSON.stringify(seed()));
     await page.goto(SEARCH);
     await page.addScriptTag({ content: SCRIPT });
     await page.waitForSelector('article > .rf-badge');
@@ -35,6 +36,18 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
   };
   const setFrom = async (page, v) => { await page.fill('#rf-from', v); await page.dispatchEvent('#rf-from', 'change'); };
 
+  // Marks as they'd look after a week of use: one shortlisted, one price drop, two new.
+  const history = () => {
+    const now = Date.now(), day = 864e5, m = {};
+    for (let k = 0; k < 18; k++) m[146500000 + k] = { f: now - 6 * day, l: now };
+    Object.assign(m[146500001], { s: 1 });
+    Object.assign(m[146500002], { p: 895, ps: '$895 per week' }); // now $824: a drop
+    m[146500004].h = 1;
+    m[146500005].f = now - 3600e3; // new today
+    return { c: now - 7 * day, m };
+  };
+  await shot('shortlist', { seed: history, act: async (page) => { await search(page); await page.hover('.rf-item:nth-child(2)'); } });
+  await shot('badges-marks', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
   await shot('badges', { act: async (page) => { await page.evaluate(() => window.scrollTo(0, 60)); } });
   await shot('drawer', { act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
   await shot('filters', { act: async (page) => {

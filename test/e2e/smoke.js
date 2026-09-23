@@ -140,6 +140,8 @@ const html = (n) => {
   await page.hover('.rf-item');
   await page.click('.rf-item >> [data-act=s]');
   assert.equal(await page.$eval(`.rf-item[data-id="${firstId}"] [data-act=s]`, (b) => b.getAttribute('aria-pressed')), 'true');
+  await page.mouse.move(0, 0);
+  assert.equal(await page.$eval(`.rf-item[data-id="${firstId}"] .rf-acts`, (a) => getComputedStyle(a).opacity), '1', 'star visible without hover');
   const secondId = await page.$eval('.rf-item:nth-child(2)', (el) => el.dataset.id);
   await page.hover('.rf-item:nth-child(2)');
   await page.click('.rf-item:nth-child(2) >> [data-act=h]');

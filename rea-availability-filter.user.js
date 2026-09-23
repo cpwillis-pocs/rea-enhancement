@@ -613,7 +613,9 @@
   .rf-item{position:relative}
   .rf-item.rf-hidden .rf-card{opacity:.45}
   .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
-  .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-acts button[aria-pressed=true]{opacity:1}
+  .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-starred .rf-acts,.rf-hidden .rf-acts{opacity:1}
+  .rf-starred:not(:hover) .rf-acts [data-act=h]{display:none}
+  .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
   .rf-acts button[data-act=s][aria-pressed=true]{color:#e6a700}
@@ -891,7 +893,7 @@
 
   function itemsHtml(rows) {
     return rows.map((r) => `
-      <div class="rf-item${r.hidden ? ' rf-hidden' : ''}" data-id="${esc(r.id)}">
+      <div class="rf-item${r.hidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
