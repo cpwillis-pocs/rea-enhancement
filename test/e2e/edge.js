@@ -209,6 +209,14 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.selectOption('.rf-sl-filter', '-');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), [ids[1]]);
     await page.selectOption('.rf-sl-filter', '');
+    const addr = await page.textContent(`.rf-item[data-id="${ids[1]}"] .rf-addr`);
+    await page.fill('.rf-sl-q', addr.split(',')[0]);
+    await page.waitForFunction((id) => [...document.querySelectorAll('.rf-item')].map((x) => x.dataset.id).join() === id, ids[1], { timeout: 3000 });
+    assert.match(await status(page), /1 of 2 shortlisted/);
+    await page.fill('.rf-sl-q', 'zzznomatch');
+    await page.waitForSelector('.rf-empty:has-text("Nothing on the shortlist matches")');
+    await page.fill('.rf-sl-q', '');
+    await page.waitForFunction(() => document.querySelectorAll('.rf-item').length === 2);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-sl-bar [data-export=csv]')]);
     const csv = fs.readFileSync(await dl.path(), 'utf8');
     assert.equal(csv.trim().split('\r\n').length, 3, 'shortlist export = header + 2 shortlisted');

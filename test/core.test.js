@@ -475,3 +475,11 @@ test('changedOnly keeps listings with a recent price or date change', () => {
   assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, changedOnly: true }).map((r) => r.id), ['1', '2']);
   assert.equal(core.activeFilters({ ...core.DEFAULT_CFG, changedOnly: true })[0].label, 'Changed only');
 });
+
+test('textMatch: every word, across address/note/agency/suburb/status', () => {
+  const r = { address: '4 Hall St, Bondi', note: 'Great light', agency: 'Harbour Co', appStatus: 'applied' };
+  assert.ok(core.textMatch(r, ''));
+  assert.ok(core.textMatch(r, 'hall LIGHT'));
+  assert.ok(core.textMatch(r, 'harbour applied'));
+  assert.ok(!core.textMatch(r, 'hall pool'));
+});

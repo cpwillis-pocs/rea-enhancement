@@ -1537,6 +1537,14 @@
 
   const orQ = (v) => (v === '' || v == null ? '?' : v);
 
+  // Shortlist search: every word must appear in the address, note, agency, suburb, price or status.
+  const textMatch = (r, q) => {
+    const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const hay = [r.address, r.note, r.agency, r.suburb, r.price, r.appStatus, r.type].filter(Boolean).join(' ').toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  };
+
   // One listing as plain text for a message.
   const summaryText = (r) => [
     `${r.price || 'Price on request'} - ${r.address}`,
@@ -1645,7 +1653,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1869,6 +1877,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-med.up{color:#b45309}
   .rf-app{display:flex;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px;color:var(--rf-muted)}
   .rf-app select{font:12px system-ui,sans-serif;padding:3px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
+  .rf-sl-q{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:130px}
   .rf-sl-filter{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   article[data-rf-pos]{position:relative}
@@ -1976,6 +1985,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <option value="unstar-declined">Remove declined</option><option value="unstar">Remove all shown</option>
         </select>
         <select class="rf-plan" aria-label="Plan an inspection day"></select>
+        <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
         <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
           <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
           <option value="-">Not started</option>
@@ -2111,6 +2121,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       slCount: panel.querySelector('.rf-count'),
       slFile: panel.querySelector('.rf-sl-bar input[type=file]'),
       slFilter: panel.querySelector('.rf-sl-filter'),
+      slQuery: panel.querySelector('.rf-sl-q'),
       plan: panel.querySelector('.rf-plan'),
       bulk: panel.querySelector('.rf-bulk'),
       preset: panel.querySelector('.rf-preset'),
@@ -2205,6 +2216,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
         if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
+        if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
         if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
         if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
           if (listKeys(e)) { e.preventDefault(); return; }
@@ -2321,6 +2333,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    let slqT = null;
+    ui.slQuery.addEventListener('input', () => { clearTimeout(slqT); slqT = setTimeout(renderShortlist, 150); });
     ui.plan.addEventListener('change', () => {
       ui.planDay = ui.plan.value || null;
       if (ui.planDay && ui.compare) ui.slBar.querySelector('[data-sl=compare]').click(); // one view at a time
@@ -2534,8 +2548,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   const shortlistRows = () => {
-    const f = ui.slFilter.value;
-    return marks.shortlist().filter((r) => !f || (f === '-' ? !r.appStatus : r.appStatus === f));
+    const f = ui.slFilter.value, q = ui.slQuery.value;
+    return marks.shortlist().filter((r) => (!f || (f === '-' ? !r.appStatus : r.appStatus === f)) && textMatch(r, q));
   };
 
   // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
@@ -2652,11 +2666,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.cmpPicked = picked.length > 0;
     // Bulk actions act on what's on screen: the planned day's or compared listings when those views are up.
     ui.bulkRows = slots ? [...new Set(slots.map((x) => x.r))] : cmp || null;
-    ui.list.innerHTML = !rows.length ? '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>'
+    const total = marks.counts().starred;
+    ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
       : slots ? planHtml(slots, ui.planDay)
       : cmp ? compareHtml(cmp)
       : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
-    setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
+    setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
   const updateCounts = () => {
