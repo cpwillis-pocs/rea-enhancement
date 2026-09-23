@@ -132,7 +132,7 @@
   // Per-listing memory in localStorage, keyed by listing id: s=shortlisted (st=when),
   // h=hidden, n=note, d=summary kept for shortlisted listings so the shortlist works
   // across searches, f=first seen, l=last seen, p/ps=last weekly price and its display,
-  // pp/pps=previous, pt=when it changed.
+  // pp/pps=previous, pt=when it changed, as/ast=application status and when it was set.
   const NOTE_MAX = 500;
   const ADVANCE_WEEKS = 2; // rent usually paid in advance at signing
   const BOND_CAP_WEEKS = 4; // typical state cap on bond for standard rents; above it is flagged, not filtered
@@ -158,7 +158,8 @@
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
   });
-  const keep = (e) => e.s || e.h || e.n;
+  const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
+  const keep = (e) => e.s || e.h || e.n || e.as;
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
@@ -211,6 +212,7 @@
           r.starred = !!e?.s;
           r.hidden = !!e?.h;
           r.note = e?.n || '';
+          r.appStatus = e?.as || '';
           r.firstSeen = e?.f ? new Date(e.f) : null;
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
@@ -231,6 +233,13 @@
         return !!e[k];
       },
       note: (id) => load().m[id]?.n || '',
+      setStatus(id, status) {
+        if (!APP_STATUSES.includes(status)) return;
+        const { m } = fresh();
+        const e = entry(m, id);
+        if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; }
+        save();
+      },
       setNote(id, text) {
         const { m } = fresh();
         const e = entry(m, id);
@@ -248,7 +257,7 @@
             return {
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: '', ppb: perBed(priceNum, d.b),
-              starred: true, hidden: !!e.h, note: e.n || '', inspections: [], listed: null,
+              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', inspections: [], listed: null,
             };
           });
       },
@@ -257,7 +266,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out };
       },
@@ -276,6 +285,7 @@
           if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
           if (e.h) cur.h = 1;
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
+          if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           n++;
         }
         save();
@@ -782,7 +792,7 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -831,7 +841,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG, moveIn, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -950,6 +960,9 @@
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-warn{color:#b45309;font-weight:600}
+  .rf-app{display:flex;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px;color:var(--rf-muted)}
+  .rf-app select{font:12px system-ui,sans-serif;padding:3px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
+  .rf-sl-filter{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
@@ -1032,6 +1045,11 @@
       </div>
       <div class="rf-sl-bar" hidden>
         <span class="rf-label">Shortlist, all searches</span>
+        <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
+          <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+          <option value="-">Not started</option>
+        </select>
+        <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
         <input type="file" accept="application/json,.json" hidden>
@@ -1108,6 +1126,7 @@
       slBar: panel.querySelector('.rf-sl-bar'),
       slCount: panel.querySelector('.rf-count'),
       slFile: panel.querySelector('.rf-sl-bar input[type=file]'),
+      slFilter: panel.querySelector('.rf-sl-filter'),
       list: panel.querySelector('.rf-list'),
     };
 
@@ -1199,8 +1218,17 @@
       if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
     });
     ui.list.tabIndex = -1;
+    ui.list.addEventListener('change', (e) => {
+      const sel = e.target.closest('select[data-app]');
+      if (!sel) return;
+      const id = sel.closest('.rf-item').dataset.id;
+      marks.setStatus(id, sel.value);
+      refreshMarks();
+      ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] select[data-app]`)?.focus();
+    });
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
+    ui.slFilter.addEventListener('change', () => renderShortlist());
     ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
       const data = marks.exportData();
       if (cfg.remember) data.snapshots = snaps.exportData();
@@ -1226,7 +1254,7 @@
     ui.refresh.addEventListener('click', () => busy || run(true));
     for (const b of ui.exports) {
       b.addEventListener('click', async () => {
-        const rows = ui.view === 'shortlist' ? marks.shortlist() : cache ? applyFilters(pool(), cfg) : null;
+        const rows = ui.view === 'shortlist' ? shortlistRows() : cache ? applyFilters(pool(), cfg) : null;
         if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
@@ -1263,8 +1291,13 @@
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
   }
 
+  const shortlistRows = () => {
+    const f = ui.slFilter.value;
+    return marks.shortlist().filter((r) => !f || (f === '-' ? !r.appStatus : r.appStatus === f));
+  };
+
   function renderShortlist() {
-    const rows = marks.shortlist();
+    const rows = shortlistRows();
     ui.rows = rows;
     setExport(rows.length === 0);
     ui.list.innerHTML = rows.length
@@ -1392,6 +1425,8 @@
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>
+      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${APP_STATUSES.map((v) =>
+        `<option value="${v}"${v === r.appStatus ? ' selected' : ''}>${v ? v[0].toUpperCase() + v.slice(1) : 'Not started'}</option>`).join('')}</select></label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>

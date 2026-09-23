@@ -140,3 +140,23 @@ test('marksStore: caps entries at MARKS_MAX, keeping shortlisted/hidden', () => 
   assert.equal(Object.keys(m).length, 5000);
   assert.equal(m['100000001'].s, 1, 'shortlisted survives the cap');
 });
+
+test('marksStore: application status set, cleared, backed up, validated', () => {
+  let t = 1e12;
+  const a = core.marksStore(mem(), () => t);
+  const r = row('146500030');
+  a.observe([r]); a.toggle(r.id, 's', r);
+  a.setStatus(r.id, 'applied');
+  assert.equal(a.shortlist()[0].appStatus, 'applied');
+  a.setStatus(r.id, 'bogus');
+  assert.equal(a.shortlist()[0].appStatus, 'applied', 'unknown status ignored');
+  const b = core.marksStore(mem(), () => t);
+  b.importJson(a.exportJson());
+  assert.equal(b.shortlist()[0].appStatus, 'applied');
+  a.setStatus(r.id, '');
+  assert.equal(a.shortlist()[0].appStatus, '');
+  const c = core.marksStore(mem(), () => t);
+  c.importJson(JSON.stringify({ app: 'rea-enhancement', kind: 'marks', v: 1, m: { 146500031: { as: '<script>' } } }));
+  assert.equal(c.counts().starred, 0);
+  assert.deepEqual(core.APP_STATUSES[0], '');
+});

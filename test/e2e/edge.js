@@ -51,7 +51,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const page = await open(ctx);
     await page.click('#rf-launch'); await page.click('#rf-run');
     await waitStatus(page, /listings match/);
-    await page.click('[data-export=copy]');
+    await page.click('.rf-exports [data-export=copy]');
     await waitStatus(page, /Copied \d+ rows/);
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     assert.ok(clip.startsWith('available_date\tavailable\t'), 'TSV on clipboard');
@@ -62,7 +62,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await p2.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) } }); });
     await p2.click('#rf-launch'); await p2.click('#rf-run');
     await waitStatus(p2, /listings match/);
-    await p2.click('[data-export=copy]');
+    await p2.click('.rf-exports [data-export=copy]');
     await waitStatus(p2, /Copied|Clipboard blocked/);
     console.log('clipboard fallback:', await status(p2));
     await done(p2); await ctx2.close();
@@ -183,6 +183,29 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const capped = await page.$$eval('.rf-item', (e) => e.length);
     assert.ok(capped < total, `move-in cap filters (${capped} < ${total})`);
     console.log('move-in cost:', capped, 'of', total, 'under $3000');
+    await done(page); await ctx.close();
+  }
+
+  // 11. Application status on a shortlisted listing; shortlist filter by status; export column.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
+    for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.selectOption(`.rf-item[data-id="${ids[0]}"] select[data-app]`, 'applied');
+    assert.equal(await page.evaluate(() => document.activeElement.matches('select[data-app]')), true, 'focus kept on the select');
+    await page.click('[data-view=shortlist]');
+    await page.selectOption('.rf-sl-filter', 'applied');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), [ids[0]]);
+    await page.selectOption('.rf-sl-filter', '-');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), [ids[1]]);
+    await page.selectOption('.rf-sl-filter', '');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-sl-bar [data-export=csv]')]);
+    const csv = fs.readFileSync(await dl.path(), 'utf8');
+    assert.equal(csv.trim().split('\r\n').length, 3, 'shortlist export = header + 2 shortlisted');
+    assert.ok(csv.split('\r\n')[0].includes('application') && csv.includes(',applied,'), 'status in CSV');
+    console.log('application tracker: ok');
     await done(page); await ctx.close();
   }
 

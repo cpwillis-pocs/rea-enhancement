@@ -205,10 +205,10 @@ const html = (n) => {
   await page.dispatchEvent('#rf-from', 'change');
 
   // Export: capture download.
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-export=tsv]')]);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-exports [data-export=tsv]')]);
   const body = fs.readFileSync(await dl.path(), 'utf8');
   console.log('export:', dl.suggestedFilename(), body.split('\n').length - 1, 'rows');
-  const [csv] = await Promise.all([page.waitForEvent('download'), page.click('[data-export=csv]')]);
+  const [csv] = await Promise.all([page.waitForEvent('download'), page.click('.rf-exports [data-export=csv]')]);
   const csvBody = fs.readFileSync(await csv.path(), 'utf8');
   assert.ok(csvBody.startsWith('\ufeffavailable_date,'), 'csv has BOM + header');
 
