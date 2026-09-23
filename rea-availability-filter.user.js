@@ -35,7 +35,9 @@
 (() => {
   'use strict';
 
-  const CFG_KEY = 'rea-avail-filter/v1';
+  // Every storage key starts with this, so Settings can measure and delete only our data.
+  const TOOL_PREFIX = 'rea-avail-filter/';
+  const CFG_KEY = `${TOOL_PREFIX}v1`;
   const IMG_SIZE = '345x260';
   const PAGE_DELAY_MS = 600;
   const MAX_PAGES = 20;
@@ -49,7 +51,7 @@
   const RENDER_CHUNK = 50; // items per render; the next chunk loads on scroll
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
-  const ROWS_PREFIX = 'rea-avail-filter/rows/';
+  const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
   const ROWS_VERSION = 8;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
@@ -59,7 +61,7 @@
   const ROW_INFINITE = ['priceNum', 'ppb', 'upfront', 'bondNum']; // "unknown" numbers held as Infinity
   const ROWS_TTL_MS = 10 * 60 * 1000;
   const ROWS_KEEP = 2; // searches kept in sessionStorage
-  const MARKS_KEY = 'rea-avail-filter/marks/v1';
+  const MARKS_KEY = `${TOOL_PREFIX}marks/v1`;
   const MARKS_MAX = 5000;
   const HOUR_MS = 36e5;
   const DAY_MS = 864e5;
@@ -67,7 +69,7 @@
   const PRICE_CHANGE_MS = 14 * DAY_MS; // "was $X" shown for two weeks after a change
   const NEW_MS = 48 * HOUR_MS; // a listing REA dates within 48h counts as new even without a baseline
   const ROWS_TEXT_MAX = 600;
-  const SNAP_KEY = 'rea-avail-filter/snapshots/v1';
+  const SNAP_KEY = `${TOOL_PREFIX}snapshots/v1`;
   const SNAP_MAX = 3; // searches remembered across sessions (localStorage is shared with REA)
   const SNAP_VISIT_GAP_MS = HOUR_MS; // runs closer together than this count as one visit
   const SNAP_TEXT_MAX = 300; // per-field text cap in remembered rows (sessionStorage rows: ROWS_TEXT_MAX)
@@ -192,7 +194,7 @@
     const out = new Map();
     for (const r of rows) {
       if (!r.agency || !['applied', 'approved', 'declined'].includes(r.appStatus)) continue;
-      const k = r.agency.trim().toLowerCase();
+      const k = agencyKey(r.agency);
       const v = out.get(k) || { applied: 0, approved: 0, declined: 0 };
       v.applied++; if (r.appStatus !== 'applied') v[r.appStatus]++;
       out.set(k, v);
@@ -285,7 +287,20 @@
         raw = out;
       } catch { raw = null; /* quota/blocked: re-read next time */ }
     };
+    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
+    const bag = (d, f) => (d[f] = isObj(d[f]) ? d[f] : {});
+    const setAs = (e, status) => { if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } };
+    // Hidden agencies (ag) and suburbs (sb): name -> shown name, keyed case/space-insensitively.
+    const NAMED = { ag: 80, sb: 60 };
+    const toggleNamed = (f) => (raw) => {
+      const name = clip(raw, NAMED[f]), k = agencyKey(name);
+      if (!k) return false;
+      const b = bag(fresh(), f);
+      if (b[k]) delete b[k]; else b[k] = name;
+      save();
+      return !!b[k];
+    };
     return {
       invalidate() { data = null; raw = null; },
       // `full`: rows from a complete crawl of a search. Only then is a missing listing evidence of
@@ -333,7 +348,7 @@
           const ak = addressKey(r.address);
           if (ak) {
             const d = data;
-            d.ad = d.ad && typeof d.ad === 'object' ? d.ad : {};
+            bag(d, 'ad');
             const prev = d.ad[ak];
             // Only a relist if the old listing has stopped appearing: two live listings at one
             // address (units listed without a unit number) are different places.
@@ -392,7 +407,7 @@
         if (!APP_STATUSES.includes(status)) return;
         const { m } = fresh();
         const e = entry(m, id);
-        if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; }
+        setAs(e, status);
         save();
       },
       // Re-check outcome: gone (REA took it down) or seen again (clears gone).
@@ -440,9 +455,8 @@
           .sort(([, a], [, b]) => (b.st || 0) - (a.st || 0))
           .map(([id, e]) => {
             // Hand-edited or half-written summaries: text fields must be strings, numbers stay numbers.
-            const NUM = ['b', 'ba', 'c', 'la', 'ln'], KEEP = ['in', 'am'];
-            const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, KEEP.includes(k) ? v
-              : NUM.includes(k) ? (typeof v === 'number' || typeof v === 'string' ? v : '') : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '']));
+            const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, SUM_KEEP.includes(k) ? v
+              : SUM_NUM.includes(k) ? (typeof v === 'number' || typeof v === 'string' ? v : '') : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '']));
             const priceNum = parsePrice(clip(d.p, 80));
             return {
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
@@ -450,7 +464,6 @@
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
               gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck),
-              inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
           });
       },
@@ -459,7 +472,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -481,20 +494,13 @@
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
+          if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
           n++;
         }
-        if (src.sb && typeof src.sb === 'object') {
-          const d = load();
-          d.sb = d.sb && typeof d.sb === 'object' ? d.sb : {};
-          for (const raw of Object.values(src.sb)) { const name = clip(raw, 60); if (agencyKey(name)) d.sb[agencyKey(name)] = name; }
-        }
-        if (src.ag && typeof src.ag === 'object') {
-          const d = load();
-          d.ag = d.ag && typeof d.ag === 'object' ? d.ag : {};
-          for (const raw of Object.values(src.ag)) {
-            const name = clip(raw, 80); // key the clipped name, the same one shown and toggled
-            if (agencyKey(name)) d.ag[agencyKey(name)] = name;
-          }
+        for (const f of Object.keys(NAMED)) {
+          if (!isObj(src[f])) continue;
+          const b = bag(load(), f);
+          for (const raw of Object.values(src[f])) { const name = clip(raw, NAMED[f]); if (agencyKey(name)) b[agencyKey(name)] = name; } // keyed by the clipped name, as toggled
         }
         save();
         return n;
@@ -507,26 +513,9 @@
         return (countMemo = { starred, hidden, notes });
       },
       // Hidden agencies live beside the per-listing marks: data.ag = { normalisedName: displayName }.
-      toggleAgency(raw) {
-        const name = clip(raw, 80);
-        const k = agencyKey(name);
-        if (!k) return false;
-        const d = fresh();
-        d.ag = d.ag && typeof d.ag === 'object' ? d.ag : {};
-        if (d.ag[k]) delete d.ag[k]; else d.ag[k] = name;
-        save();
-        return !!d.ag[k];
-      },
+      toggleAgency: toggleNamed('ag'),
       hiddenAgencies: () => Object.values(load().ag || {}),
-      toggleSuburb(raw) {
-        const name = clip(raw, 60), k = agencyKey(name);
-        if (!k) return false;
-        const d = fresh();
-        d.sb = d.sb && typeof d.sb === 'object' ? d.sb : {};
-        if (d.sb[k]) delete d.sb[k]; else d.sb[k] = name;
-        save();
-        return !!d.sb[k];
-      },
+      toggleSuburb: toggleNamed('sb'),
       hiddenSuburbs: () => Object.values(load().sb || {}),
       // Bulk: set s (shortlist) or h (hidden) explicitly on many rows in one write.
       setMany(rows, k, on) {
@@ -546,7 +535,7 @@
       setStatusMany(ids, status) {
         if (!APP_STATUSES.includes(status)) return 0;
         const { m } = fresh();
-        for (const id of ids) { const e = entry(m, id); if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } }
+        for (const id of ids) setAs(entry(m, id), status);
         save();
         return ids.length;
       },
@@ -638,7 +627,12 @@
 
   // Everything this tool keeps in a storage area: keys share the prefix, so it can be measured
   // and removed without touching REA's own data. Sizes are UTF-16 (2 bytes a character).
-  const TOOL_PREFIX = 'rea-avail-filter/';
+  // One string value in a storage area; blocked or full storage just means no value.
+  const keyStore = (storage, key) => ({
+    get() { try { return storage.getItem(key); } catch { return null; } },
+    set(v) { try { storage.setItem(key, v); } catch { /* quota/blocked */ } },
+    clear() { try { storage.removeItem(key); } catch { /* blocked */ } },
+  });
   const toolKeys = (storage) => {
     const out = [];
     try { for (let i = 0; i < storage.length; i++) { const k = storage.key(i); if (k && k.startsWith(TOOL_PREFIX)) out.push(k); } } catch { /* blocked */ }
@@ -648,9 +642,18 @@
   const fmtBytes = (b) => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
   const snapshotStore = (storage, now = () => Date.now()) => {
+    // Parsed copy reused while the stored string is unchanged (several reads per navigation).
+    let memo = null, memoRaw = null;
     const load = () => {
+      let raw = null;
+      try { raw = storage.getItem(SNAP_KEY); } catch { /* blocked */ }
+      if (memo && raw != null && raw === memoRaw) return memo;
+      memo = parse(raw); memoRaw = raw;
+      return memo;
+    };
+    const parse = (raw) => {
       try {
-        const d = JSON.parse(storage.getItem(SNAP_KEY));
+        const d = JSON.parse(raw);
         if (isObj(d) && isObj(d.s)) {
           for (const [k, e] of Object.entries(d.s)) {
             if (!isSearchKey(k) || !isObj(e) || typeof e.at !== 'number') { delete d.s[k]; continue; }
@@ -667,7 +670,8 @@
       const keys = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
       for (const k of keys.slice(SNAP_MAX)) delete d.s[k];
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { storage.setItem(SNAP_KEY, JSON.stringify(d)); return true; } catch {
+        try { const out = JSON.stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return true; } catch {
+          memo = null;
           const ks = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
           if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) delete d.s[k];
           else for (const k of ks) d.s[k].gone = [];
@@ -714,7 +718,7 @@
         persist(d);
         return view(d.s[key]);
       },
-      clear() { try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
+      clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
       exportData: () => load().s,
       // Untrusted: keys must be REA rent search URLs; rows round-trip through fatRow/slimRow.
       importData(src) {
@@ -740,7 +744,7 @@
   };
 
   // Named filter presets; a preset with `key` auto-applies on that search.
-  const PRESETS_KEY = 'rea-avail-filter/presets/v1';
+  const PRESETS_KEY = `${TOOL_PREFIX}presets/v1`;
   const PRESETS_MAX = 30;
   const presetStore = (storage) => {
     const load = () => {
@@ -751,7 +755,7 @@
       return { v: 1, list: [] };
     };
     const save = (d) => { try { storage.setItem(PRESETS_KEY, JSON.stringify(d)); } catch { /* quota/blocked */ } };
-    const pick = (cfg) => Object.fromEntries([...FILTER_KEYS, 'anchor', 'sort'].filter((k) => k in cfg).map((k) => [k, cfg[k]]));
+    const pick = (cfg) => Object.fromEntries(PRESET_KEYS.filter((k) => k in cfg).map((k) => [k, cfg[k]]));
     return {
       list: () => load().list,
       save(name, cfg, key = null) {
@@ -1336,8 +1340,8 @@
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
     'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly'];
-  const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'unopenedOnly', 'noWatch', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
+  const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
+  const PRESET_KEYS = [...FILTER_KEYS, 'anchor', 'sort']; // what a preset saves and restores
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'places', 'checklist', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -1486,25 +1490,31 @@
     const i = (sorted.length - 1) * q, lo = Math.floor(i);
     return Math.round(sorted[lo] + (sorted[Math.min(lo + 1, sorted.length - 1)] - sorted[lo]) * (i - lo));
   };
-  const marketStats = (rows, now = new Date()) => {
-    const uniq = dedupe(rows);
-    const beds = new Map();
-    for (const r of uniq) {
-      if (r.beds === '' || r.beds == null) continue;
-      const k = Math.min(+r.beds || 0, 5);
-      if (!beds.has(k)) beds.set(k, { beds: k, n: 0, rents: [], ppb: [] });
-      const g = beds.get(k);
+  // Rent and $/bed per group (bed count, suburb), sorted ascending, for the quantiles below.
+  const asc = (x, y) => x - y;
+  const medianOf = (a) => (a.length >= MEDIAN_MIN ? quantile(a, 0.5) : null);
+  const groupRents = (rows, keyOf) => {
+    const m = new Map();
+    for (const r of rows) {
+      const k = keyOf(r);
+      if (k == null || k === '') continue;
+      let g = m.get(k);
+      if (!g) m.set(k, (g = { key: k, n: 0, rents: [], ppb: [] }));
       g.n++;
       if (Number.isFinite(r.priceNum)) g.rents.push(r.priceNum);
       if (Number.isFinite(r.ppb)) g.ppb.push(r.ppb);
     }
-    const byBeds = [...beds.values()].sort((a, b) => a.beds - b.beds).map(({ beds: b, n, rents, ppb }) => {
-      rents.sort((x, y) => x - y); ppb.sort((x, y) => x - y);
-      const enough = rents.length >= MEDIAN_MIN;
-      return { beds: b, n, priced: rents.length, min: rents[0] ?? null, max: rents[rents.length - 1] ?? null,
-        p25: enough ? quantile(rents, 0.25) : null, median: enough ? quantile(rents, 0.5) : null, p75: enough ? quantile(rents, 0.75) : null,
-        ppb: ppb.length >= MEDIAN_MIN ? quantile(ppb, 0.5) : null };
-    });
+    for (const g of m.values()) { g.rents.sort(asc); g.ppb.sort(asc); }
+    return [...m.values()];
+  };
+  const marketStats = (rows, now = new Date()) => {
+    const uniq = dedupe(rows);
+    const byBeds = groupRents(uniq, (r) => (r.beds === '' || r.beds == null ? null : Math.min(+r.beds || 0, 5))).sort((a, b) => a.key - b.key)
+      .map(({ key, n, rents, ppb }) => {
+        const enough = rents.length >= MEDIAN_MIN;
+        return { beds: key, n, priced: rents.length, min: rents[0] ?? null, max: rents[rents.length - 1] ?? null,
+          p25: enough ? quantile(rents, 0.25) : null, median: medianOf(rents), p75: enough ? quantile(rents, 0.75) : null, ppb: medianOf(ppb) };
+      });
     const today = startOfDay(now);
     const weeks = [{ label: 'Now', from: null, n: 0 }];
     for (let w = 0; w < MARKET_WEEKS; w++) {
@@ -1514,28 +1524,17 @@
     const later = { label: 'Later', n: 0 }, unknown = { label: 'Unknown', n: 0 };
     for (const r of uniq) {
       if (!(r.avail instanceof Date) || isNaN(r.avail)) { unknown.n++; continue; }
-      const days = Math.round((startOfDay(r.avail) - today) / 864e5);
+      const days = Math.round((startOfDay(r.avail) - today) / DAY_MS);
       if (days <= 0) weeks[0].n++;
       else if (days <= MARKET_WEEKS * 7) weeks[Math.ceil(days / 7)].n++;
       else later.n++;
     }
-    const all = uniq.map((r) => r.priceNum).filter(Number.isFinite).sort((a, b) => a - b);
-    // Per suburb (only worth showing when the search spans several): count, median rent and $/bed.
-    const subs = new Map();
-    for (const r of uniq) {
-      const k = String(r.suburb || '').trim();
-      if (!k) continue;
-      if (!subs.has(k)) subs.set(k, { suburb: k, n: 0, rents: [], ppb: [] });
-      const g = subs.get(k);
-      g.n++;
-      if (Number.isFinite(r.priceNum)) g.rents.push(r.priceNum);
-      if (Number.isFinite(r.ppb)) g.ppb.push(r.ppb);
-    }
-    const bySuburb = subs.size > 1 ? [...subs.values()].sort((a, b) => b.n - a.n || a.suburb.localeCompare(b.suburb)).map(({ suburb, n, rents, ppb }) => {
-      rents.sort((x, y) => x - y); ppb.sort((x, y) => x - y);
-      return { suburb, n, median: rents.length >= MEDIAN_MIN ? quantile(rents, 0.5) : null, ppb: ppb.length >= MEDIAN_MIN ? quantile(ppb, 0.5) : null };
-    }) : [];
-    return { n: uniq.length, median: all.length >= MEDIAN_MIN ? quantile(all, 0.5) : null, byBeds, bySuburb, byWeek: [...weeks, later, unknown] };
+    const all = uniq.map((r) => r.priceNum).filter(Number.isFinite).sort(asc);
+    // Per suburb, only worth showing when the search spans several.
+    const subs = groupRents(uniq, (r) => String(r.suburb || '').trim());
+    const bySuburb = subs.length > 1 ? subs.sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))
+      .map(({ key, n, rents, ppb }) => ({ suburb: key, n, median: medianOf(rents), ppb: medianOf(ppb) })) : [];
+    return { n: uniq.length, median: medianOf(all), byBeds, bySuburb, byWeek: [...weeks, later, unknown] };
   };
 
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
@@ -1612,7 +1611,7 @@
     const sameDay = (ms, r) => ymdIn(ms, tzOf(r)) === cfg.inspectOn; // the listing's calendar day, like the planner
     const kept = dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
-      .filter((r) => cfg.showHidden || (!r.hidden && !r.agencyHidden && !r.suburbHidden))
+      .filter((r) => cfg.showHidden || !ruledOut(r))
       .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
@@ -1763,6 +1762,8 @@
     return slots;
   };
 
+  const plural = (n, word, suffix = 's') => `${n} ${word}${n === 1 ? '' : suffix}`;
+  const ruledOut = (r) => !!(r.hidden || r.agencyHidden || r.suburbHidden); // you hid it, its agency or its suburb
   const orQ = (v) => (v === '' || v == null ? '?' : v);
 
   // Shortlist search: every word must appear in the address, note, agency, suburb, price or status.
@@ -1785,10 +1786,13 @@
     .replace(/\{link\}/g, r.url || '').replace(/\s+\n/g, '\n').trim();
 
   // One listing as plain text for a message.
+  // "Available 12 Oct · 2 bed, 1 bath, ? car · move-in $3,300": shared by Copy and Print.
+  const factsLine = (r, sep) => [r.available && r.available !== '-' ? `Available ${r.available}` : '',
+    [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? [`${orQ(r.beds)} bed`, `${orQ(r.baths)} bath`, `${orQ(r.cars)} car`].join(sep) : '',
+    Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · ');
   const summaryText = (r) => [
     `${r.price || 'Price on request'} - ${r.address}`,
-    [r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${orQ(r.beds)} bed, ${orQ(r.baths)} bath, ${orQ(r.cars)} car` : '',
-      Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · '),
+    factsLine(r, ', '),
     r.inspections?.length ? `Inspections: ${r.inspections.map((i) => i.label).join('; ')}` : '',
     r.url,
   ].filter(Boolean).join('\n');
@@ -1803,11 +1807,10 @@ h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
 .p{font-weight:700;font-size:15px}.a{font-weight:600}.m{color:#444;margin-top:2px}.n{margin-top:6px;padding:6px 8px;background:#f4f4f6;border-radius:4px;white-space:pre-wrap}
 .box{margin-top:8px;height:64px;border:1px dashed #aaa;border-radius:4px;color:#999;font-size:11px;padding:4px}
 .u{color:#666;font-size:11px;word-break:break-all}@media print{body{margin:10mm}}
-</style></head><body><h1>Rental shortlist</h1><div class="sub">${rows.length} listing${rows.length === 1 ? '' : 's'} · printed ${esc(now.toLocaleDateString('en-AU'))}</div>
+</style></head><body><h1>Rental shortlist</h1><div class="sub">${plural(rows.length, 'listing')} · printed ${esc(now.toLocaleDateString('en-AU'))}</div>
 ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` : '<div></div>'}<div>
 <div class="p">${esc(r.price)}</div><div class="a">${esc(r.address)}</div>
-<div class="m">${esc([r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${orQ(r.beds)} bed · ${orQ(r.baths)} bath · ${orQ(r.cars)} car` : '',
-  Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · '))}</div>
+<div class="m">${esc(factsLine(r, ' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}
 ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
@@ -1815,7 +1818,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Drift canary: share of rows with each field, tracked as an average over searches. A field
   // that's usually there but suddenly isn't means REA probably renamed or moved it.
-  const HEALTH_KEY = 'rea-avail-filter/health/v1';
+  const HEALTH_KEY = `${TOOL_PREFIX}health/v1`;
   const HEALTH_MIN_ROWS = 20; // smaller searches are too noisy to judge
   const HEALTH_ALPHA = 0.3; // weight of the newest search in the running average
   const HEALTH_FIELDS = {
@@ -1947,11 +1950,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     background:var(--rf-accent);color:#fff;font:600 13px/1 system-ui,-apple-system,sans-serif;cursor:pointer;
     box-shadow:0 4px 16px rgba(0,0,0,.28)}
   #rf-launch:hover{background:var(--rf-accent-hover)}
-  #rf-launch[hidden]{display:none}
+  /* hidden always wins over our display rules */
+  #rf-launch[hidden],#rf-panel[hidden],#rf-panel [hidden],#rf-lbar [hidden]{display:none!important}
   #rf-panel{position:fixed;top:0;right:0;bottom:0;width:430px;max-width:100vw;z-index:2147483001;background:var(--rf-bg);
     display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.22);color-scheme:light dark;
     font:13px/1.45 system-ui,-apple-system,sans-serif;color:var(--rf-fg)}
-  #rf-panel[hidden]{display:none}
   #rf-panel *{box-sizing:border-box}
   .rf-head{padding:14px 16px;border-bottom:1px solid var(--rf-line);display:flex;align-items:center;gap:8px}
   .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1;color:var(--rf-fg)}
@@ -1960,12 +1963,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-n{font-weight:400;color:var(--rf-soft)}
   .rf-undo{margin-left:8px;border:0;background:none;padding:0;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);
     text-decoration:underline;cursor:pointer}
-  .rf-clear[hidden]{display:none}
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-keys{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
     color:var(--rf-muted);cursor:pointer;padding:0}
   .rf-help{padding:10px 16px;border-bottom:1px solid var(--rf-line);font-size:12px;background:var(--rf-hover)}
-  .rf-help[hidden]{display:none}
   .rf-help dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 0}
   .rf-help dt{font:600 11px ui-monospace,monospace;color:var(--rf-fg)}
   .rf-help dd{margin:0;color:var(--rf-muted)}
@@ -1994,7 +1995,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     font:600 13px system-ui,sans-serif;cursor:pointer}
   .rf-btn:hover{background:var(--rf-accent-hover)}
   .rf-btn[disabled]{opacity:.5;cursor:default}
-  .rf-btn[hidden]{display:none}
   .rf-btn.sec{background:var(--rf-sec);color:var(--rf-fg)}
   .rf-btn.sec:hover{background:var(--rf-sec-hover)}
   .rf-bulk,.rf-sl-bulk{flex:0 0 auto;font:12px system-ui,sans-serif;padding:7px 6px;border:1px solid var(--rf-input);border-radius:6px;
@@ -2020,7 +2020,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-tabs button[aria-selected=true]{color:var(--rf-fg);border-bottom-color:var(--rf-accent)}
   .rf-sl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
   .rf-sl-bar .rf-label{flex-basis:100%}
-  .rf-sl-bar[hidden],.rf-controls[hidden]{display:none}
   .rf-sl-bar .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-note{margin:-2px 9px 8px 124px;padding:6px 8px;border-radius:6px;background:var(--rf-hover);font-size:12px;
     white-space:pre-wrap;overflow-wrap:anywhere}
@@ -2050,7 +2049,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-warn{color:var(--rf-up);font-weight:600}
   .rf-score{font-weight:700;color:var(--rf-fg);cursor:help;border-bottom:1px dotted var(--rf-soft)}
   .rf-agencies{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-  .rf-agencies[hidden]{display:none}
   .rf-agencies .rf-label{margin-right:4px}
   .rf-compare{overflow-x:auto;padding:4px}
   #rf-panel.rf-wide{width:min(960px,100vw)}
@@ -2063,16 +2061,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-compare .rf-best{background:rgba(8,122,80,.12);color:var(--rf-accent-fg);font-weight:700}
   .rf-na{color:var(--rf-soft)}
   .rf-active{display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px;border-bottom:1px solid var(--rf-line)}
-  .rf-active[hidden]{display:none}
   .rf-achip{font-size:11px;padding:3px 8px}
   .rf-achip span{color:var(--rf-soft);font-weight:400}
   .rf-preset{font:12px system-ui,sans-serif;padding:6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:100%}
   .rf-share-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
-  .rf-share-in[hidden]{display:none}
   .rf-share-in .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
-  .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
   .rf-checks{display:flex;flex-wrap:wrap;gap:4px;margin:6px 9px 0 124px}
   .rf-checks .rf-chip{font-size:11px;padding:2px 7px}
@@ -2283,7 +2278,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
             <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
             <label>Type<select id="rf-type"><option value="">Any</option></select></label>
           </div>
-          <div class="rf-amen" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
+          <div class="rf-amen rf-amen-req" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
             <input type="hidden" id="rf-amenities">
             ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
           </div>
@@ -2441,7 +2436,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       noWatchInput.dispatchEvent(new Event('change'));
     });
     ui.paintAmen = () => { paintAmen(); paintNoWatch(); };
-    panel.querySelector('.rf-amen').addEventListener('click', (e) => {
+    panel.querySelector('.rf-amen-req').addEventListener('click', (e) => {
       const b = e.target.closest('[data-amen]');
       if (!b) return;
       const st = parseAmenCfg(amenInput.value), id = b.dataset.amen;
@@ -2771,7 +2766,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.offerShare = (rows) => {
       if (!rows?.length) return;
       shareIn.hidden = false;
-      shareIn.querySelector('.rf-share-msg').textContent = `${rows.length} shared listing${rows.length === 1 ? '' : 's'}:`;
+      shareIn.querySelector('.rf-share-msg').textContent = `${plural(rows.length, 'shared listing')}:`;
       ui.pendingShare = rows;
       launch.hidden = false;
       setOpen(true);
@@ -2785,7 +2780,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         for (const r of rows) if (r.note && !marks.note(r.id)) marks.setNote(r.id, `Shared: ${r.note}`);
         refreshMarks();
         setView('shortlist');
-        setStatus(`Added ${n} shared listing${n === 1 ? '' : 's'} to your shortlist.`);
+        setStatus(`Added ${plural(n, 'shared listing')} to your shortlist.`);
       }
       shareIn.hidden = true;
       ui.pendingShare = null;
@@ -2805,7 +2800,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const paintStorage = () => {
       const ls = storageOr('localStorage'), ss = storageOr('sessionStorage');
       const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
-      storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${n} remembered search${n === 1 ? '' : 'es'}).`;
+      storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`;
     };
     ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
     panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
@@ -2849,7 +2844,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         fillPresets();
         renderSaved();
         refreshMarks();
-        setStatus(`Restored ${n} listing${n === 1 ? '' : 's'}${k ? ` and ${k} saved search${k === 1 ? '' : 'es'}` : ''} from backup.`);
+        setStatus(`Restored ${plural(n, 'listing')}${k ? ` and ${plural(k, 'saved search', 'es')}` : ''} from backup.`);
       } catch (err) { setStatus(err.message, true); }
     });
 
@@ -2888,9 +2883,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
   }
 
-  const shortlistRows = () => {
+  const shortlistRows = (all = marks.shortlist()) => {
     const f = ui.slFilter.value, q = ui.slQuery.value;
-    return marks.shortlist().filter((r) => (!f || (f === '-' ? !r.appStatus : r.appStatus === f)) && textMatch(r, q));
+    return all.filter((r) => (!f || (f === '-' ? !r.appStatus : r.appStatus === f)) && textMatch(r, q));
   };
 
   // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
@@ -2969,7 +2964,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         out.push(`${label}: ${found.added} new${found.gone ? `, ${found.gone} gone` : ''}`);
         if (i < keys.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
       }
-      setStatus(`Checked ${keys.length} saved search${keys.length === 1 ? '' : 'es'}. ${out.join(' · ')}.`);
+      setStatus(`Checked ${plural(keys.length, 'saved search', 'es')}. ${out.join(' · ')}.`);
     } catch (err) {
       // Aborted by navigation or opting out: whoever aborted has already said why.
       if (!ctrl.signal.aborted && err?.name !== 'AbortError') { setStatus(`Check failed: ${err.message}`, true); logError(`saved: ${err.message}`); }
@@ -2981,15 +2976,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   function renderShortlist() {
-    const rows = shortlistRows();
-    ui.agencyRec = agencyRecord(marks.shortlist()); // over the whole shortlist, not just what the search box shows
+    const all = marks.shortlist();
+    const rows = shortlistRows(all);
+    ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
     // Distance for the shortlist too (applyFilters isn't run over it).
     for (const r of rows) setDistances(r, cfg);
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
     ui.plan.innerHTML = `<option value="">Plan a day…</option>` + days.map(({ day, n }) =>
-      `<option value="${day}">${esc(shortDate(day))} (${n} inspection${n === 1 ? '' : 's'})</option>`).join('');
+      `<option value="${day}">${esc(shortDate(day))} (${plural(n, 'inspection')})</option>`).join('');
     if (ui.planDay && !days.some((d) => d.day === ui.planDay)) ui.planDay = null;
     ui.plan.value = ui.planDay || '';
     ui.plan.hidden = !days.length;
@@ -3005,7 +3001,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
       : slots ? planHtml(slots, ui.planDay)
       : cmp ? compareHtml(cmp)
-      : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
+      : itemsHtml(rows.slice(0, Math.max(RENDER_CHUNK, ui.keepShown || 0))) + moreHtml(rows.length - Math.max(RENDER_CHUNK, ui.keepShown || 0));
     setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
@@ -3059,9 +3055,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     updateCounts();
     const top = ui.list.scrollTop;
     const shown = ui.list.querySelectorAll('.rf-item').length;
+    ui.keepShown = shown; // re-render as many as were showing, in one pass
     if (ui.view === 'shortlist') renderShortlist();
     else if (cache) showResults();
-    while (ui.rows && ui.list.querySelectorAll('.rf-item').length < Math.min(shown, ui.rows.length)) renderMore();
+    ui.keepShown = 0;
     ui.list.scrollTop = top;
     scheduleAnnotate();
   }
@@ -3144,7 +3141,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
+    const n = Math.max(RENDER_CHUNK, ui.keepShown || 0);
+    ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : itemsHtml(rows.slice(0, n)) + moreHtml(rows.length - n);
     ui.list.scrollTop = 0;
   }
 
@@ -3154,7 +3152,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }) : clock(ms, tz))
       .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
     const clashes = slots.filter((x) => x.flag).length;
-    return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${slots.length} inspection${slots.length === 1 ? '' : 's'}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
+    return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
       <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
       <ol>${slots.map((x) => `<li class="${x.flag ? `rf-${x.flag}` : ''}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
         <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>
@@ -3167,7 +3165,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
     const top = Math.max(1, ...m.byWeek.map((w) => w.n));
     const weekLabel = (w) => w.label || shortDate(w.from);
-    return `<div class="rf-market"><div class="rf-plan-head">${m.n} listing${m.n === 1 ? '' : 's'} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
+    return `<div class="rf-market"><div class="rf-plan-head">${plural(m.n, 'listing')} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
       <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
         <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
@@ -3227,7 +3225,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return rows.map((r) => {
       const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       return `
-      <div tabindex="-1" class="rf-item${r.gone || r.hidden || r.agencyHidden || r.suburbHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
+      <div tabindex="-1" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
@@ -3242,8 +3240,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
-          ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency, ui.view === 'shortlist' && r.agency ? recordText(ui.agencyRec?.get(r.agency.trim().toLowerCase())) : '',
-            r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
+          ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency, ui.view === 'shortlist' && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '',
+            r.photos != null ? `${plural(r.photos, 'photo')}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${am.length ? `<div class="rf-tags">${am.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${wt.length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${wt.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${med ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(med)}</div>` : ''}
@@ -3293,26 +3291,27 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // over your edits). Leaving for a search without one puts back the filters you had before.
   // The filters from before a bound preset live in localStorage (like cfg), so a reload or a
   // new tab still puts them back when you leave the preset's search.
-  const PRESET_VISIT_KEY = 'rea-avail-filter/preset-visit';
-  const PRESET_PREV_KEY = 'rea-avail-filter/preset-prev/v1';
+  const PRESET_VISIT_KEY = `${TOOL_PREFIX}preset-visit`;
+  const PRESET_PREV_KEY = `${TOOL_PREFIX}preset-prev/v1`;
+  const prevKey = keyStore(storageOr('localStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
   const prevStore = {
-    get() { try { const v = JSON.parse(window.localStorage.getItem(PRESET_PREV_KEY)); return isObj(v) ? sanitizeCfg(v) : null; } catch { return null; } },
-    set(v) { try { window.localStorage.setItem(PRESET_PREV_KEY, JSON.stringify(v)); } catch { /* quota/blocked */ } },
-    clear() { try { window.localStorage.removeItem(PRESET_PREV_KEY); } catch { /* blocked */ } },
+    get() { try { const v = JSON.parse(prevKey.get()); return isObj(v) ? sanitizeCfg(v) : null; } catch { return null; } },
+    set: (v) => prevKey.set(JSON.stringify(v)),
+    clear: () => prevKey.clear(),
   };
   function enterSearchPresets(key) {
     const bound = key && presets.forSearch(key);
     let visited = null;
-    try { visited = window.sessionStorage.getItem(PRESET_VISIT_KEY); } catch { /* blocked */ }
+    visited = visitKey.get();
     if (bound) {
       if (visited === key) return;
-      if (!prevStore.get()) prevStore.set(Object.fromEntries([...FILTER_KEYS, 'anchor', 'sort'].map((k) => [k, cfg[k]])));
+      if (!prevStore.get()) prevStore.set(Object.fromEntries(PRESET_KEYS.map((k) => [k, cfg[k]])));
       applyPreset(bound);
-      try { window.sessionStorage.setItem(PRESET_VISIT_KEY, key); } catch { /* blocked */ }
+      visitKey.set(key);
       return;
     }
     if (!key) return; // a listing page or other REA page between searches isn't "leaving"
-    try { window.sessionStorage.removeItem(PRESET_VISIT_KEY); } catch { /* blocked */ }
+    visitKey.clear();
     const before = prevStore.get();
     if (before) {
       prevStore.clear();
@@ -3502,11 +3501,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: '', price: '', inspections: [], partial: true };
   }
   // Minimised state is remembered: the bar can sit over REA's own buttons on small screens.
-  const LBAR_MIN_KEY = 'rea-avail-filter/lbar-min';
-  const lbarMin = {
-    get() { try { return window.localStorage.getItem(LBAR_MIN_KEY) === '1'; } catch { return false; } },
-    set(v) { try { if (v) window.localStorage.setItem(LBAR_MIN_KEY, '1'); else window.localStorage.removeItem(LBAR_MIN_KEY); } catch { /* blocked */ } },
-  };
+  const LBAR_MIN_KEY = `${TOOL_PREFIX}lbar-min`;
+  const lbarKey = keyStore(storageOr('localStorage'), LBAR_MIN_KEY);
+  const lbarMin = { get: () => lbarKey.get() === '1', set: (v) => (v ? lbarKey.set('1') : lbarKey.clear()) };
   function renderListingBar({ onlyIfMoved = false } = {}) {
     let bar = document.getElementById('rf-lbar');
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
@@ -3659,7 +3656,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
       if (badge.dataset.rfHtml !== html) { badge.innerHTML = html; badge.dataset.rfHtml = html; }
-      const m = (r.hidden || r.agencyHidden || r.suburbHidden) && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
+      const m = ruledOut(r) && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
       if ((card.dataset.rfMatch || '') !== m) { if (m) card.dataset.rfMatch = m; else delete card.dataset.rfMatch; }
     }
   }
