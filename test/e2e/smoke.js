@@ -62,6 +62,7 @@ const html = (n) => {
 
   // Badges from the boot document, no search run yet.
   await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge').length === 3, null, { timeout: 5000 });
+  assert.ok(await page.$$eval('article', (els) => els.every((e) => 'rfPos' in e.dataset)), 'static cards anchored');
   console.log('boot badges:', await page.$$eval('article > .rf-badge', (els) => els.map((e) => e.textContent).join(' | ')));
 
   // SPA navigation to page 2: REA swaps the cards and pushState()s; script fetches that page once.

@@ -37,7 +37,7 @@
   const RETRIES = 3;
   const RETRY_BASE_MS = 1000;
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
-  const ROWS_VERSION = 3; // bump when toRow() shape changes
+  const ROWS_VERSION = 4; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROWS_TTL_MS = 10 * 60 * 1000;
 
@@ -219,7 +219,8 @@
       url: safeUrl(listing._links?.canonical?.href),
       surrounding,
       headline: str(listing.title) || str(listing.headline) || '',
-      id: String(listing.id ?? '') || listingId(listing._links?.canonical?.href),
+      // Cards are matched by the id in their href, so prefer the URL-derived id.
+      id: listingId(listing._links?.canonical?.href) || String(listing.id ?? ''),
       inspections: extractInspections(listing),
       listed: extractListed(listing),
     };
@@ -472,7 +473,7 @@
   .rf-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#eee;
     color:#666;font-size:10px;font-weight:600;text-transform:uppercase;vertical-align:1px}
   .rf-empty{padding:28px 16px;text-align:center;color:#767680}
-  article[data-rf-id]{position:relative}
+  article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
   article[data-rf-match="0"]:hover{opacity:1}
   .rf-badge{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
@@ -765,7 +766,8 @@
     if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
     return p;
   };
-  const learn = (rows) => { for (const r of rows) if (r.id) known.set(r.id, r); };
+  let knownVer = 0;
+  const learn = (rows) => { for (const r of rows) if (r.id) known.set(r.id, r); knownVer++; };
   const rowsOf = (results) => [
     ...(results.exact?.items || []).filter((i) => i.listing).map((i) => toRow(i.listing, false)),
     ...(results.surrounding?.items || []).filter((i) => i.listing).map((i) => toRow(i.listing, true)),
@@ -784,9 +786,17 @@
   const filtersActive = () => ['from', 'to', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
     .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly;
 
+  // Match set only changes with cfg or known rows; mutation bursts reuse it.
+  let matchMemo = { sig: null, set: null };
+  const matchSet = () => {
+    if (!cfg.dimCards || !filtersActive()) return null;
+    const sig = knownVer + JSON.stringify(cfg);
+    if (matchMemo.sig !== sig) matchMemo = { sig, set: new Set(applyFilters([...known.values()], cfg).map((r) => r.id)) };
+    return matchMemo.set;
+  };
+
   function annotate() {
-    const matches = cfg.dimCards && filtersActive()
-      ? new Set(applyFilters([...known.values()], cfg).map((r) => r.id)) : null;
+    const matches = matchSet();
     const seen = new Set();
     for (const a of document.querySelectorAll('a[href]')) {
       if (a.closest('#rf-panel')) continue;
@@ -801,7 +811,11 @@
         if (card.dataset.rfMatch) delete card.dataset.rfMatch;
         continue;
       }
-      if (card.dataset.rfId !== id) card.dataset.rfId = id;
+      if (card.dataset.rfId !== id) {
+        card.dataset.rfId = id;
+        // Anchor the badge without overriding a position REA already set (eg virtualised lists).
+        if (getComputedStyle(card).position === 'static') card.dataset.rfPos = '';
+      }
       const html = badgeHtml(r);
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       if (badge.innerHTML !== html) badge.innerHTML = html;

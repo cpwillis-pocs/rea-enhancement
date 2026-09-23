@@ -173,3 +173,8 @@ test('isSearchPage', () => {
   assert.equal(core.isSearchPage('https://www.realestate.com.au/property-apartment-nsw-bondi-146500010'), false);
   assert.equal(core.isSearchPage('https://www.realestate.com.au/'), false);
 });
+
+test('toRow: id prefers canonical URL id', () => {
+  const r = core.toRow(listing({ id: '999', _links: { canonical: { href: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500010' } } }), false);
+  assert.equal(r.id, '146500010');
+});
