@@ -3143,6 +3143,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const l = ex ? findListing(unpackJson(ex), id) : null;
     return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: '', price: '', inspections: [], partial: true };
   }
+  // Minimised state is remembered: the bar can sit over REA's own buttons on small screens.
+  const LBAR_MIN_KEY = 'rea-avail-filter/lbar-min';
+  const lbarMin = {
+    get() { try { return window.localStorage.getItem(LBAR_MIN_KEY) === '1'; } catch { return false; } },
+    set(v) { try { if (v) window.localStorage.setItem(LBAR_MIN_KEY, '1'); else window.localStorage.removeItem(LBAR_MIN_KEY); } catch { /* blocked */ } },
+  };
   function renderListingBar({ onlyIfMoved = false } = {}) {
     let bar = document.getElementById('rf-lbar');
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
@@ -3163,10 +3169,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     bar._row = r;
     const info = [r.prevPrice && `was ${r.prevPrice}`, r.prevAvail && `available was ${r.prevAvail}`, r.relisted && 'relisted',
       r.firstSeen && `first seen ${ago(Date.now() - r.firstSeen)}`].filter(Boolean).join(' · ');
-    bar.innerHTML = `<button type="button" data-l="s" aria-pressed="${r.starred}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
+    const small = lbarMin.get();
+    bar.classList.toggle('rf-lbar-min', small);
+    bar.innerHTML = small ? `<button type="button" data-l="s" aria-pressed="${r.starred}" aria-label="${r.starred ? 'Shortlisted' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>
+      <button type="button" data-l="min" aria-expanded="false" aria-label="Show listing tools">⋯</button>` : `<button type="button" data-l="s" aria-pressed="${r.starred}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
       ${r.starred ? `<select data-l="as" aria-label="Application status">${APP_STATUSES.map((v) => `<option value="${v}"${v === r.appStatus ? ' selected' : ''}>${v ? v[0].toUpperCase() + v.slice(1) : 'Not started'}</option>`).join('')}</select>` : ''}
       <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
       <button type="button" data-l="h" aria-pressed="${r.hidden}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+      <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">–</button>
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
     if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
@@ -3182,7 +3192,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const el = e.target.closest('[data-l]');
     if (!el || (e.type === 'click' && el.tagName === 'SELECT')) return;
     const k = el.dataset.l;
-    if (k === 's' || k === 'h') marks.toggle(id, k, r);
+    if (k === 'min') lbarMin.set(!lbarMin.get());
+    else if (k === 's' || k === 'h') marks.toggle(id, k, r);
     else if (k === 'as') marks.setStatus(id, el.value);
     else if (k === 'n') {
       const text = window.prompt('Private note for this listing:', r.note || '');

@@ -737,6 +737,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500101']);
     assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
+    await page.click('#rf-lbar [data-l=min]');
+    assert.ok(await page.$('#rf-lbar.rf-lbar-min') && !(await page.$('#rf-lbar [data-l=h]')), 'minimised');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.l), 'min', 'focus stays on the toggle');
+    await page.click('#rf-lbar [data-l=min]');
     await page.focus('#rf-lbar [data-l=h]');
     await page.evaluate(() => history.replaceState({}, '', location.pathname + '?gallery=1'));
     await page.waitForTimeout(600);
