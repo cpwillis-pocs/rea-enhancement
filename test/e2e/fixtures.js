@@ -38,7 +38,7 @@ function pageResults(n, { pages = 3, perPage = 6, noInspections = false } = {}) 
       title: ['Light-filled with harbour glimpses', 'Renovated with pool', 'Moments to the beach', 'Quiet leafy street'][k % 4],
       inspections: noInspections || k % 2 ? [] : [{ startTime: new Date(Date.UTC(2026, 8, 26 + (k % 3), 0, 30)).toISOString() }],
       description: ['Pets considered on application. Split system air conditioning.', 'Sorry, no pets. Dishwasher and sunny balcony.',
-        'Offered unfurnished. Built-in robes throughout.'][k % 3],
+        'Offered unfurnished. Built-in robes throughout. Water usage charged to tenant.'][k % 3],
     }));
   }
   return results({ exact: items, maxPage: pages });

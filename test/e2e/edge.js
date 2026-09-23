@@ -270,6 +270,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('.rf-clear');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: any');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.ok(await page.$('.rf-watch span:has-text("Water usage charged")'), 'heads-up tag from description');
     console.log('amenities:', withPets, 'with pets,', noPets, 'without, of', total);
     await done(page); await ctx.close();
   }

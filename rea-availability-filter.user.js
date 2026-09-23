@@ -162,7 +162,7 @@
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
-    in: cleanInspections(r.inspections),
+    in: cleanInspections(r.inspections), w: clip(r.watch, 80),
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
@@ -181,7 +181,7 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: cleanInspections(d.in), bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   const dayNum = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS; // local calendar day, DST-proof
@@ -452,7 +452,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'inspect', 'agency', 'lat', 'lng', 'photos', 'floorplan'];
+    'cars', 'type', 'img', 'surrounding', 'inspect', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch'];
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -975,6 +975,19 @@
   const amenCfgString = (o) => Object.entries(o).map(([id, st]) => `${id}:${st}`).join(',');
   const amenityTags = (r) => AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.yes);
 
+  // Heads-up: terms in the listing text worth asking the agent about. Plain text matches, so a
+  // tag means "mentioned", never a verdict ("no application fee" is not flagged).
+  const WATCHOUTS = [
+    { id: 'short', label: 'Short lease', re: /\b(?:3|6|three|six)[- ]?months?\s+(?:lease|tenancy)|\bshort[- ]term (?:lease|rental|tenancy)/ },
+    { id: 'water', label: 'Water usage charged', re: /water (?:usage|consumption)[^.]{0,30}?\b(?:charged|payable|paid by|extra|additional|on top)/ },
+    { id: 'fee', label: 'Fee mentioned', re: /(?<!\bno\s)(?<!\bfree\s)\b(?:application|holding|admin(?:istration)?|reservation) fees?\b(?!\s*(?:free|waived))/ },
+    { id: 'bid', label: 'Invites higher offers', re: /\b(?:offers?|bids?) (?:above|over|in excess of)|\brent bidding|\bhighest offer|\bbest offer/ },
+    { id: 'strata', label: 'Subject to strata approval', re: /subject to (?:strata|body corporate|owners? corporation) approval/ },
+    { id: 'break', label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)? fee|\blease[- ]break (?:fee|cost|clause)/ },
+  ];
+  const watchOf = (text) => WATCHOUTS.filter((w) => w.re.test(String(text || '').toLowerCase())).map((w) => w.id);
+  const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
+
   // Distance from a user-chosen point. Accepts "-33.87, 151.21" or a Google Maps URL/text
   // containing "@-33.87,151.21" (no geocoding: nothing leaves the browser).
   const parseAnchor = (v) => {
@@ -1047,6 +1060,7 @@
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
     row.text = [row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' ').toLowerCase();
+    row.watch = watchOf([row.headline, str(listing.description), ...row.features].join(' ')).join(',');
     row.amen = amenitiesOf({ features: row.features, amenText: [row.headline, str(listing.description)].filter(Boolean).join(' ') });
     return row;
   };
@@ -1411,14 +1425,14 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
-    const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ')
+    const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
       : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
@@ -1653,7 +1667,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1834,6 +1848,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
     padding:8px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
@@ -2825,6 +2840,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ['Of income', (r) => (incomePct(r, cfg.income) != null ? `${incomePct(r, cfg.income)}%` : ''), (r) => incomePct(r, cfg.income) ?? Infinity, 'min'],
     ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
     ['Amenities', (r) => amenityTags(r).join(', '), null],
+    ['Heads-up', (r) => watchTags(r).join(', '), null],
     ['Agency', (r) => r.agency || '', null],
     ['Status', (r) => (r.appStatus ? r.appStatus[0].toUpperCase() + r.appStatus.slice(1) : 'Not started'), null],
     ['Note', (r) => r.note || '', null],
@@ -2873,6 +2889,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency,
             r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+          ${watchTags(r).length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${watchTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
           ${incomePct(r, cfg.income) != null ? `<div class="rf-meta${incomePct(r, cfg.income) > RENT_STRESS_PCT ? ' rf-warn-t' : ''}">${incomePct(r, cfg.income)}% of income</div>` : ''}
           ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}

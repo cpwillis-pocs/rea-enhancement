@@ -58,3 +58,17 @@ test('amenitiesOf: adversarial phrases', () => {
     pool: [['No swimming pool', 'no'], ['Pool: No', 'no'], ['car pool', null], ['Walk to Bondi Icebergs pool', null], ['close to the Aquatic Centre pool', null], ['heated pool', 'yes']] };
   for (const [id, cases] of Object.entries(T)) for (const [t, want] of cases) assert.equal(am(t)[id], want, `${id}: ${t}`);
 });
+
+test('watchOf: heads-up terms, negations not flagged', () => {
+  const w = (t) => core.watchOf(t);
+  assert.deepEqual(w('Available on a 6 month lease only.'), ['short']);
+  assert.deepEqual(w('Water usage is charged to the tenant'), ['water']);
+  assert.deepEqual(w('A holding fee of one week applies'), ['fee']);
+  assert.deepEqual(w('No application fee. Pets welcome'), []);
+  assert.deepEqual(w('Application fees waived'), []);
+  assert.deepEqual(w('Offers above the asking rent considered'), ['bid']);
+  assert.deepEqual(w('Pets subject to strata approval'), ['strata']);
+  assert.deepEqual(w('Break lease fee applies'), ['break']);
+  assert.deepEqual(w('Sunny 2 bed with 12 month lease'), []);
+  assert.deepEqual(core.watchTags({ watch: 'short,fee' }), ['Short lease', 'Fee mentioned']);
+});
