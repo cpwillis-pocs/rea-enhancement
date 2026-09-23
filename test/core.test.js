@@ -576,3 +576,62 @@ test('small helpers: listingId, unpackJson, startOfDay, setDistances, AMENITIES/
   assert.ok(core.AMENITIES.every((a) => a.id && a.label && a.pos instanceof RegExp && a.neg instanceof RegExp));
   assert.ok(core.HIDE_REASONS.includes('other'));
 });
+
+test('availability from the description when the field is missing', () => {
+  const now = new Date(2026, 8, 23);
+  assert.equal(+core.availFromText('Available from 1st November. Sunny.', now), +new Date(2026, 10, 1));
+  assert.equal(+core.availFromText('Available now!', now), +new Date(2026, 8, 23));
+  assert.equal(+core.availFromText('Availability: 12/11/2026', now), +new Date(2026, 10, 12));
+  assert.equal(core.availFromText('Available for inspection this Saturday', now), null);
+  assert.equal(core.availFromText('available to view by appointment', now), null);
+  const r = core.toRow(require('./helpers').listing({ availableDate: null, description: 'Great unit. Available 1st of December.' }), false);
+  assert.ok(r.avail instanceof Date && r.availFromText);
+  assert.match(r.available, /\(from text\)$/);
+});
+
+test('apply-via portal and lease term from text', () => {
+  assert.equal(core.applyViaOf('Apply via 2Apply today'), '2Apply');
+  assert.equal(core.applyViaOf('Applications through Snug please'), 'Snug');
+  assert.equal(core.applyViaOf('a snug bedroom'), '');
+  const t = (x) => core.leaseCode(core.leaseTermOf(x));
+  assert.deepEqual(['12 month lease', '6-12 month lease available', 'Lease term: 6 or 12 months', 'Flexible lease', '2 year lease', 'Close to 12 month old park'].map(t),
+    ['12', '6-12', '6-12', 'flex', '24', '']);
+  assert.equal(core.leaseLabel(core.leaseFromCode('6-12')), 'Lease 6–12 mo');
+  const rows = [{ id: '1', url: 'a', lease: '6' }, { id: '2', url: 'b', lease: '6-12' }, { id: '3', url: 'c', lease: '' }, { id: '4', url: 'd', lease: 'flex' }];
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, leaseMin: '12' }).map((r) => r.id), ['2', '3', '4'], 'only a stated too-short lease is dropped');
+});
+
+test('buildings: key, one per building, counts and exact-address twins', () => {
+  assert.equal(core.buildingKey('5/12 Hall St, Bondi NSW 2026'), '12 hall st bondi nsw 2026');
+  assert.equal(core.buildingKey('Unit 3, 12 Hall St, Bondi NSW 2026'), '12 hall st bondi nsw 2026');
+  assert.equal(core.buildingKey('12 Hall St, Bondi NSW 2026'), '', 'a house is not a building group');
+  const rows = [
+    { id: '1', url: 'a', address: '5/12 Hall St, Bondi NSW 2026', priceNum: 700, agency: 'A' },
+    { id: '2', url: 'b', address: '6/12 Hall St, Bondi NSW 2026', priceNum: 650 },
+    { id: '3', url: 'c', address: '5/12 Hall St, Bondi NSW 2026', priceNum: 720, agency: 'B', price: '$720' },
+    { id: '4', url: 'd', address: '9 Other Rd, Bondi NSW 2026', priceNum: 500 },
+  ];
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, onePerBuilding: true }).map((r) => r.id), ['2', '4']);
+  core.withBuildings(rows);
+  assert.equal(rows[0].buildingN, 3); assert.equal(rows[0].buildingAddr, '12 Hall St');
+  assert.deepEqual(rows[0].alsoListed, [{ id: '3', agency: 'B', price: '$720' }]);
+  assert.equal(rows[3].buildingN, 0);
+});
+
+test('lease fit: overlap cost, gap nights, sort', () => {
+  const now = new Date(2026, 8, 23);
+  const f = (d) => core.leaseFit({ avail: new Date(2026, 9, d), priceNum: 700 }, '2026-10-10', now);
+  assert.deepEqual(f(5), { overlap: 6, gap: 0, cost: 600 });
+  assert.deepEqual(f(20), { overlap: 0, gap: 9, cost: 0 });
+  assert.equal(core.fitLabel(f(11)), 'starts right after your lease');
+  assert.equal(core.leaseFit({ avail: new Date() }, 'nonsense'), null);
+  const rows = [{ id: 'gap', url: 'a', avail: new Date(2026, 9, 20), priceNum: 700 }, { id: 'over', url: 'b', avail: new Date(2026, 9, 5), priceNum: 700 }, { id: 'exact', url: 'c', avail: new Date(2026, 9, 11), priceNum: 700 }];
+  assert.deepEqual(core.applyFilters(rows, { ...core.DEFAULT_CFG, leaseEnd: '2026-10-10', sort: 'fit' }, now).map((r) => r.id), ['exact', 'over', 'gap']);
+});
+
+test('building filter matches the building exactly (2 Hall St is not 12 Hall St)', () => {
+  const rows = [{ id: '1', url: 'a', address: '5/2 Hall St, Bondi NSW 2026' }, { id: '2', url: 'b', address: '3/12 Hall St, Bondi NSW 2026' }, { id: '3', url: 'c', address: '9/2 Hall St, Bondi NSW 2026' }];
+  const key = core.buildingKey(rows[0].address);
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, building: `${key}|2 Hall St` }).map((r) => r.id), ['1', '3']);
+  assert.equal(core.activeFilters({ ...core.DEFAULT_CFG, building: `${key}|2 Hall St` })[0].label, 'Building: 2 Hall St');
+});

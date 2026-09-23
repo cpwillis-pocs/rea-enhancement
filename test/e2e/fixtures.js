@@ -16,28 +16,38 @@ const photo = (i) => `<svg xmlns="http://www.w3.org/2000/svg" width="690" height
 <rect width="690" height="520" fill="url(#g)"/><rect x="180" y="190" width="330" height="230" fill="rgba(255,255,255,.55)"/>
 <polygon points="150,200 345,90 540,200" fill="rgba(255,255,255,.7)"/><rect x="310" y="310" width="70" height="110" fill="rgba(0,0,0,.25)"/></svg>`;
 
-function pageResults(n, { pages = 3, perPage = 6, noInspections = false } = {}) {
+// extras: a few listings carry text-only facts (apply portal, lease terms, availability in the
+// description) and share buildings/addresses, for the tests of those features.
+const EXTRAS = {
+  0: { description: 'Pets considered on application. Apply via 2Apply. 12 month lease.' },
+  1: { availableDate: null, description: 'Sorry, no pets. Available from 1st December 2026.' },
+  2: { address: '7/2 Curlewis St' }, // same building as listing 0 (10/2 Curlewis St)
+  3: { address: '10/2 Curlewis St', listingCompany: { name: 'Other Agency' } }, // same unit, second agency
+  4: { description: '6 month lease only. Dishwasher.' },
+};
+function pageResults(n, { pages = 3, perPage = 6, noInspections = false, extras = false } = {}) {
   const items = [];
   for (let i = 0; i < perPage; i++) {
     const k = (n - 1) * perPage + i;
     const beds = [1, 2, 2, 3, 0, 4][k % 6];
     const id = String(146500000 + k);
+    const x = extras ? EXTRAS[k] || {} : {};
     items.push(listing({
       id,
-      availableDate: { display: dates[k % dates.length] },
+      availableDate: 'availableDate' in x ? x.availableDate : { display: dates[k % dates.length] },
       price: { display: k % 7 === 3 ? 'Contact agent' : `$${550 + ((k * 137) % 900)} per week` },
       bond: { display: `$${(550 + ((k * 137) % 900)) * 4}` },
-      address: { suburb: 'Bondi', display: { fullAddress: `${10 + k * 3}/${k + 2} ${streets[k % streets.length]}, ${SUBURB}` },
+      address: { suburb: 'Bondi', display: { fullAddress: `${x.address || `${10 + k * 3}/${k + 2} ${streets[k % streets.length]}`}, ${SUBURB}` },
         location: { latitude: -33.8915 + k * 0.004, longitude: 151.2767 - k * 0.006 } },
       generalFeatures: { bedrooms: { value: beds }, bathrooms: { value: Math.max(1, beds - 1) }, parkingSpaces: { value: k % 3 } },
       propertyType: { display: beds === 0 ? 'Studio' : types[k % 5] },
       media: { mainImage: { templatedUrl: `https://i2.au.reastatic.net/{size}/fixture/${k}.svg` }, images: new Array(4 + (k % 9)).fill(0),
         floorplans: k % 2 ? [] : [0] },
-      listingCompany: { name: ['Bondi Realty', 'Harbour Property Co', 'Eastside Agents'][k % 3] },
+      listingCompany: x.listingCompany || { name: ['Bondi Realty', 'Harbour Property Co', 'Eastside Agents'][k % 3] },
       _links: { canonical: { href: `${ORIGIN}/property-apartment-nsw-bondi-${id}` } },
       title: ['Light-filled with harbour glimpses', 'Renovated with pool', 'Moments to the beach', 'Quiet leafy street'][k % 4],
       inspections: noInspections || k % 2 ? [] : [{ startTime: new Date(Date.UTC(2026, 8, 26 + (k % 3), 0, 30)).toISOString() }],
-      description: ['Pets considered on application. Split system air conditioning.', 'Sorry, no pets. Dishwasher and sunny balcony.',
+      description: x.description || ['Pets considered on application. Split system air conditioning.', 'Sorry, no pets. Dishwasher and sunny balcony.',
         'Offered unfurnished. Built-in robes throughout. Water usage charged to tenant.'][k % 3],
     }));
   }

@@ -482,3 +482,18 @@ test('marksStore: parsed copy reused until another tab writes; counts memo reset
   a.invalidate();
   assert.equal(a.counts().starred, 1);
 });
+
+test('after-inspection prompts: inspected? then apply?', () => {
+  let t = Date.now(); // stored inspections are cleaned against the real clock
+  const st = core.marksStore(mem(), () => t);
+  const r = Object.assign(row('146500071'), { inspections: [{ at: t + 864e5, label: 'Mon' }] });
+  st.toggle('146500071', 's', r);
+  t += 2 * 864e5; // the inspection has passed
+  let s1 = st.shortlist()[0];
+  assert.equal(core.needsAction(s1, t), 'inspected');
+  st.answerInspect('146500071');
+  assert.equal(core.needsAction(st.shortlist()[0], t), '', "didn't go: not asked again");
+  st.setStatus('146500071', 'inspected');
+  t += 3 * 864e5;
+  assert.equal(core.needsAction(st.shortlist()[0], t), 'apply');
+});

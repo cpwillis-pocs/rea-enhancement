@@ -909,13 +909,92 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24l. Round 10: text facts (apply portal, lease, availability from text), lease fit, lease/building
+  // filters, building + twin listings, measure from a listing, places feedback, inspection prompts,
+  // warning banner, saved-search reminder.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const item = (id) => page.textContent(`.rf-item[data-id="${id}"]`);
+    assert.match(await item('146500000'), /Apply: 2Apply/); assert.match(await item('146500000'), /Lease 12 mo/);
+    assert.match(await item('146500001'), /\(from text\)/, 'availability read from the description');
+    assert.match(await item('146500000'), /3 in this building/);
+    assert.match(await item('146500000'), /Also listed by Other Agency/);
+    // Lease fit and sort.
+    await page.click('.rf-settings summary');
+    await page.fill('#rf-leaseEnd', '2026-10-20'); await page.dispatchEvent('#rf-leaseEnd', 'change');
+    await page.selectOption('#rf-sort', 'fit');
+    const first = await page.textContent('.rf-item .rf-meta:has-text("overlap"), .rf-item .rf-meta:has-text("right after")');
+    assert.match(first, /overlap|right after/);
+    // Lease and building filters (with chips).
+    await page.click('#rf-more summary');
+    await page.selectOption('#rf-leaseMin', '12');
+    assert.equal(await page.$('.rf-item[data-id="146500004"]'), null, '6-month-only lease dropped');
+    assert.ok(await page.$('.rf-achip:has-text("Lease 12+ mo")'));
+    await page.selectOption('#rf-leaseMin', '');
+    const before = await page.$$eval('.rf-item', (e) => e.length);
+    await page.check('#rf-onePerBuilding');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), before - 2, 'two extra units in one building collapse');
+    await page.uncheck('#rf-onePerBuilding');
+    await page.click('.rf-item[data-id="146500000"] [data-act=bldg]');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 3, 'only that building');
+    assert.match(await status(page), /Showing the 3 listings at 2 Curlewis St/);
+    await page.click('.rf-achip:has-text("Building: 2 Curlewis St")');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), before, 'chip removes the building filter');
+    // Measure from a listing; add it as a place (feedback line).
+    await page.click('.rf-item[data-id="146500002"] .rf-acts-more summary');
+    await page.click('.rf-item[data-id="146500002"] [data-act=anchor]');
+    assert.match(await page.inputValue('#rf-anchor'), /^-33\.\d+, 151\.\d+$/);
+    await page.click('.rf-item[data-id="146500003"] .rf-acts-more summary');
+    await page.click('.rf-item[data-id="146500003"] [data-act=place]');
+    assert.match(await page.inputValue('#rf-places'), /^10\/2 Curlewis St: -33/);
+    assert.match(await page.textContent('.rf-places-fb'), /10\/2 Curlewis St ✓/);
+    await page.fill('#rf-places', 'Work: -33.87, 151.21\nnonsense'); await page.dispatchEvent('#rf-places', 'input');
+    assert.match(await page.textContent('.rf-places-fb'), /Work ✓ · 1 line not understood/);
+    // After-inspection prompt on the shortlist: a past inspection you were down for.
+    await page.evaluate(() => document.querySelectorAll('.rf-acts-more[open]').forEach((d) => { d.open = false; }));
+    await page.click('.rf-item[data-id="146500000"] [data-act=s]');
+    assert.equal(await page.getAttribute('.rf-item[data-id="146500000"] [data-act=s]', 'aria-pressed'), 'true', 'shortlisted');
+    await page.evaluate(() => { const k = 'rea-avail-filter/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); d.m['146500000'].d.in = [{ at: Date.now() - 864e5, label: 'yesterday' }]; d.m['146500000'].as = 'to inspect'; d.m['146500000'].ast = Date.now() - 3 * 864e5; localStorage.setItem(k, JSON.stringify(d)); window.dispatchEvent(new StorageEvent('storage', { key: k })); }); // as another tab would
+    await page.click('[data-view=shortlist]');
+    await page.selectOption('.rf-sl-filter', '!');
+    assert.match(await item('146500000'), /Did you inspect\?/);
+    await page.click('.rf-item[data-id="146500000"] [data-na=yes]');
+    assert.equal(await page.inputValue('.rf-item[data-id="146500000"] select[data-app]').catch(() => 'gone'), 'gone', 'no longer needs action once answered');
+    await page.selectOption('.rf-sl-filter', '');
+    assert.equal(await page.inputValue('.rf-item[data-id="146500000"] select[data-app]'), 'inspected');
+    await page.click('[data-view=results]');
+    console.log('round 10 features: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 24m. Saved-search reminder by the launcher (at most daily), Check now runs Check all.
+  {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => {
+      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1': { at: Date.now() - 3 * 864e5, ids: [], rows: [], gone: [] } } }));
+    });
+    const page = await open(ctx);
+    await page.waitForSelector('#rf-remind');
+    assert.match(await page.textContent('#rf-remind'), /1 saved search, last checked 3d ago/);
+    await page.click('#rf-remind [data-r=check]');
+    await waitStatus(page, /Checked 1 saved search/, 30000);
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.waitForTimeout(300);
+    assert.equal(await page.$('#rf-remind'), null, 'not again the same day');
+    console.log('saved-search reminder: ok');
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/health/v1', JSON.stringify({ n: 5, ema: { inspections: 0.5, availability: 1, price: 0.9 } })));
     const page = await open(ctx, SEARCH, { route: serve([], { pages: 4, perPage: 6, noInspections: true }) });
     await page.click('#rf-launch'); await page.click('#rf-run');
-    await waitStatus(page, /REA may have changed its data: inspections on 0%/);
+    await page.waitForFunction(() => /REA may have changed its data: inspections on 0%/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''), null, { timeout: 15000 });
+    assert.match(await status(page), /listings match/, 'status keeps the match count');
     const report = await page.evaluate(() => window.reaFilter.selfcheck());
     assert.match(report, /inspections 0%\/\d+%/);
     assert.match(report, /page: \/rent\//);

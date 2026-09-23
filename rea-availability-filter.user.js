@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.15.2
+// @version      2.16.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis/rea-enhancement
@@ -52,7 +52,7 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 8;
+  const ROWS_VERSION = 9;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'hideReason', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
@@ -178,7 +178,7 @@
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
-    in: cleanInspections(r.inspections), w: clip(r.watch, 80),
+    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10),
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
@@ -187,7 +187,15 @@
   const checklistItems = (v) => [...new Set(String(v || CHECKLIST_DEFAULT).split(/[,\n]/).map((x) => clip(x.trim(), 30)).filter(Boolean))].slice(0, CHECK_MAX);
   const checkSummary = (r, items) => items.filter((k) => r.checks?.[k]).map((k) => `${r.checks[k] === 'y' ? '✓' : '✗'} ${k}`).join(', ');
   const HIDE_REASONS = ['too small', 'location', 'condition', 'price', 'other'];
-  const FOLLOW_UP_DAYS = 5; // an application with no answer after this long gets a "follow up?" nudge
+  const FOLLOW_UP_DAYS = 5;
+  // After an inspection you were down for: "Inspected?"; inspected a while ago but not applied: "Apply?".
+  const ACTION_WINDOW_DAYS = 7, APPLY_NUDGE_DAYS = 2;
+  const needsAction = (r, now = Date.now()) => {
+    if (r.lastInspect && now - r.lastInspect < ACTION_WINDOW_DAYS * DAY_MS && (!r.appStatus || r.appStatus === 'to inspect') &&
+      !(r.inspectAnswered >= r.lastInspect) && !(r.appAt >= r.lastInspect)) return 'inspected';
+    if (r.appStatus === 'inspected' && r.appAt && now - r.appAt > APPLY_NUDGE_DAYS * DAY_MS) return 'apply';
+    return '';
+  }; // an application with no answer after this long gets a "follow up?" nudge
   const needsFollowUp = (r, now = Date.now()) => r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
   // Your track record per agency across the shortlist: { applied, approved, declined } by agency name.
   const agencyRecord = (rows) => {
@@ -220,7 +228,7 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
@@ -429,6 +437,8 @@
         save();
         return next;
       },
+      // "Didn't go" on the after-inspection prompt: don't ask again for inspections up to now.
+      answerInspect(id) { const { m } = fresh(); entry(m, id).nd = now(); save(); },
       setHideReason(id, reason) {
         const { m } = fresh();
         const e = entry(m, id);
@@ -464,6 +474,9 @@
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
               gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck),
+              // The latest inspection that has already happened (the display list drops past ones).
+              lastInspect: Math.max(0, ...(Array.isArray(d.in) ? d.in : []).map((i) => i?.at).filter((at) => typeof at === 'number' && at + INSPECT_MINUTES * 60e3 < now())) || null,
+              inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
             };
           });
       },
@@ -565,7 +578,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch']; // inspect/nextInspect: re-derived on load
+    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText']; // inspect/nextInspect: re-derived on load
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -1149,6 +1162,43 @@
       return false;
     })).map((w) => w.id);
   };
+  // Availability from the description when REA's field is missing: "Available from 1st Nov",
+  // "available now", "Availability: 12/11/2026". Not "available for inspection", "available to view".
+  const AVAIL_TEXT = /\bavailab(?:le|ility)\b\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|[^.;,\n()]{3,32})/i;
+  const availFromText = (text, now = new Date()) => {
+    const m = String(text || '').match(AVAIL_TEXT);
+    if (!m) return null;
+    return /^(now|immediately)$/i.test(m[1].trim()) ? startOfDay(now) : parseAvail(`Available ${m[1]}`, now);
+  };
+
+  // How the agent takes applications, when the text names a portal (display only, never contacted).
+  const APPLY_VIA = [
+    ['2Apply', /\b2apply\b/],
+    ['Snug', /\bsnug\.com\b|\b(?:apply|application)s?\b[^.;]{0,24}\b(?:via|through|on|with|using)\s+snug\b/],
+    ['Ignite', /\bignite\.com\b|\b(?:apply|application)s?\b[^.;]{0,24}\b(?:via|through|on|with|using)\s+(?:rea\s+)?ignite\b/],
+    ['tApp', /\btapp\b/],
+    ['Inspect Real Estate', /\binspect\s?real\s?estate\b/],
+  ];
+  const applyViaOf = (text) => APPLY_VIA.find(([, re]) => re.test(String(text || '').toLowerCase()))?.[0] || '';
+
+  // Lease term in months from the text: { min, max } or { flexible }; null when not stated.
+  const leaseTermOf = (text) => {
+    const t = String(text || '').toLowerCase();
+    if (/\bflexible (?:lease|term)s?\b|\blease (?:terms?|length) (?:is )?(?:flexible|negotiable)\b/.test(t)) return { flexible: true };
+    const mo = '(?:months?|mths?|mo)\\b';
+    let m = t.match(new RegExp(`\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})\\s*${mo}[^.;]{0,20}?\\b(?:lease|tenancy|term)`))
+      || t.match(new RegExp(`\\b(?:lease|tenancy|term)\\b[^.;]{0,20}?\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})\\s*${mo}`));
+    if (m) return { min: Math.min(+m[1], +m[2]), max: Math.max(+m[1], +m[2]) };
+    m = t.match(new RegExp(`\\b(\\d{1,2})\\s*${mo}[^.;]{0,20}?\\b(?:lease|tenancy|term)`)) || t.match(new RegExp(`\\b(?:lease|tenancy|term)\\b[^.;]{0,20}?\\b(\\d{1,2})\\s*${mo}`));
+    if (m && +m[1] >= 1 && +m[1] <= 60) return { min: +m[1], max: +m[1] };
+    m = t.match(/\b(\d)\s*(?:years?|yrs?)\b[^.;]{0,12}?\b(?:lease|tenancy|term)/) || t.match(/\b(?:lease|tenancy|term)\b[^.;]{0,12}?\b(\d)\s*(?:years?|yrs?)\b/);
+    return m ? { min: +m[1] * 12, max: +m[1] * 12 } : null;
+  };
+  // Compact form for rows and storage: "6-12", "12", "flex" or "".
+  const leaseCode = (l) => (!l ? '' : l.flexible ? 'flex' : l.min === l.max ? String(l.min) : `${l.min}-${l.max}`);
+  const leaseFromCode = (c) => { const v = String(c || ''); if (v === 'flex') return { flexible: true }; const m = v.match(/^(\d+)(?:-(\d+))?$/); return m ? { min: +m[1], max: +(m[2] || m[1]) } : null; };
+  const leaseLabel = (l) => (!l ? '' : l.flexible ? 'Flexible lease' : l.min === l.max ? `Lease ${l.min} mo` : `Lease ${l.min}–${l.max} mo`);
+
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
 
@@ -1245,7 +1295,14 @@
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
     row.text = [row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' ').toLowerCase();
-    row.watch = watchOf([row.headline, str(listing.description), ...row.features].join(' ')).join(',');
+    const said = [row.headline, str(listing.description), ...row.features].join(' ');
+    row.watch = watchOf(said).join(',');
+    row.applyVia = applyViaOf(said);
+    row.lease = leaseCode(leaseTermOf(said));
+    if (!row.avail) { // REA's field missing or unreadable: the description often says it
+      const t = availFromText(said);
+      if (t) { row.avail = t; row.available = `${t.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} (from text)`; row.availFromText = true; }
+    }
     row.amen = amenitiesOf({ features: row.features, amenText: [row.headline, str(listing.description)].filter(Boolean).join(' ') });
     return row;
   };
@@ -1327,7 +1384,7 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
-    remember: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', showGone: false, income: '',
+    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1339,10 +1396,10 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS, 'anchor', 'sort']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'places', 'checklist', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein']; // Clear keeps your "from" point
+  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -1357,6 +1414,7 @@
     inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
     value: (a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b),
     distance: (a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || byAvail(a, b),
+    fit: (a, b) => fitKey(a.fit) - fitKey(b.fit) || byAvail(a, b),
     allnear: (a, b) => (worstKm(a) ?? Infinity) - (worstKm(b) ?? Infinity) || byAvail(a, b),
     match: (a, b) => (b.score ?? -1) - (a.score ?? -1) || byAvail(a, b),
   };
@@ -1449,10 +1507,10 @@
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
     bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
     keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has a photo',
-    exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet',
+    exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet', leaseMin: (v) => `Lease ${v}+ mo`, onePerBuilding: () => 'One per building', building: (v) => `Building: ${v.split('|')[1] || 'one building'}`,
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
-  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'maxKm', 'withinDays'];
+  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'maxKm', 'withinDays', 'leaseMin'];
   const activeFilters = (cfg) => {
     const out = [];
     for (const k of FILTER_KEYS) {
@@ -1586,7 +1644,9 @@
   // ("how many would this chip let back in?") can't disturb what's on screen.
   function applyFilters(rows, cfg, now = new Date()) {
     cfg = { ...DEFAULT_CFG, ...cfg };
-    return withScores(filterRows(rows, cfg, now), cfg).sort(Object.hasOwn(SORTS, cfg.sort) ? SORTS[cfg.sort] : SORTS.avail);
+    const kept = filterRows(rows, cfg, now);
+    for (const r of kept) r.fit = leaseFit(r, cfg.leaseEnd, now);
+    return withScores(kept, cfg).sort(Object.hasOwn(SORTS, cfg.sort) ? SORTS[cfg.sort] : SORTS.avail);
   }
 
   function filterRows(rows, cfg, now = new Date()) {
@@ -1629,9 +1689,52 @@
       .filter((r) => !cfg.type || r.type === cfg.type)
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !kw || kw(r.text || ''))
-      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)));
-    return kept;
+      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)))
+      .filter((r) => !cfg.building || buildingKey(r.address) === cfg.building.split('|')[0]) // "key|label" from "N in this building"
+      .filter((r) => { // a stated lease shorter than you need; unstated or flexible passes
+        const need = num(cfg.leaseMin), l = need ? leaseFromCode(r.lease) : null;
+        return !l || l.flexible || l.max >= need;
+      });
+    return cfg.onePerBuilding ? onePerBuilding(kept) : kept;
   }
+
+  // Same building: a unit address without its unit ("5/12 Hall St, Bondi" -> "12 hall st bondi").
+  const UNIT_PREFIX = /^\s*(?:(?:unit|apartment|apt|flat|suite|villa|townhouse|lot)\s*[\w-]+\s*[,\/]?\s*|[\w-]+\s*\/\s*)/i;
+  const buildingKey = (address) => (UNIT_PREFIX.test(String(address || '')) ? addressKey(String(address).replace(UNIT_PREFIX, '')) : '');
+  // One per building keeps the cheapest unit; houses and unit-less addresses always stay.
+  const onePerBuilding = (rows) => {
+    const best = new Map();
+    for (const r of rows) {
+      const k = buildingKey(r.address);
+      if (k && (!best.has(k) || (r.priceNum ?? Infinity) < (best.get(k).priceNum ?? Infinity))) best.set(k, r);
+    }
+    return rows.filter((r) => { const k = buildingKey(r.address); return !k || best.get(k) === r; });
+  };
+  // Per row: how many listings share its building, and other listings at the exact same address
+  // (the same place listed twice, eg by two agencies).
+  const withBuildings = (rows) => {
+    const byB = new Map(), byA = new Map();
+    const add = (m, k, r) => { if (k) { if (!m.has(k)) m.set(k, []); m.get(k).push(r); } };
+    for (const r of dedupe(rows)) { add(byB, buildingKey(r.address), r); add(byA, addressKey(r.address), r); }
+    for (const r of rows) {
+      const b = buildingKey(r.address), same = b ? byB.get(b) || [] : [];
+      r.buildingN = same.length > 1 ? same.length : 0;
+      r.buildingAddr = r.buildingN ? String(r.address).replace(UNIT_PREFIX, '').split(',')[0].trim() : '';
+      r.alsoListed = (byA.get(addressKey(r.address)) || []).filter((x) => x.id !== r.id).map((x) => ({ id: x.id, agency: x.agency || '', price: x.price || '' }));
+    }
+    return rows;
+  };
+
+  // Moving from your current lease: nights paying two rents (overlap) or with nowhere (gap).
+  // Your lease covers through `leaseEnd`; the new one starts on its available date (today if now).
+  const leaseFit = (r, leaseEnd, now = new Date()) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(leaseEnd || '')) || !(r.avail instanceof Date) || isNaN(r.avail)) return null;
+    const end = dayNum(new Date(`${leaseEnd}T00:00:00`)), start = Math.max(dayNum(r.avail), dayNum(now));
+    const overlap = Math.max(0, end - start + 1), gap = Math.max(0, start - end - 1);
+    return { overlap, gap, cost: overlap && Number.isFinite(r.priceNum) ? Math.round((overlap * r.priceNum) / 7) : 0 };
+  };
+  const fitLabel = (f) => (!f ? '' : f.overlap ? `${plural(f.overlap, 'day')} overlap${f.cost ? ` ≈ ${money(f.cost)}` : ''}` : f.gap ? `${plural(f.gap, 'night')} gap` : 'starts right after your lease');
+  const fitKey = (f) => (!f ? Infinity : f.gap ? 1e9 + f.gap : f.cost + f.overlap / 100);
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
   const ppbLabel = (r) => (+r.beds > 1 && Number.isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
@@ -1895,7 +1998,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1939,11 +2042,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Colours are tokens on #rf-panel so the dark scheme only swaps values.
   const css = `
-  #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
+  #rf-panel,#rf-launch,#rf-lbar,#rf-remind{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
     --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
     --rf-err:#c00;--rf-tag:#eee;--rf-up:#b34700;--rf-star-fg:#8a6100}
   @media (prefers-color-scheme: dark){
-    #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;
+    #rf-panel,#rf-launch,#rf-lbar,#rf-remind{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;
       --rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e}
   }
   #rf-launch{position:fixed;right:20px;bottom:20px;z-index:2147483000;padding:11px 16px;border:0;border-radius:999px;
@@ -2069,6 +2172,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-planner{padding:8px 12px}
+  .rf-warnbar{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;color:var(--rf-err);background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
+  .rf-warnbar .rf-warn-msg{flex:1}
+  .rf-warn-x{border:0;background:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;min-width:24px;min-height:24px}
+  .rf-group,.rf-nudge{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px}
+  .rf-nudge{padding:6px 8px;border-radius:6px;background:var(--rf-hover)}
+  @media (max-width:480px){ .rf-group,.rf-nudge{margin-left:9px} }
   .rf-checks{display:flex;flex-wrap:wrap;gap:4px;margin:6px 9px 0 124px}
   .rf-checks .rf-chip{font-size:11px;padding:2px 7px}
   .rf-checks .rf-chip[data-state=no]{text-decoration:none;background:transparent;color:var(--rf-err);border-color:var(--rf-err)}
@@ -2084,6 +2193,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)}
   .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  #rf-remind{position:fixed;right:20px;bottom:72px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:min(340px,calc(100vw - 32px));
+    padding:10px 12px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
   #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
     padding:8px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
@@ -2244,7 +2355,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
         <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
           <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
-          <option value="-">Not started</option>
+          <option value="-">Not started</option><option value="!">Needs action</option>
         </select>
         <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
         <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
@@ -2290,8 +2401,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
             <label>Distance from<input type="text" id="rf-anchor" placeholder="-33.87, 151.21 or a Google Maps link" autocomplete="off"></label>
             <label>Max km<input type="number" min="0" step="1" id="rf-maxKm" inputmode="decimal"></label>
           </div>
+          <div class="rf-grid3">
+            <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
+          </div>
+          <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
+          <input type="hidden" id="rf-building">
           <label>Other places (optional, one per line)<textarea id="rf-places" rows="2" placeholder="Work: -33.87, 151.21&#10;Uni: Google Maps link"
             title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
+          <div class="rf-meta rf-places-fb" aria-live="polite"></div>
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
@@ -2310,12 +2427,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
+          <label class="rf-check"><input type="checkbox" id="rf-remindSaved">Remind me to check saved searches (at most daily)</label>
           <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
             <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
           <fieldset class="rf-weights"><legend>Best match: how much each counts</legend>
             ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
               <option value="0">Ignore</option><option value="1">Less</option><option value="2">Normal</option><option value="3">More</option></select></label>`).join('')}
           </fieldset>
+          <label>My current lease ends (optional)<input type="date" id="rf-leaseEnd" title="Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap"></label>
           <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
           <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
             title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>
@@ -2342,6 +2461,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
             <option value="value">Best value vs median</option>
             <option value="distance">Nearest</option>
             <option value="allnear">Nearest to all places</option>
+            <option value="fit">Least overlap with my lease</option>
             <option value="match">Best match</option>
           </select></label>
         </div>
@@ -2372,6 +2492,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <button class="rf-btn" data-share="add">Add to my shortlist</button>
         <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
       </div>
+      <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
       <div class="rf-status" role="status" aria-live="polite"></div>
       <div class="rf-active" hidden aria-label="Active filters"></div>
       <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
@@ -2387,6 +2508,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       refresh: panel.querySelector('#rf-refresh'),
       exports: [...panel.querySelectorAll('[data-export]')],
       status: panel.querySelector('.rf-status'),
+      warnbar: panel.querySelector('.rf-warnbar'),
       active: panel.querySelector('.rf-active'),
       controls: panel.querySelector('.rf-controls'),
       tabs: [...panel.querySelectorAll('[role=tab]')],
@@ -2547,12 +2669,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     // The blur after typing fires "change" with nothing new; re-rendering then would
     // replace the list between mousedown and mouseup and swallow the user's click.
     let lastSig = JSON.stringify(cfg);
+    // Leaving a typed field mid-click (mousedown -> blur -> change) must not re-render the list
+    // under the pointer, or the click is lost: renders asked for during a press wait for its end.
+    let pressing = false, renderAfterPress = false;
+    const typed = (el) => el?.tagName === 'TEXTAREA' || el?.type === 'text' || el?.type === 'number' || el?.type === 'date';
+    const renderNow = (defer) => { if (defer && pressing) renderAfterPress = true; else showResults(); };
+    panel.addEventListener('pointerdown', () => { pressing = true; }, true);
+    const endPress = () => setTimeout(() => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } }, 0);
+    for (const type of ['pointerup', 'pointercancel', 'click']) document.addEventListener(type, endPress, true); // pointerup's timeout runs after its click
     const onChange = (e) => {
       const next = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
       const sig = JSON.stringify(next);
       if (sig === lastSig) {
         // Same config: only flush a pending debounced render (eg Enter right after typing).
-        if (t && e?.type === 'change') { clearTimeout(t); t = null; if (cache) showResults(); }
+        if (t && e?.type === 'change') { clearTimeout(t); t = null; if (cache) renderNow(typed(e.target)); }
         return;
       }
       lastSig = sig;
@@ -2570,12 +2700,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       scheduleAnnotate();
       if (e?.target === ui.annotateBox && cfg.annotate) ensureVisiblePage();
       if (!cache) return;
-      if (e?.type === 'input') t = setTimeout(() => { t = null; showResults(); }, INPUT_DEBOUNCE_MS); // debounce typing
-      else showResults(); // re-filter without refetching
+      if (e?.type === 'input') t = setTimeout(() => { t = null; renderNow(true); }, INPUT_DEBOUNCE_MS); // debounce typing
+      else renderNow(typed(e?.target)); // re-filter without refetching
     };
     for (const [, el] of fields) {
       el.addEventListener('change', onChange);
-      if (el.type === 'text' || el.type === 'number') el.addEventListener('input', onChange);
+      // Typed fields (textareas too) apply as you type, so blurring one doesn't re-render mid-click.
+      if (el.type === 'text' || el.type === 'number' || el.tagName === 'TEXTAREA') el.addEventListener('input', onChange);
     }
 
     // Shortlist / hide / note: one delegated handler; re-render keeps scroll position.
@@ -2591,11 +2722,45 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }
       const drop = e.target.closest('[data-drop-chip]');
       if (drop) return ui.active.querySelector(`[data-chip="${drop.dataset.dropChip}"]`)?.click();
+      const na = e.target.closest('[data-na]');
+      if (na) { // after-inspection prompt
+        const id = na.closest('.rf-item').dataset.id;
+        if (na.dataset.na === 'yes') marks.setStatus(id, 'inspected');
+        else if (na.dataset.na === 'applied') marks.setStatus(id, 'applied');
+        else marks.answerInspect(id);
+        refreshMarks();
+        setStatus(na.dataset.na === 'no' ? 'Noted.' : `Marked ${na.dataset.na === 'yes' ? 'inspected: tick the checklist while it\'s fresh' : 'applied'}.`);
+        return;
+      }
+      const bldg = e.target.closest('[data-act=bldg]');
+      if (bldg) { // same building: keyword on the street address (the listing text includes it)
+        const r = rowById(bldg.closest('.rf-item').dataset.id);
+        if (!r?.buildingAddr) return;
+        write(panel.querySelector('#rf-building'), `${buildingKey(r.address)}|${r.buildingAddr}`);
+        onChange({ type: 'change' });
+        return setStatus(`Showing the ${r.buildingN} listings at ${r.buildingAddr}. Remove the Building chip to go back.`);
+      }
       const b = e.target.closest('.rf-acts button');
       if (!b) return;
       const id = b.closest('.rf-item')?.dataset.id;
       if (!id) return;
       if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
+      if (b.dataset.act === 'anchor' || b.dataset.act === 'place') {
+        const r = rowById(id) || ui.rows?.find((x) => x.id === id);
+        if (r?.lat == null) return;
+        const at = `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`;
+        let msg = `Measuring from ${r.address}.`;
+        if (b.dataset.act === 'anchor') write(panel.querySelector('#rf-anchor'), at);
+        else {
+          const lines = String(cfg.places || '').split('\n').filter((l) => l.trim());
+          if (lines.length >= PLACES_MAX) return setStatus(`Other places holds ${PLACES_MAX}; remove one first.`, true);
+          write(panel.querySelector('#rf-places'), [...lines, `${clip(String(r.address).split(',')[0], 24).replace(/:/g, '')}: ${at}`].join('\n'));
+          msg = 'Added to Other places (under More filters).';
+          ui.paintPlaces();
+        }
+        onChange({ type: 'change' });
+        return setStatus(msg);
+      }
       if (b.dataset.act === 'enq') {
         const r = rowById(id) || ui.rows?.find((x) => x.id === id);
         if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
@@ -2632,6 +2797,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
     });
     ui.list.tabIndex = -1;
+    // Other places: say what was understood, so a mistyped line isn't silently ignored.
+    const placesBox = panel.querySelector('#rf-places'), placesFb = panel.querySelector('.rf-places-fb');
+    const paintPlaces = () => {
+      const lines = placesBox.value.split('\n').filter((l) => l.trim());
+      const ok = parsePlaces(placesBox.value);
+      placesFb.textContent = !lines.length ? '' : `${ok.map((p) => `${p.label} ✓`).join(' · ')}${lines.length > ok.length ? `${ok.length ? ' · ' : ''}${plural(lines.length - ok.length, 'line')} not understood${lines.length > PLACES_MAX ? ` (at most ${PLACES_MAX})` : ''}` : ''}`;
+      placesFb.classList.toggle('rf-warn-t', lines.length > ok.length);
+    };
+    placesBox.addEventListener('input', paintPlaces);
+    ui.paintPlaces = paintPlaces;
+    paintPlaces();
+    ui.warnbar.querySelector('.rf-warn-x').addEventListener('click', () => { ui.warnDismissed = ui.warnbar.querySelector('.rf-warn-msg').textContent; ui.warnbar.hidden = true; });
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
     if (typeof IntersectionObserver === 'function') {
       const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: ui.list, rootMargin: '600px 0px' });
@@ -2885,7 +3062,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   const shortlistRows = (all = marks.shortlist()) => {
     const f = ui.slFilter.value, q = ui.slQuery.value;
-    return all.filter((r) => (!f || (f === '-' ? !r.appStatus : r.appStatus === f)) && textMatch(r, q));
+    return all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : r.appStatus === f)) && textMatch(r, q));
   };
 
   // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
@@ -2980,7 +3157,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const rows = shortlistRows(all);
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
     // Distance for the shortlist too (applyFilters isn't run over it).
-    for (const r of rows) setDistances(r, cfg);
+    for (const r of rows) { setDistances(r, cfg); r.fit = leaseFit(r, cfg.leaseEnd); }
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
@@ -3088,6 +3265,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; };
 
+  // Data-format warnings sit in their own banner, so the status line keeps "N of M match".
+  const warnings = {};
+  const setWarn = (kind, msg) => {
+    if (msg) warnings[kind] = msg; else delete warnings[kind];
+    const text = Object.values(warnings).join(' ');
+    ui.warnbar.hidden = !text || ui.warnDismissed === text;
+    ui.warnbar.querySelector('.rf-warn-msg').textContent = text;
+  };
   const setStatus = (msg, isErr) => {
     ui.status.textContent = msg;
     ui.status.classList.toggle('err', !!isErr);
@@ -3111,7 +3296,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : '') + matchHint);
     const warn = schemaWarnings(cache);
-    if (warn.length) setStatus(`REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.`, true);
+    setWarn('schema', warn.length ? `REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.` : '');
   }
 
   // Nothing matches: offer the filters whose removal brings back the most listings.
@@ -3193,6 +3378,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
     ['Agency', (r) => r.agency || '', null],
+    ['Lease', (r) => (r.lease ? leaseLabel(leaseFromCode(r.lease)).replace(/^Lease /, '') : ''), null],
+    ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
+    ['Apply via', (r) => r.applyVia || '', null],
     ['Status', (r) => statusLabel(r.appStatus), null],
     ['Checklist', (r) => checkSummary(r, checklistItems(cfg.checklist)), (r) => -Object.values(r.checks || {}).filter((v) => v === 'y').length, 'min'],
     ['Note', (r) => r.note || '', null],
@@ -3205,7 +3393,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
     };
     const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
-    const body = COMPARE_ROWS.filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length)).map(([label, show, score]) => {
+    const body = COMPARE_ROWS.filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!cfg.leaseEnd)).map(([label, show, score]) => {
       const b = score ? best(score) : null;
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
     }).join('');
@@ -3219,6 +3407,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const shown = ui.list.querySelectorAll('.rf-item').length;
     ui.list.querySelector('.rf-more-btn')?.remove();
     ui.list.insertAdjacentHTML('beforeend', itemsHtml(ui.rows.slice(shown, shown + RENDER_CHUNK)) + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
+  }
+
+  // Money facts in one line: move-in (bond flag), lease overlap/gap, share of income, vs median.
+  function moneyLine(r, inc, med) {
+    const parts = [
+      Number.isFinite(r.upfront) ? `Move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}` : '',
+      r.fit ? `<span title="Against your current lease end (Settings)"${r.fit.gap ? ' class="rf-warn"' : ''}>${esc(fitLabel(r.fit))}</span>` : '',
+      inc != null ? `<span${inc > RENT_STRESS_PCT ? ' class="rf-warn-t"' : ''}>${inc}% of income</span>` : '',
+      med ? `<span class="rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(med)}</span>` : '',
+    ].filter(Boolean);
+    return parts.length ? `<div class="rf-meta">${parts.join(' · ')}</div>` : '';
   }
 
   function itemsHtml(rows) {
@@ -3242,11 +3441,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency, ui.view === 'shortlist' && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '',
             r.photos != null ? `${plural(r.photos, 'photo')}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
-          ${am.length ? `<div class="rf-tags">${am.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+          ${am.length || r.applyVia || r.lease ? `<div class="rf-tags">${[...am, r.lease ? leaseLabel(leaseFromCode(r.lease)) : '', r.applyVia ? `Apply: ${r.applyVia}` : ''].filter(Boolean).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${wt.length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${wt.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
-          ${med ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(med)}</div>` : ''}
-          ${inc != null ? `<div class="rf-meta${inc > RENT_STRESS_PCT ? ' rf-warn-t' : ''}">${inc}% of income</div>` : ''}
-          ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
+          ${moneyLine(r, inc, med)}
           ${r.inspections?.length || r.listed || r.lastSeen || r.openedAt || r.hideReason ? `<div class="rf-meta">${esc([
             r.lastSeen && ui.view === 'shortlist' ? `seen ${ago(Date.now() - r.lastSeen)}` : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
@@ -3256,6 +3453,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>
+      ${r.buildingN || r.alsoListed?.length ? `<div class="rf-group">${r.buildingN ? `<button type="button" class="rf-chip" data-act="bldg" title="Show only listings at ${esc(r.buildingAddr)}">${r.buildingN} in this building</button>` : ''}${r.alsoListed?.length
+        ? ` <span class="rf-meta">Also listed ${r.alsoListed.map((x) => `${x.agency ? `by ${esc(x.agency)} ` : ''}${x.price ? `at ${esc(x.price)}` : ''}`).join('; ')}</span>` : ''}</div>` : ''}
+      ${ui.view === 'shortlist' && needsAction(r) === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
+      ${ui.view === 'shortlist' && needsAction(r) === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(Date.now() - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${r.starred && ui.view === 'shortlist' ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checklistItems(cfg.checklist).map((k) => {
         const v = r.checks?.[k];
         return `<button type="button" class="rf-chip" data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
@@ -3270,6 +3471,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ${ui.view === 'shortlist' ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
+          ${r.lat != null ? `<button data-act="anchor" title="Measure distances from this listing">Measure from here</button><button data-act="place" title="Add this listing's location to Other places">Add as a place</button>` : ''}
           ${r.suburb && ui.view !== 'shortlist' ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
           ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
         </div></details>`}
@@ -3353,6 +3555,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     cache = rows;
     applySnap(snap);
     withMedians(rows);
+    withBuildings(rows);
     truncated = trunc;
     cacheKey = key;
     ui.refresh.hidden = false;
@@ -3422,7 +3625,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (res.sample) rawSample = res.sample;
       let drops = [];
       try { drops = health.record(res.rows); } catch (e) { logError(`health: ${e.message}`); }
-      if (drops.length) queueMicrotask(() => setStatus(`REA may have changed its data: ${drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`).join('; ')}. Run reaFilter.selfcheck() in the console and report it.`, true));
+      setWarn('drift', drops.length ? `REA may have changed its data: ${drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`).join('; ')}. Run reaFilter.selfcheck() in the console and report it.` : '');
       store.set(key, res.rows, res.truncated);
       adopt(key, res.rows, res.truncated, '', cfg.remember ? snaps.save(key, res.rows, res.truncated) : null, true);
     } catch (err) {
@@ -3502,6 +3705,32 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
   // Minimised state is remembered: the bar can sit over REA's own buttons on small screens.
   const LBAR_MIN_KEY = `${TOOL_PREFIX}lbar-min`;
+  // Once a day at most, on a search page: saved searches not checked for a day get a small
+  // prompt by the launcher. Nothing is fetched unless you click "Check now".
+  const REMIND_KEY = `${TOOL_PREFIX}remind-at`;
+  const REMIND_EVERY_MS = DAY_MS;
+  function remindSaved() {
+    if (!cfg.remember || !cfg.remindSaved || !isSearchPage(location.href)) return;
+    const entries = Object.values(snaps.exportData());
+    const newest = Math.max(0, ...entries.map((e) => e.at));
+    const remind = keyStore(storageOr('localStorage'), REMIND_KEY);
+    if (!entries.length || Date.now() - newest < REMIND_EVERY_MS || Date.now() - (+remind.get() || 0) < REMIND_EVERY_MS) return;
+    remind.set(String(Date.now()));
+    const tip = Object.assign(document.createElement('div'), { id: 'rf-remind' });
+    tip.setAttribute('role', 'status');
+    tip.innerHTML = `${esc(plural(entries.length, 'saved search', 'es'))}, last checked ${esc(ago(Date.now() - newest))}.
+      <button type="button" data-r="check" class="rf-btn">Check now</button><button type="button" data-r="later" class="rf-btn sec">Later</button>`;
+    tip.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-r]');
+      if (!b) return;
+      tip.remove();
+      if (b.dataset.r !== 'check') return;
+      ui.setOpen(true);
+      ui.saved.open = true;
+      checkSaved(ui.saved.querySelector('[data-saved-check]'));
+    });
+    document.body.appendChild(tip);
+  }
   const lbarKey = keyStore(storageOr('localStorage'), LBAR_MIN_KEY);
   const lbarMin = { get: () => lbarKey.get() === '1', set: (v) => (v ? lbarKey.set('1') : lbarKey.clear()) };
   function renderListingBar({ onlyIfMoved = false } = {}) {
@@ -3800,6 +4029,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       window.addEventListener('storage', (e) => { if ((e.key === MARKS_KEY || e.key === null) && document.getElementById('rf-lbar')) { marks.invalidate(); renderListingBar(); } });
     });
     step('saved', renderSaved);
+    step('remind', remindSaved);
     step('annotate', ensureVisiblePage);
   }
 })();
