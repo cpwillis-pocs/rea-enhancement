@@ -2,7 +2,7 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
-## Unreleased
+## 2.9.0
 
 - Listing actions now sit in a row under each listing (always visible, keyboard and touch friendly): Shortlist, Hide, Note, Copy; Hide suburb / Hide agency behind "⋯".
 - **Copy** a listing's summary (price, address, availability, beds, move-in, inspections, link) for messaging; `c` key.
