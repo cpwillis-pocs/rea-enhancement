@@ -22,7 +22,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
 - Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type, photo required, inspection on a given day, listed over 3 weeks ago.
 - Keywords over headline, description, address and features: `pool -studio "north facing"`.
-- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
+- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
 - Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost; hover it to see the parts.
@@ -54,6 +54,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
 - **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time).
+- **Opened tracking**: "opened 2d ago" on listings you've looked at, and a **Not opened yet** filter.
+- **Hide with a reason** (too small, location, condition, price) so you remember why later.
+- **Application follow-up**: time since you applied, a "follow up?" nudge, and your record with each agency.
+- **Copy enquiry**: a ready-made message for the agent from a template you can edit.
 - **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly.
 - Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 

@@ -2,6 +2,21 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.14.0
+
+- **Opened tracking**: listings you've opened (from the drawer, REA's cards or the listing page) show "opened 2d ago"; new filter **Not opened yet**.
+- **More amenity chips**: study, ensuite, heating, gas cooking, lift, secure parking.
+- **Hide with a reason** (too small, location, condition, price, other) straight from the Undo prompt; shown on hidden listings and kept in backups.
+- **Application follow-up**: when you set a status the time is shown ("applied 6d ago"), with a "follow up?" nudge after 5 days; your record with each agency ("you: 3 applied, 1 declined") appears on the shortlist.
+- **Copy enquiry**: a ready-to-paste message for the agent (in the ⋯ menu), with an editable template in Settings.
+- **Details changes**: a listing whose amenities or heads-up terms change between searches is tagged ("now Pets OK", "fee mentioned added") and counts under **Price, date or details changed recently**.
+- The Shortlist bar is shorter: CSV, Calendar, Share link, Print, Backup and Restore sit under **More ▾**.
+- Market view adds a **by-suburb** table for multi-suburb searches.
+- "Nothing matches" now offers the filters to drop that would bring listings back; Bulk menus say how many listings they'll touch.
+- Faster: listings render 50 at a time and load as you scroll; off-screen listings skip layout (about 45 ms to 15 ms per filter change at 500 listings).
+- Accessibility: page behind the full-screen drawer on phones is inert (Tab can't escape); Esc in the ⋯ menu closes just the menu; Results/Shortlist are proper tabs (arrow keys); stronger contrast for price/date changes, warnings, the "no longer listed" tag, soft text and input borders in light and dark mode; larger touch targets on phones; Sort wraps on very narrow screens; more room for the list in short windows or when zoomed in.
+- Fixed: a shortlisted "no longer listed" listing showed as not shortlisted (clicking ☆ removed it); a relisted listing that inherited "hidden" couldn't be unhidden; a partial view of one of two same-address listings could be taken as a relist; the listing bar could keep an empty summary after quick in-app navigation; a restored preset with an invalid sort could break the drawer; "20th Dec" read in January was taken as next December; 31/13 was accepted as a date; "$2,600 pm" rents were read as weekly; "Inspecting on" used your browser's time zone rather than the listing's; a crafted backup URL could add events to a calendar export; CSV showed an undated "-" as "'-"; Re-check could replace a shortlisted listing's agency and inspections with blanks; Alt+Shift+F was swallowed while typing.
+
 ## 2.13.2
 
 - Heads-up tags ignore good news next to a mention: "no application fee", "water usage not charged", "rent bidding is prohibited", "fee: nil", "no break lease fees", "we do not accept offers above". They also catch more phrasing ("6-12 month lease", "6mth lease", "water usage charges apply", "tenant pays water", "break-fee"). So **Hide if mentioned** no longer hides listings for their disclaimers.
