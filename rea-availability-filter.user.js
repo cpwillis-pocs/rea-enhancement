@@ -71,6 +71,7 @@
   const IMPORT_ROWS_MAX = 1000; // rows accepted per search from a backup
   const SEARCH_KEY_MAX = 2000; // longest search URL accepted from a backup
   const YEARLESS_ROLL_MS = 60 * DAY_MS; // "3 Jan" more than this far in the past means next year
+  const YEARLESS_BACK_MS = 300 * DAY_MS; // and more than this far ahead means last year
   const INSPECT_GRACE_MS = HOUR_MS; // an inspection that started this recently is still shown
   const BACKUP_MAX_BYTES = 5e6;
   const INPUT_DEBOUNCE_MS = 200;
@@ -159,6 +160,10 @@
     .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }))
     .filter((i) => i.label && (i.at == null || i.at >= Date.now() - INSPECT_GRACE_MS)).slice(0, INSPECT_KEEP);
   const clip = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : '');
+  // A sparser source (eg a property page without agency or inspections) updates what it has
+  // and keeps the rest of the stored summary.
+  const mergeSummary = (old, next) => ({ ...(isObj(old) ? old : {}),
+    ...Object.fromEntries(Object.entries(next).filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && !v.length))) });
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
@@ -167,7 +172,23 @@
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
-  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'as', 'ast']; // user choices a bulk action can change
+  const HIDE_REASONS = ['too small', 'location', 'condition', 'price', 'other'];
+  const FOLLOW_UP_DAYS = 5; // an application with no answer after this long gets a "follow up?" nudge
+  const needsFollowUp = (r, now = Date.now()) => r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
+  // Your track record per agency across the shortlist: { applied, approved, declined } by agency name.
+  const agencyRecord = (rows) => {
+    const out = new Map();
+    for (const r of rows) {
+      if (!r.agency || !['applied', 'approved', 'declined'].includes(r.appStatus)) continue;
+      const k = r.agency.trim().toLowerCase();
+      const v = out.get(k) || { applied: 0, approved: 0, declined: 0 };
+      v.applied++; if (r.appStatus !== 'applied') v[r.appStatus]++;
+      out.set(k, v);
+    }
+    return out;
+  };
+  const recordText = (v) => (v ? `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined` : ''}` : '');
+  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'as', 'ast']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const keep = (e) => e.s || e.h || e.n || e.as;
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
@@ -184,8 +205,27 @@
     inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
+  // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
+  const FEAT_V = 1; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const featSig = (r) => {
+    let a = 0, w = 0;
+    AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
+    const ws = String(r.watch || '').split(',');
+    WATCHOUTS.forEach((x, i) => { if (ws.includes(x.id)) w |= 1 << i; });
+    return `${FEAT_V}:${a.toString(36)}:${w.toString(36)}`;
+  };
+  const featDiff = (from, to) => {
+    const [, a0, w0] = String(from).split(':').map((v, i) => (i ? parseInt(v, 36) || 0 : v));
+    const [, a1, w1] = String(to).split(':').map((v, i) => (i ? parseInt(v, 36) || 0 : v));
+    const out = [];
+    AMENITIES.forEach((x, i) => { const b = 1 << i; if ((a1 & b) && !(a0 & b)) out.push(`now ${x.yes}`); else if ((a0 & b) && !(a1 & b)) out.push(`no longer ${x.yes}`); });
+    WATCHOUTS.forEach((x, i) => { const b = 1 << i; if ((w1 & b) && !(w0 & b)) out.push(`${x.label.toLowerCase()} added`); else if ((w0 & b) && !(w1 & b)) out.push(`${x.label.toLowerCase()} removed`); });
+    return out.join(', ');
+  };
   const YEARLESS_SKIP_DAYS = 300; // a jump this far out from "now" is a yearless date rolling over
   const dayNum = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS; // local calendar day, DST-proof
+  // h: 1 hidden, 0 explicitly shown (overrides an inherited hide), absent: inherit from a relisted-from listing.
+  const hiddenOf = (e, was) => e?.h === 1 || (e?.h !== 0 && !!was?.h && !e?.s);
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
@@ -215,7 +255,9 @@
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     return {
       invalidate() { data = null; },
-      observe(rows) {
+      // `full`: rows from a complete crawl of a search. Only then is a missing listing evidence of
+      // a relist; one page (annotate, boot, re-check) says nothing about the rest.
+      observe(rows, { full = false, features = true } = {}) {
         const { m } = fresh();
         const t = now();
         const batch = new Set(rows.map((r) => r.id));
@@ -224,7 +266,7 @@
           const e = m[r.id] || (m[r.id] = { f: t });
           e.l = t;
           delete e.x; // seen again, so not gone
-          if (e.s) e.d = summary(r); // keep the shortlist's copy current
+          if (e.s) e.d = mergeSummary(e.d, summary(r)); // keep the shortlist's copy current, never poorer
           if (Number.isFinite(r.priceNum)) {
             if (e.p != null && e.p !== r.priceNum) {
               // History only once the price actually changes (seeded with the previous price), so
@@ -246,6 +288,14 @@
             if (e.av != null && e.av !== av && !(av === 0 && e.av <= today) && !rolled) { e.pav = e.av; e.avt = t; e.avd = av > (e.av || today) ? 'later' : 'sooner'; }
             if (!rolled) e.av = av;
           }
+          // Amenities / heads-up as a compact signature; a change ("now pets OK", "fee now mentioned")
+          // is kept like a price change. Only compared between search results (features: false for
+          // property pages, whose fuller text would read as changes), and only with the same detector.
+          if (features && r.amen) {
+            const sig = featSig(r);
+            if (e.fs && e.fs !== sig && e.fs.startsWith(`${FEAT_V}:`)) { e.pfs = e.fs; e.fst = t; }
+            e.fs = sig;
+          }
           // Same address under a new id = relisted: remember which listing it replaces.
           const ak = addressKey(r.address);
           if (ak) {
@@ -254,8 +304,9 @@
             const prev = d.ad[ak];
             // Only a relist if the old listing has stopped appearing: two live listings at one
             // address (units listed without a unit number) are different places.
-            if (prev && prev !== r.id && m[prev] && !e.rl && !batch.has(prev) && t - (m[prev].l || 0) > RELIST_GAP_MS) e.rl = prev;
-            d.ad[ak] = r.id;
+            if (full && prev && prev !== r.id && m[prev] && !e.rl && !batch.has(prev) && t - (m[prev].l || 0) > RELIST_GAP_MS) e.rl = prev;
+            if (e.rl && batch.has(e.rl)) delete e.rl; // the "old" listing is live again: two places, not a relist
+            if (full || !prev || batch.has(prev) || !m[prev]) d.ad[ak] = r.id; // a partial view doesn't move the address on
           }
         }
         save();
@@ -267,14 +318,17 @@
           const e = m[r.id];
           const was = e?.rl ? m[e.rl] : null; // the listing this one relists, if any
           r.starred = !!e?.s;
-          r.hidden = !!e?.h || !!(was?.h && !e?.s); // ruled out before: stays out when relisted
+          r.hidden = hiddenOf(e, was); // ruled out before: stays out when relisted, unless you unhid it
           r.relisted = was ? { price: was.ps || '', hidden: !!was.h } : null;
           r.priceHistory = Array.isArray(e?.ph) ? e.ph : [];
           r.note = e?.n || '';
           r.appStatus = e?.as || '';
+          r.appAt = e?.as && e.ast ? e.ast : null;
           r.agencyHidden = !!(r.agency && ag?.[agencyKey(r.agency)]);
           r.suburbHidden = !!(r.suburb && sb?.[agencyKey(r.suburb)]);
           r.firstSeen = e?.f ? new Date(e.f) : null;
+          r.openedAt = e?.o ? new Date(e.o) : null;
+          r.hideReason = r.hidden && e?.hr ? e.hr : '';
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
           r.prevPrice = e && e.pp != null && e.pp !== e.p && e.pt && t - e.pt < PRICE_CHANGE_MS ? e.pps || `$${e.pp}` : '';
@@ -282,6 +336,7 @@
           const availMoved = e && e.pav != null && e.avt && t - e.avt < PRICE_CHANGE_MS && e.pav !== e.av;
           r.prevAvail = availMoved ? (e.pav === 0 ? 'now' : new Date(e.pav * DAY_MS).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' })) : '';
           r.availDir = availMoved ? e.avd || ((e.av || 0) > (e.pav || 0) ? 'later' : 'sooner') : '';
+          r.featChange = e?.pfs && e.fs && e.fst && t - e.fst < PRICE_CHANGE_MS ? featDiff(e.pfs, e.fs) : '';
         }
         return rows;
       },
@@ -289,7 +344,9 @@
       toggle(id, k, row) {
         const { m } = fresh();
         const e = entry(m, id);
-        e[k] = e[k] ? 0 : 1;
+        // Hide flips what you see, including a hide inherited from the listing this one relists.
+        if (k === 'h') e.h = hiddenOf(e, e.rl ? m[e.rl] : null) ? 0 : 1;
+        else e[k] = e[k] ? 0 : 1;
         if (k === 's') {
           if (e.s) { e.st = now(); if (row) e.d = summary(row); } else { delete e.st; }
         }
@@ -309,6 +366,19 @@
         const { m } = fresh();
         const e = entry(m, id);
         if (gone) e.x = now(); else delete e.x;
+        save();
+      },
+      // You opened the listing (from the drawer, a card or its page): "opened 2d ago", Not-opened filter.
+      setHideReason(id, reason) {
+        const { m } = fresh();
+        const e = entry(m, id);
+        if (HIDE_REASONS.includes(reason)) e.hr = reason; else delete e.hr;
+        save();
+      },
+      setOpened(id) {
+        if (!isListingId(id)) return;
+        const { m } = fresh();
+        entry(m, id).o = now();
         save();
       },
       setNote(id, text) {
@@ -333,7 +403,7 @@
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
-              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', listed: null, lastSeen: e.l || null,
+              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
               gone: !!e.x, goneAt: e.x || null,
               inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
@@ -344,7 +414,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -361,7 +431,7 @@
           if (!isListingId(id) || !e || typeof e !== 'object') continue;
           const cur = entry(m, id);
           if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
-          if (e.h) cur.h = 1;
+          if (e.h) { cur.h = 1; if (HIDE_REASONS.includes(e.hr)) cur.hr = e.hr; }
           if (typeof e.x === 'number') cur.x = e.x;
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
@@ -672,7 +742,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-  const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : '');
+  const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) && !/[\s\u0000-\u001f"<>]/.test(u) ? u : ''); // no CR/LF smuggling into ICS/CSV
 
   // ------------------------------------------------------------ extraction
 
@@ -692,7 +762,7 @@
     const num = display.match(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})\b/);
     if (num) {
       const d = new Date(+num[3] < 100 ? 2000 + +num[3] : +num[3], +num[2] - 1, +num[1]);
-      return isNaN(d) || d.getDate() !== +num[1] ? null : clamp(d);
+      return isNaN(d) || d.getDate() !== +num[1] || d.getMonth() !== +num[2] - 1 ? null : clamp(d); // 31/13 is not 31 Jan
     }
     // "12th Oct 2026", "1st of December", "October 12, 2026". Every candidate is tried so
     // words like "Available" (-> "ava") or weekdays don't shadow the real month.
@@ -707,6 +777,7 @@
       let year = yr ? +yr : today.getFullYear();
       let d = new Date(year, month, +day);
       if (!yr && today - d > YEARLESS_ROLL_MS) d = new Date(++year, month, +day);
+      else if (!yr && d - today > YEARLESS_BACK_MS) d = new Date(--year, month, +day); // "20 Dec" read on 5 Jan: last month
       if (d.getDate() !== +day) return null; // 31 Feb, 29 Feb in a non-leap year
       return clamp(d);
     }
@@ -725,7 +796,7 @@
     const tail = s.slice(m.index + m[0].length).split('$')[0];
     const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
     if (!weekly) {
-      if (/\b(per\s*month|p\.?\s*c\.?\s*m|pcm|monthly|a\s*month)\b|\/\s*m(on)?th\b/i.test(tail)) v = (v * 12) / 52;
+      if (/\b(per\s*(?:calendar\s*)?month|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
       else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(ea)?r\b/i.test(tail)) v /= 52;
     }
     return Math.round(v);
@@ -970,6 +1041,17 @@
       pos: /\bbuilt[- ]in (?:robes?|wardrobes?)\b|\bbirs?\b|\bwalk[- ]in (?:robe|wardrobe)\b/ },
     { id: 'pool', label: 'Pool', yes: 'Pool', neg: /\bno (?:swimming |lap |plunge )?pool\b/,
       pos: /\b(?<!(?:car|walk to [\w' ]{0,30}|near(?:by)? [\w' ]{0,20}|close to [\w' ]{0,30}) )(?:swimming |lap |plunge )?pool\b(?! tables?|side)/ },
+    { id: 'study', label: 'Study', yes: 'Study', neg: /\bno (?:study|home office)\b/,
+      pos: /\b(?<!\b(?:to|and|or|while you|students who) )(?:study(?: room| nook| area)?|home office)\b(?! (?:at|nearby|precinct|centre))/ },
+    { id: 'ensuite', label: 'Ensuite', yes: 'Ensuite', neg: /\bno en[- ]?suite\b/, pos: /\ben[- ]?suited?\b/ },
+    { id: 'heating', label: 'Heating', yes: 'Heating', neg: /\bno heat(?:ing|er)\b/,
+      pos: /\b(?<!water )(?:ducted |gas |hydronic |underfloor |floor |split[- ]system |panel )?heat(?:ing|ers?)\b(?! (?:bill|costs?))|\b(?:open |gas |wood )?fireplace\b|\breverse[- ]cycle\b/ },
+    { id: 'gas', label: 'Gas cooking', yes: 'Gas cooking', neg: /\bno gas\b|\belectric (?:cooking|cooktop|stove) only\b/,
+      pos: /\bgas (?:cooking|cook ?top|stove|hob|oven|burners?|kitchen|appliances)\b/ },
+    { id: 'lift', label: 'Lift', yes: 'Lift', neg: /\bno (?:lift|elevator)\b|\bwalk[- ]up\b|\bstairs only\b/,
+      pos: /\blift (?:access|in (?:the )?building|to all (?:levels|floors)|serviced)\b|\blift[- ]serviced\b|\belevators?\b/ },
+    { id: 'parking', label: 'Secure parking', yes: 'Secure parking', neg: /\bno (?:off[- ]street |secure )?parking\b|\bstreet parking only\b/,
+      pos: /\bsecure(?:d)? (?:car ?park(?:ing|s)?|parking|garage|basement(?: parking)?|car ?space)\b|\b(?:remote|lock)[- ]up garage\b|\bremote[- ]controlled? garage\b|\bsecurity (?:car ?park|parking|garage)\b/ },
   ];
   // "X: No" per amenity, built once.
   for (const a of AMENITIES) a.kvNo = new RegExp(`(?:${a.pos.source})${AMEN_NO}`);
@@ -1169,22 +1251,22 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
-    remember: true, newOnly: false, changedOnly: false, noWatch: '', showGone: false, income: '',
+    remember: true, enquiry: '', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', showGone: false, income: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
   // keyword: null) falls back to the default instead of throwing on every render.
   const sanitizeCfg = (c) => (c && typeof c === 'object'
-    ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k]).map((k) => [k, c[k]]))
+    ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))).map((k) => [k, c[k]]))
     : {});
 
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'noWatch', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
-  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'income']; // Clear keeps your "from" point
+    'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'unopenedOnly', 'noWatch', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
+  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'income', 'enquiry']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -1283,8 +1365,8 @@
     from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
     bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
-    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has photo',
-    exactOnly: () => 'No nearby suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only',
+    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has a photo',
+    exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet',
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
   const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'maxKm', 'withinDays'];
@@ -1359,7 +1441,22 @@
       else later.n++;
     }
     const all = uniq.map((r) => r.priceNum).filter(Number.isFinite).sort((a, b) => a - b);
-    return { n: uniq.length, median: all.length >= MEDIAN_MIN ? quantile(all, 0.5) : null, byBeds, byWeek: [...weeks, later, unknown] };
+    // Per suburb (only worth showing when the search spans several): count, median rent and $/bed.
+    const subs = new Map();
+    for (const r of uniq) {
+      const k = String(r.suburb || '').trim();
+      if (!k) continue;
+      if (!subs.has(k)) subs.set(k, { suburb: k, n: 0, rents: [], ppb: [] });
+      const g = subs.get(k);
+      g.n++;
+      if (Number.isFinite(r.priceNum)) g.rents.push(r.priceNum);
+      if (Number.isFinite(r.ppb)) g.ppb.push(r.ppb);
+    }
+    const bySuburb = subs.size > 1 ? [...subs.values()].sort((a, b) => b.n - a.n || a.suburb.localeCompare(b.suburb)).map(({ suburb, n, rents, ppb }) => {
+      rents.sort((x, y) => x - y); ppb.sort((x, y) => x - y);
+      return { suburb, n, median: rents.length >= MEDIAN_MIN ? quantile(rents, 0.5) : null, ppb: ppb.length >= MEDIAN_MIN ? quantile(ppb, 0.5) : null };
+    }) : [];
+    return { n: uniq.length, median: all.length >= MEDIAN_MIN ? quantile(all, 0.5) : null, byBeds, bySuburb, byWeek: [...weeks, later, unknown] };
   };
 
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
@@ -1394,9 +1491,9 @@
 
   // Counts for the status line over the deduped rows.
   const diffStats = (rows) => {
-    let fresh = 0, moved = 0, redated = 0, hidden = 0;
-    for (const r of dedupe(rows)) { fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; redated += r.prevAvail ? 1 : 0; hidden += r.hidden ? 1 : 0; }
-    return { fresh, moved, redated, hidden };
+    let fresh = 0, moved = 0, redated = 0, featured = 0, hidden = 0;
+    for (const r of dedupe(rows)) { fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; redated += r.prevAvail ? 1 : 0; featured += r.featChange ? 1 : 0; hidden += r.hidden ? 1 : 0; }
+    return { fresh, moved, redated, featured, hidden };
   };
 
   const ago = (ms) => {
@@ -1411,7 +1508,7 @@
   // ("how many would this chip let back in?") can't disturb what's on screen.
   function applyFilters(rows, cfg, now = new Date()) {
     cfg = { ...DEFAULT_CFG, ...cfg };
-    return withScores(filterRows(rows, cfg, now), cfg).sort(SORTS[cfg.sort] || SORTS.avail);
+    return withScores(filterRows(rows, cfg, now), cfg).sort(Object.hasOwn(SORTS, cfg.sort) ? SORTS[cfg.sort] : SORTS.avail);
   }
 
   function filterRows(rows, cfg, now = new Date()) {
@@ -1431,15 +1528,16 @@
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
     // Memoised per anchor: removedBy() re-filters once per chip with the same point.
     for (const r of rows) { const k = `${cfg.anchor}|${r.lat}|${r.lng}`; if (r._kmFor !== k) { r.km = kmFrom(anchor, r); r._kmFor = k; } }
-    const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
-    const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
+    const insDay = !!cfg.inspectOn;
+    const sameDay = (ms, r) => ymdIn(ms, tzOf(r)) === cfg.inspectOn; // the listing's calendar day, like the planner
     const kept = dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => cfg.showHidden || (!r.hidden && !r.agencyHidden && !r.suburbHidden))
       .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
-      .filter((r) => !cfg.changedOnly || !!(r.prevPrice || r.prevAvail))
+      .filter((r) => !cfg.changedOnly || !!(r.prevPrice || r.prevAvail || r.featChange))
+      .filter((r) => !cfg.unopenedOnly || !r.openedAt)
       .filter((r) => !noWatch.length || !String(r.watch || '').split(',').some((id) => noWatch.includes(id)))
       .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
       .filter((r) => kmMax == null || !anchor || (r.km != null && r.km <= kmMax)) // no location fails a distance cap
@@ -1452,7 +1550,7 @@
       .filter((r) => !cfg.type || r.type === cfg.type)
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !kw || kw(r.text || ''))
-      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at)));
+      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)));
     return kept;
   }
 
@@ -1477,7 +1575,7 @@
   };
   // Spreadsheet formula injection guard (OWASP): neutralise leading = + @ tab CR, and any
   // leading - that isn't a plain negative number ("-1+1" evaluates in Excel/Sheets).
-  const safeCell = (v) => (/^[=+@\t\r]|^-(?!\d+(\.\d+)?$)/.test(v) ? `'${v}` : v);
+  const safeCell = (v) => (/^[=+@\t\r]|^-(?!\d+(\.\d+)?$|$)/.test(v) ? `'${v}` : v); // a bare "-" (no date) is harmless
   const table = (rows) => [EXPORT_COLS.map(([, h]) => h)].concat(rows.map((r) => EXPORT_COLS.map(([k]) => safeCell(cellValue(r, k)))));
 
   const toTsv = (rows) => table(rows).map((cols) => cols.map((c) => c.replace(/\t/g, ' ')).join('\t')).join('\n');
@@ -1487,7 +1585,7 @@
   // Upcoming inspections as an iCalendar file (RFC 5545) for any calendar app. REA gives a
   // start time only, so each event is INSPECT_MINUTES long. '' when there are none.
   const INSPECT_MINUTES = 15;
-  const icsText = (v) => String(v ?? '').replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\r?\n/g, '\\n');
+  const icsText = (v) => String(v ?? '').replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\r\n?|\n/g, '\\n');
   const icsTime = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   // Lines over 75 octets are folded: CRLF + one space, per RFC 5545 3.1.
   const icsFold = (line) => {
@@ -1594,6 +1692,17 @@
     const hay = [r.address, r.note, r.agency, r.suburb, r.price, r.appStatus, r.type].filter(Boolean).join(' ').toLowerCase();
     return terms.every((t) => hay.includes(t));
   };
+
+  // Enquiry message from a template: {address} {price} {available} {inspection} {link}.
+  const ENQUIRY_DEFAULT = 'Hi, I\'m interested in {address} ({price}). Is it still available{available}? {inspection}Thanks.';
+  const enquiryText = (r, template) => String(template || ENQUIRY_DEFAULT)
+    .replace(/\{address\}/g, r.address || 'this property').replace(/\{price\}/g, r.price || 'price on request')
+    .replace(/\{available\}/g, () => {
+      const a = String(r.available && r.available !== '-' ? r.available : '').replace(/^available\s*(from\s*)?/i, '').trim();
+      return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
+    })
+    .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : 'Could I arrange an inspection? ')
+    .replace(/\{link\}/g, r.url || '').replace(/\s+\n/g, '\n').trim();
 
   // One listing as plain text for a message.
   const summaryText = (r) => [
@@ -1703,7 +1812,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1747,12 +1856,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   // Colours are tokens on #rf-panel so the dark scheme only swaps values.
   const css = `
-  #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#767680;--rf-line:#e4e4e7;--rf-input:#cfcfd4;
+  #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
     --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
-    --rf-err:#c00;--rf-tag:#eee}
+    --rf-err:#c00;--rf-tag:#eee;--rf-up:#b34700;--rf-star-fg:#8a6100}
   @media (prefers-color-scheme: dark){
-    #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#3a3a43;
-      --rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b}
+    #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;
+      --rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e}
   }
   #rf-launch{position:fixed;right:20px;bottom:20px;z-index:2147483000;padding:11px 16px;border:0;border-radius:999px;
     background:var(--rf-accent);color:#fff;font:600 13px/1 system-ui,-apple-system,sans-serif;cursor:pointer;
@@ -1851,14 +1960,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
-  .rf-acts button[data-act=s][aria-pressed=true]{color:#e6a700}
+  .rf-acts button[data-act=s][aria-pressed=true]{color:var(--rf-star-fg)}
   .rf-tag.rf-new{background:#087a50;color:#fff}
-  .rf-tag.rf-gone{background:#8a8a95;color:#fff}
+  .rf-tag.rf-gone{background:#6b6b75;color:#fff}
   .rf-was{font-weight:600;font-size:11px;padding:1px 5px;border-radius:4px}
-  .rf-was.down{color:#087a50;background:rgba(8,122,80,.12)}
-  .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
+  .rf-was.down{color:var(--rf-accent-fg);background:rgba(8,122,80,.12)}
+  .rf-was.up{color:var(--rf-up);background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
-  .rf-warn{color:#b45309;font-weight:600}
+  .rf-warn{color:var(--rf-up);font-weight:600}
   .rf-score{font-weight:700;color:var(--rf-fg);cursor:help;border-bottom:1px dotted var(--rf-soft)}
   .rf-agencies{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
   .rf-agencies[hidden]{display:none}
@@ -1885,6 +1994,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  .rf-menu{position:relative}
+  .rf-menu>summary{list-style:none;cursor:pointer}
+  .rf-menu>summary::-webkit-details-marker{display:none}
+  .rf-menu>summary::after{content:' ▾'}
+  .rf-menu-list{position:absolute;right:0;top:calc(100% + 4px);z-index:5;display:grid;gap:4px;min-width:150px;padding:6px;
+    background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)}
   .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
@@ -1916,7 +2031,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-planner li{padding:8px 0;border-top:1px solid var(--rf-line)}
   .rf-planner li a{color:inherit;font-weight:600}
   .rf-plan-t{display:inline-block;min-width:64px;font-weight:700;color:var(--rf-accent-fg)}
-  .rf-planner li.rf-clash .rf-meta,.rf-planner li.rf-tight .rf-meta{color:#b45309;font-weight:600}
+  .rf-planner li.rf-clash .rf-meta,.rf-planner li.rf-tight .rf-meta{color:var(--rf-up);font-weight:600}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-nowatch .rf-label{flex:1 1 100%}
@@ -1928,7 +2043,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
   .rf-tags span{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--rf-hover);color:var(--rf-muted)}
   .rf-med.down{color:var(--rf-accent-fg)}
-  .rf-med.up{color:#b45309}
+  .rf-med.up{color:var(--rf-up)}
   .rf-app{display:flex;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px;color:var(--rf-muted)}
   .rf-app select{font:12px system-ui,sans-serif;padding:3px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-sl-q{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:130px}
@@ -1951,12 +2066,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-badge .rf-b-star{background:#e6a700;color:#111}
   .rf-badge .rf-b-new{background:#2563eb}
   .rf-badge .rf-b-down{background:#087a50}
-  .rf-badge .rf-b-up{background:#c60}
+  .rf-badge .rf-b-up{background:#a84f00}
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
     .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:48vh}
     .rf-actions{flex-wrap:wrap} .rf-actions .rf-bulk{flex:1 1 100%}
     .rf-acts,.rf-note,.rf-note-edit,.rf-app{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
-    .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px} }
+    .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px}
+    .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1 1 100%}
+    .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} }
+  @media (max-height:600px){ .rf-controls{max-height:38vh} } /* short windows / zoomed in: keep room for the list */
   .rf-btn{white-space:nowrap}
   `;
 
@@ -2027,18 +2145,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <div class="rf-head">
         <h2>Availability filter</h2>
         <button class="rf-clear" title="Reset all filters">Clear</button>
-        <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false">?</button>
+        <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
         <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
       </div>
       <div class="rf-tabs" role="tablist">
-        <button role="tab" data-view="results" aria-selected="true">Results</button>
-        <button role="tab" data-view="shortlist" aria-selected="false">Shortlist <span class="rf-count"></span></button>
+        <button role="tab" id="rf-tab-results" data-view="results" aria-selected="true" aria-controls="rf-list">Results</button>
+        <button role="tab" id="rf-tab-shortlist" data-view="shortlist" aria-selected="false" aria-controls="rf-list" tabindex="-1">Shortlist <span class="rf-count"></span></button>
       </div>
       <div class="rf-sl-bar" hidden>
         <span class="rf-label">Shortlist, all searches</span>
         <select class="rf-sl-bulk" aria-label="Bulk action on the shortlist shown">
-          <option value="">Bulk…</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="status:${v}">Mark shown: ${v}</option>`).join('')}
-          <option value="unstar-declined">Remove declined</option><option value="unstar">Remove all shown</option>
+          <option value="">Bulk…</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="status:${v}" data-label="Mark {n} shown: ${v}">Mark shown: ${v}</option>`).join('')}
+          <option value="unstar-declined" data-label="Remove declined">Remove declined</option><option value="unstar" data-label="Remove all {n} shown">Remove all shown</option>
         </select>
         <select class="rf-plan" aria-label="Plan an inspection day"></select>
         <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
@@ -2046,14 +2164,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
           <option value="-">Not started</option>
         </select>
-        <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
-        <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
-        <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
-        <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
-        <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
-        <button class="rf-btn sec" data-sl="share" title="Copy a link that shares these listings (no server involved)">Share</button>
-        <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
         <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
+        <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
+        <details class="rf-menu"><summary class="rf-btn sec" title="Export, share, print, backup">More</summary><div class="rf-menu-list">
+          <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
+          <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
+          <button class="rf-btn sec" data-sl="share" title="Copy a link that shares these listings (no server involved)">Share link</button>
+          <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
+          <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
+          <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+        </div></details>
         <input type="file" accept="application/json,.json" hidden>
       </div>
       <div class="rf-controls">
@@ -2090,10 +2210,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           </div>
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
-          <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Listed over 3 weeks ago</label>
-          <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
+          <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
+          <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
           <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
-          <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price or date changed recently</label>
+          <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price, date or details changed recently</label>
+          <label class="rf-check"><input type="checkbox" id="rf-unopenedOnly">Not opened yet</label>
           <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
           <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
@@ -2107,6 +2228,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
           <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
             <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
+          <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
+            title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>
           <label>Household income, $ a year before tax (optional)<input type="number" id="rf-income" min="0" step="1000" inputmode="numeric" placeholder="eg 120000"
             title="Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser."></label>
         </details>
@@ -2136,7 +2259,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <button class="rf-btn" id="rf-run">Search all pages</button>
           <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
           <select class="rf-bulk" aria-label="Bulk action on the listings shown" disabled>
-            <option value="">Bulk…</option><option value="star">Shortlist all shown</option><option value="hide">Hide all shown</option>
+            <option value="">Bulk…</option><option value="star" data-label="Shortlist all {n} shown">Shortlist all shown</option><option value="hide" data-label="Hide all {n} shown">Hide all shown</option>
           </select>
           <button class="rf-btn sec rf-market-btn" aria-pressed="false" disabled title="Rent spread per bed count and when the listings shown become available">Market</button>
         </div>
@@ -2148,7 +2271,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <button class="rf-btn sec" data-export="ics" disabled title="Upcoming inspections as a calendar file">Calendar</button>
         </div>
       </div>
-      <div class="rf-help" hidden>
+      <div class="rf-help" id="rf-help" hidden>
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
         <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
@@ -2161,7 +2284,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       </div>
       <div class="rf-status" role="status" aria-live="polite"></div>
       <div class="rf-active" hidden aria-label="Active filters"></div>
-      <div class="rf-list"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
+      <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
 
     document.body.append(launch, panel);
 
@@ -2240,11 +2363,22 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
     // Full-screen on phones, so modal there (focus trapped); a side drawer on desktop.
     const narrow = window.matchMedia(NARROW_MQ);
+    // Full-screen on phones is a real modal: the page behind is inert, so Tab can't wander there.
+    const setInert = (on) => {
+      for (const el of document.body.children) {
+        if (el === panel || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+        if (on && !el.inert) { el.inert = true; el.dataset.rfInert = '1'; }
+        else if (!on && el.dataset.rfInert) { el.inert = false; delete el.dataset.rfInert; }
+      }
+    };
     const setOpen = (open) => {
       panel.hidden = !open;
       launch.setAttribute('aria-expanded', String(open));
       panel.setAttribute('aria-modal', String(open && narrow.matches));
+      setInert(open && narrow.matches);
+      if (!open) for (const d of panel.querySelectorAll('.rf-acts-more[open], .rf-menu[open]')) d.open = false;
     };
+    narrow.addEventListener?.('change', () => { if (!panel.hidden) setOpen(true); });
     ui.setOpen = setOpen;
     launch.addEventListener('click', () => { setOpen(true); ui.run.focus(); });
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
@@ -2274,7 +2408,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       }
     };
     document.addEventListener('keydown', (e) => {
-      if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href)) {
+      if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href) && !typing(e.target)) {
         e.preventDefault();
         setOpen(panel.hidden);
         if (!panel.hidden) ui.run.focus(); else launch.focus();
@@ -2282,6 +2416,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       }
       if (panel.hidden) return;
       // Esc is ours only when focus is in the drawer (or it's full-screen): REA's own viewers use it too.
+      const menu = document.activeElement?.closest?.('.rf-acts-more[open], .rf-menu[open]');
+      if (e.key === 'Escape' && menu && panel.contains(menu)) { menu.open = false; menu.querySelector('summary').focus(); return; } // closes just the ⋯ menu
       if (e.key === 'Escape' && !e.defaultPrevented && (panel.contains(document.activeElement) || narrow.matches)) {
         if (!help.hidden) { toggleHelp(); return; }
         setOpen(false); launch.focus(); return;
@@ -2297,7 +2433,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         }
       }
       if (e.key === 'Tab' && narrow.matches) {
-        const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled);
+        const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled &&
+          !el.closest('details:not([open]) > :not(summary)') && (el.checkVisibility?.({ contentVisibilityAuto: true }) ?? true));
         if (!f.length) return;
         if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
         else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
@@ -2354,11 +2491,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     // Shortlist / hide / note: one delegated handler; re-render keeps scroll position.
     ui.list.addEventListener('click', (e) => {
       if (e.target.closest('.rf-more-btn')) return renderMore();
+      const drop = e.target.closest('[data-drop-chip]');
+      if (drop) return ui.active.querySelector(`[data-chip="${drop.dataset.dropChip}"]`)?.click();
       const b = e.target.closest('.rf-acts button');
       if (!b) return;
       const id = b.closest('.rf-item')?.dataset.id;
       if (!id) return;
       if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
+      if (b.dataset.act === 'enq') {
+        const r = rowById(id) || ui.rows?.find((x) => x.id === id);
+        if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
+        return;
+      }
       if (b.dataset.act === 'copy') {
         const r = rowById(id) || ui.rows?.find((x) => x.id === id);
         if (r) copyText(summaryText(r)).then((ok) => setStatus(ok ? 'Listing summary copied.' : 'Clipboard blocked.', !ok));
@@ -2387,7 +2531,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       // Re-render replaced the button: put focus back (or on the next item if this one left the list).
       const q = (i) => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(i)}"] [data-act="${act}"]`);
       (q(id) || (next && q(next)) || ui.list).focus?.();
-      if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
+      if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
     });
     ui.list.tabIndex = -1;
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
@@ -2410,7 +2554,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] select[data-app]`)?.focus();
     });
 
-    for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
+    for (const tab of ui.tabs) {
+      tab.addEventListener('click', () => setView(tab.dataset.view));
+      // Tabs pattern: arrows move between the two tabs; only the selected one is in the Tab order.
+      tab.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        e.preventDefault();
+        const next = ui.tabs[(ui.tabs.indexOf(tab) + 1) % ui.tabs.length];
+        setView(next.dataset.view); next.focus();
+      });
+    }
     ui.slFilter.addEventListener('change', () => renderShortlist());
     let slqT = null;
     ui.slQuery.addEventListener('input', () => { clearTimeout(slqT); slqT = setTimeout(renderShortlist, 150); });
@@ -2540,6 +2693,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day) }));
       downloadIcs(rows);
     });
+    // The More menu closes once an item is chosen (or on a click elsewhere).
+    const slMenu = ui.slBar.querySelector('.rf-menu');
+    slMenu.addEventListener('click', (e) => { if (e.target.closest('.rf-menu-list button')) slMenu.open = false; });
+    document.addEventListener('click', (e) => { if (slMenu.open && !slMenu.contains(e.target)) slMenu.open = false; });
     ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
     const storageLine = panel.querySelector('.rf-storage-n');
     const paintStorage = () => {
@@ -2615,7 +2772,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   function setView(view) {
     ui.view = view;
-    for (const t of ui.tabs) t.setAttribute('aria-selected', String(t.dataset.view === view));
+    for (const t of ui.tabs) { const on = t.dataset.view === view; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; }
+    ui.list.setAttribute('aria-labelledby', `rf-tab-${view}`);
     const sl = view === 'shortlist';
     ui.controls.hidden = sl;
     ui.active.hidden = true; // results view re-shows it via renderActive()
@@ -2658,7 +2816,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         const out = parseListingPage(html, r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
         tally[out.status]++;
         if (out.status === 'gone') marks.setGone(r.id, true);
-        if (out.status === 'ok') { const row = safeRow(out.listing, false); if (row) learn([row]); }
+        if (out.status === 'ok') { const row = safeRow(out.listing, false); if (row) learn([row], true, false, false); }
         if (i < rows.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
       }
       refreshMarks();
@@ -2703,7 +2861,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         store.set(key, res.rows, res.truncated);
         const snap = snaps.save(key, res.rows, res.truncated);
         if (key === currentKey()) adopt(key, res.rows, res.truncated, '', snap, true);
-        else learn(res.rows, true);
+        else learn(res.rows, true, true);
         ui.savedResult.set(key, found);
         out.push(`${label}: ${found.added} new${found.gone ? `, ${found.gone} gone` : ''}`);
         if (i < keys.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
@@ -2721,6 +2879,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   function renderShortlist() {
     const rows = shortlistRows();
+    ui.agencyRec = agencyRecord(marks.shortlist()); // over the whole shortlist, not just what the search box shows
     // Distance for the shortlist too (applyFilters isn't run over it).
     const anchor = parseAnchor(cfg.anchor);
     for (const r of rows) r.km = kmFrom(anchor, r);
@@ -2739,6 +2898,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.cmpPicked = picked.length > 0;
     // Bulk actions act on what's on screen: the planned day's or compared listings when those views are up.
     ui.bulkRows = slots ? [...new Set(slots.map((x) => x.r))] : cmp || null;
+    labelBulk(ui.slBulk, (ui.bulkRows || rows).length);
     const total = marks.counts().starred;
     ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
       : slots ? planHtml(slots, ui.planDay)
@@ -2791,6 +2951,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   function refreshMarks() {
     ui.paintStorage?.();
     if (cache) marks.decorate(cache);
+    if (gone.length) marks.decorate(gone);
     marks.decorate([...known.values()]);
     knownVer++;
     updateCounts();
@@ -2803,12 +2964,27 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     scheduleAnnotate();
   }
 
+  // After a hide: Undo plus one-tap reasons, so "why did I rule this out?" has an answer later.
+  function offerHideUndo(id, undo) {
+    offerUndo('Listing hidden.', undo);
+    const why = document.createElement('span');
+    why.className = 'rf-why';
+    why.append(' Why? ');
+    for (const reason of HIDE_REASONS) {
+      const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: reason, type: 'button' });
+      // No re-render: the listing is hidden, and re-rendering would replace this status line.
+      b.addEventListener('click', () => { marks.setHideReason(id, reason); if (cache) marks.decorate(cache); why.replaceChildren(` Noted: ${reason}.`); }, { once: true });
+      why.append(b, ' ');
+    }
+    ui.status.append(why);
+  }
+
   // One-shot Undo link in the status line.
   function offerUndo(msg, undo) {
     setStatus(msg);
     const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: 'Undo' });
     b.addEventListener('click', () => { b.remove(); undo(); }, { once: true });
-    ui.status.appendChild(b);
+    ui.status.append(' ', b); // space: screen readers read "hidden. Undo", not "hidden.Undo"
   }
 
   const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; };
@@ -2825,17 +3001,26 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const rows = applyFilters(pool(), cfg);
     render(rows);
     renderActive();
+    if (!rows.length) suggestDrops();
     const st = diffStats(cache);
     const matchHint = cfg.sort === 'match' && !rows.some((r) => r.score != null)
       ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '';
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
-    const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`, st.redated && `${st.redated} date changed`,
+    const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`, st.redated && `${st.redated} date changed`, st.featured && `${st.featured} details changed`,
       !cfg.showHidden && st.hidden && `${st.hidden} hidden`].filter(Boolean).join(' · ');
     setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : '') + matchHint);
     const warn = schemaWarnings(cache);
     if (warn.length) setStatus(`REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.`, true);
+  }
+
+  // Nothing matches: offer the filters whose removal brings back the most listings.
+  function suggestDrops() {
+    const top = (ui.activeChips || []).map((c, i) => ({ c, i })).filter((x) => x.c.removes > 0).sort((a, b) => b.c.removes - a.c.removes).slice(0, 3);
+    if (!top.length) return;
+    setEmpty(`Nothing matches those filters. Try dropping one:<br>${top.map(({ c, i }) =>
+      `<button type="button" class="rf-chip" data-drop-chip="${i}">${esc(c.label)} <span>+${c.removes}</span></button>`).join(' ')}`);
   }
 
   // Chips for active filters with how many listings each removes; click to drop that filter.
@@ -2848,8 +3033,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.moreSummary.textContent = `More filters${chips.length ? ` (${chips.length} active)` : ''}`;
   }
 
+  // Bulk menus say how many listings they will touch.
+  const labelBulk = (sel, n) => { for (const o of sel.options) if (o.value) o.textContent = o.dataset.label.replace('{n}', n); };
+
   function render(rows) {
     ui.rows = rows; // first: renderMore()/refreshMarks() read it even when the list is empty
+    labelBulk(ui.bulk, rows.length);
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
@@ -2880,6 +3069,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
         <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
+      ${m.bySuburb.length ? `<div class="rf-market-t"><table><caption>By suburb</caption><thead><tr><th scope="col">Suburb</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Per bed</th></tr></thead>
+      <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
       <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
         const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
         const inner = `<span class="rf-bar-l">${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;
@@ -2936,7 +3127,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(Date.now() - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(Date.now() - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
@@ -2947,32 +3138,35 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
           ${km || r.score != null ? `<div class="rf-meta">${esc(km)}${r.score != null ? `${km ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
-          ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency,
+          ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency, ui.view === 'shortlist' && r.agency ? recordText(ui.agencyRec?.get(r.agency.trim().toLowerCase())) : '',
             r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${am.length ? `<div class="rf-tags">${am.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${wt.length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${wt.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${med ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(med)}</div>` : ''}
           ${inc != null ? `<div class="rf-meta${inc > RENT_STRESS_PCT ? ' rf-warn-t' : ''}">${inc}% of income</div>` : ''}
           ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
-          ${r.inspections?.length || r.listed || r.lastSeen ? `<div class="rf-meta">${esc([
+          ${r.inspections?.length || r.listed || r.lastSeen || r.openedAt || r.hideReason ? `<div class="rf-meta">${esc([
             r.lastSeen && ui.view === 'shortlist' ? `seen ${ago(Date.now() - r.lastSeen)}` : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
             r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',
+            r.openedAt ? `opened ${ago(Date.now() - r.openedAt)}` : '',
+            r.hideReason ? `hidden: ${r.hideReason}` : '',
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>
-      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select></label>` : ''}
+      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(Date.now() - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
-        <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
+        <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
         <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="copy" title="Copy a text summary of this listing" aria-label="Copy summary">Copy</button>
         ${ui.view === 'shortlist' ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
-        ${(r.suburb && ui.view !== 'shortlist') || r.agency ? `<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
+        ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
+          <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
           ${r.suburb && ui.view !== 'shortlist' ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
           ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
-        </div></details>` : ''}
+        </div></details>`}
       </div>
       </div>`;
     }).join('');
@@ -3045,7 +3239,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   function adopt(key, rows, trunc, note, snap = null, observe = false) {
-    learn(rows, observe);
+    learn(rows, observe, observe); // adopt observes only fresh full crawls
     if (snap) queueMicrotask(renderSaved);
     scheduleAnnotate();
     fillTypes(rows);
@@ -3064,6 +3258,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     for (const r of cache || []) r.sinceLast = ids.has(r.id);
     for (const r of known.values()) r.sinceLast = ids.has(r.id);
     gone = info?.gone || [];
+    marks.decorate(gone); // shortlist, notes and hides apply to "no longer listed" rows too
     baseAt = info?.baseAt ?? null;
     knownVer++;
   }
@@ -3159,8 +3354,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   // Insertion-ordered; re-learning an id moves it to the end, oldest evicted past KNOWN_MAX.
   // `observe` = these rows are fresh from REA: record sightings and price changes. Rows
   // replayed from a cache or snapshot are only decorated, or stale prices would register.
-  const learn = (rows, observe = true) => {
-    if (observe) marks.observe(rows);
+  const learn = (rows, observe = true, full = false, features = true) => {
+    if (observe) marks.observe(rows, { full, features });
     marks.decorate(rows);
     for (const r of rows) if (r.id) { known.delete(r.id); known.set(r.id, r); }
     for (const k of known.keys()) { if (known.size <= KNOWN_MAX) break; known.delete(k); }
@@ -3218,6 +3413,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       bar.addEventListener('click', onListingBar);
       bar.addEventListener('change', onListingBar);
     }
+    if (bar._opened !== id) { bar._opened = id; marks.setOpened(id); } // being here is opening it
     const r = bar._row?.id === id ? bar._row : listingPageRow(id);
     marks.decorate([r]);
     bar.dataset.id = id;
@@ -3235,11 +3431,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
     if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
-    if (r.partial && !bar._fetching) {
+    if (r.partial && bar._fetching !== id) {
       bar._fetching = id;
       fetch(location.href, { credentials: 'include', signal: withTimeout(null, FETCH_TIMEOUT_MS) }).then((res) => (res.ok ? res.text() : ''))
         .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
-        .catch(() => {}).finally(() => { bar._fetching = null; });
+        .catch(() => {}).finally(() => { if (bar._fetching === id) bar._fetching = null; if (bar.dataset.id !== id && bar._row?.partial) renderListingBar(); });
     }
   }
   function onListingBar(e) {
@@ -3262,8 +3458,24 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
   const cardActsHtml = (r) => `<span class="rf-card-acts">` +
-    `<button type="button" data-card-act="s" data-id="${esc(r.id)}" aria-pressed="${!!r.starred}" aria-label="${r.starred ? 'Remove from shortlist' : 'Shortlist'}" title="${r.starred ? 'Remove from shortlist' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>` +
+    `<button type="button" data-card-act="s" data-id="${esc(r.id)}" aria-pressed="${!!r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>` +
     `<button type="button" data-card-act="h" data-id="${esc(r.id)}" aria-label="${r.hidden ? 'Unhide' : 'Hide'} listing" title="${r.hidden ? 'Unhide' : 'Hide'} listing">${r.hidden ? 'Unhide' : 'Hide'}</button></span>`;
+
+  // Opening a listing (drawer card or REA's card; left, middle or ctrl click) marks it opened.
+  function watchOpens() {
+    const onOpen = (e) => {
+      if (e.type === 'auxclick' && e.button !== 1) return;
+      if (e.target.closest?.('[data-card-act], .rf-acts, button, select, input')) return;
+      const a = e.target.closest?.('a[href]');
+      const id = a && (a.closest('.rf-item')?.dataset.id || (/\/property-/.test(a.href) ? listingId(a.href) : ''));
+      if (!id) return;
+      marks.setOpened(id);
+      if (cache) marks.decorate(cache); // so "Not opened yet" and "opened …" reflect it on the next render
+      knownVer++;
+    };
+    document.addEventListener('click', onOpen, true);
+    document.addEventListener('auxclick', onOpen, true);
+  }
 
   function watchCardActions() {
     const onAct = (e) => {
@@ -3276,7 +3488,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const id = b.dataset.id, act = b.dataset.cardAct;
       const on = marks.toggle(id, act, rowById(id));
       refreshMarks();
-      if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); });
+      if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); });
       else if (act === 's') setStatus(on ? 'Added to shortlist.' : 'Removed from shortlist.');
     };
     for (const type of ['click', 'auxclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchend']) document.addEventListener(type, onAct, true);
@@ -3461,6 +3673,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     step('navigation', watchNavigation);
     step('cards', watchCards);
     step('card actions', watchCardActions);
+    step('opens', watchOpens);
     step('sync', () => window.addEventListener('storage', (e) => {
       // Another tab changed the shortlist/hidden/notes: pick it up here.
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }

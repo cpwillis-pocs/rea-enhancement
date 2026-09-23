@@ -203,7 +203,13 @@ test('marksStore: price history capped, relist detection carries hidden', () => 
   const relist = [R('146500099', '$590 per week', '5/12 hall st bondi nsw 2026')];
   // (address map now points at 146500097, the sibling, which was also last seen >1h ago)
   st.observe(relist); st.decorate(relist);
+  assert.equal(relist[0].relisted, null, 'one page (not a full crawl) is no evidence of a relist');
+  st.observe(relist, { full: true }); st.decorate(relist);
   assert.ok(relist[0].relisted, 'relist detected once the old listing is gone');
+  assert.ok(relist[0].hidden, 'inherits the hide');
+  assert.equal(st.toggle('146500099', 'h'), false, 'unhide overrides the inherited hide');
+  st.decorate(relist); assert.equal(relist[0].hidden, false);
+  assert.equal(st.toggle('146500099', 'h'), true); st.decorate(relist); assert.equal(relist[0].hidden, true);
   const other = [R('146500098', '$590 per week', 'Unit, Bondi')];
   st.observe(other); st.decorate(other);
   assert.equal(other[0].relisted, null, 'no street number: no match');
@@ -218,7 +224,7 @@ test('marksStore: a genuine relist inherits "hidden" and shows the old price', (
   st.toggle('146500070', 'h');
   t += 3 * 36e5;
   const r = [R('146500071', '$680 per week')];
-  st.observe(r); st.decorate(r);
+  st.observe(r, { full: true }); st.decorate(r);
   assert.deepEqual(r[0].relisted, { price: '$700 per week', hidden: true });
   assert.equal(r[0].hidden, true);
   st.toggle('146500071', 's'); st.decorate(r);
@@ -366,4 +372,82 @@ test('shortlist coerces odd summary field types', () => {
   assert.equal(r.address, '');
   assert.equal(r.available, '-');
   assert.equal(r.beds, '');
+});
+
+test('marksStore: opened timestamp and Not-opened filter', () => {
+  const t = Date.UTC(2026, 8, 23);
+  const st = core.marksStore(mem(), () => t);
+  st.setOpened('146500011'); st.setOpened('nope');
+  const rows = [row('146500011'), row('146500012')];
+  st.decorate(rows);
+  assert.equal(+rows[0].openedAt, t);
+  assert.equal(rows[1].openedAt, null);
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, unopenedOnly: true }).map((r) => r.id), ['146500012']);
+});
+
+test('marksStore: a partial view of one of two same-address listings is not a relist', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const R = (id) => Object.assign(row(id), { address: '12 Smith St, Bondi NSW 2026' });
+  st.observe([R('146500081'), R('146500082')], { full: true });
+  st.toggle('146500082', 'h');
+  t += 2 * 36e5;
+  const a = [R('146500081')];
+  st.observe(a); st.decorate(a);
+  assert.equal(a[0].relisted, null);
+  assert.equal(a[0].hidden, false);
+});
+
+test('agencyRecord / needsFollowUp', () => {
+  const rows = [{ agency: 'Harbour Co', appStatus: 'applied', appAt: 1 }, { agency: 'harbour co ', appStatus: 'declined' }, { agency: 'Other', appStatus: 'to inspect' }];
+  const rec = core.agencyRecord(rows);
+  assert.deepEqual(rec.get('harbour co'), { applied: 2, approved: 0, declined: 1 });
+  assert.equal(rec.has('other'), false);
+  assert.equal(core.recordText(rec.get('harbour co')), 'you: 2 applied, 1 declined');
+  assert.ok(core.needsFollowUp(rows[0], 6 * 864e5 + 1));
+  assert.ok(!core.needsFollowUp(rows[0], 4 * 864e5));
+});
+
+test('hide reasons: stored, shown only while hidden, round-trip through backup', () => {
+  const m = mem();
+  const st = core.marksStore(m, () => 1e12);
+  st.toggle('146500021', 'h'); st.setHideReason('146500021', 'too small'); st.setHideReason('146500022', 'bogus');
+  const rows = [row('146500021')]; st.decorate(rows);
+  assert.equal(rows[0].hideReason, 'too small');
+  const st2 = core.marksStore(mem(), () => 1e12);
+  st2.importJson(st.exportJson());
+  const r2 = [row('146500021')]; st2.decorate(r2);
+  assert.equal(r2[0].hideReason, 'too small');
+  st.toggle('146500021', 'h'); st.decorate(rows);
+  assert.equal(rows[0].hideReason, '');
+});
+
+test('observe keeps richer shortlist summary fields a sparser source lacks', () => {
+  const m = mem();
+  const st = core.marksStore(m, () => 1e12);
+  const rich = Object.assign(row('146500031', '$700 per week'), { agency: 'Harbour Co', inspections: [{ at: 2e12, label: 'Sat' }] });
+  st.toggle('146500031', 's', rich);
+  st.observe([Object.assign(row('146500031', '$650 per week'), { agency: '', inspections: [] })]);
+  const d = JSON.parse(m.getItem('rea-avail-filter/marks/v1')).m['146500031'].d;
+  assert.equal(d.p, '$650 per week', 'price updated');
+  assert.equal(d.ag, 'Harbour Co', 'agency kept');
+  assert.equal(d.in.length, 1, 'inspections kept');
+});
+
+test('marksStore: feature changes between search sightings (not from property pages)', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const withAmen = (pets, watch = '') => Object.assign(row('146500041'), { amen: { pets }, watch });
+  st.observe([withAmen(null)]);
+  t += 36e5;
+  const r = [withAmen('yes', 'fee')];
+  st.observe(r); st.decorate(r);
+  assert.equal(r[0].featChange, 'now Pets OK, fee mentioned added');
+  assert.equal(core.filterRows(r, { ...core.DEFAULT_CFG, changedOnly: true }).length, 1);
+  const st2 = core.marksStore(mem(), () => t);
+  st2.observe([withAmen(null)]);
+  const p = [withAmen('yes')];
+  st2.observe(p, { features: false }); st2.decorate(p);
+  assert.equal(p[0].featChange, '', 'property page text is not compared');
+  assert.equal(core.featDiff('1:0:0', core.featSig({ amen: { pets: 'yes' } })), 'now Pets OK');
 });

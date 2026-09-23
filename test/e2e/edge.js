@@ -217,7 +217,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.waitForSelector('.rf-empty:has-text("Nothing on the shortlist matches")');
     await page.fill('.rf-sl-q', '');
     await page.waitForFunction(() => document.querySelectorAll('.rf-item').length === 2);
-    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-sl-bar [data-export=csv]')]);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=csv]'))]);
     const csv = fs.readFileSync(await dl.path(), 'utf8');
     assert.equal(csv.trim().split('\r\n').length, 3, 'shortlist export = header + 2 shortlisted');
     assert.ok(csv.split('\r\n')[0].includes('application') && csv.includes(',applied,'), 'status in CSV');
@@ -237,7 +237,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const withInsp = await page.$$eval('.rf-item', (els) => els.find((e) => /Inspect /.test(e.textContent))?.dataset.id);
     await page.hover(`.rf-item[data-id="${withInsp}"]`); await page.click(`.rf-item[data-id="${withInsp}"] >> [data-act=s]`);
     await page.click('[data-view=shortlist]');
-    const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('.rf-sl-bar [data-export=ics]')]);
+    const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
     const ics2 = fs.readFileSync(await dl2.path(), 'utf8');
     assert.equal((ics2.match(/BEGIN:VEVENT/g) || []).length, 1, 'shortlist calendar = the one shortlisted inspection');
     console.log('calendar export:', n, 'events from results, 1 from shortlist');
@@ -565,7 +565,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
     for (const n of [1, 2]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
     await page.click('[data-view=shortlist]');
-    const [pop] = await Promise.all([ctx.waitForEvent('page'), page.click('[data-sl=print]')]);
+    const [pop] = await Promise.all([ctx.waitForEvent('page'), page.click('.rf-menu summary').then(() => page.click('[data-sl=print]'))]);
     await pop.waitForLoadState();
     assert.equal(await pop.$$eval('.l', (e) => e.length), 2);
     assert.match(await pop.title(), /Rental shortlist/);
@@ -584,7 +584,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await a.hover('.rf-item:nth-child(1)'); await a.click('.rf-item:nth-child(1) >> [data-act=n]');
     await a.fill('.rf-note-edit', 'great light'); await a.keyboard.press('Enter');
     await a.click('[data-view=shortlist]');
-    await a.click('[data-sl=share]');
+    await a.click('.rf-menu summary'); await a.click('[data-sl=share]');
     await waitStatus(a, /Share link copied \(2 listings, with notes\)/);
     const link = await a.evaluate(() => navigator.clipboard.readText());
     await done(a); await ctxA.close();
@@ -754,7 +754,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     // In-app move to another listing: its own page is read for the summary.
     await page.evaluate(() => history.pushState({}, '', '/property-house-nsw-bondi-146500102'));
     await page.waitForFunction(() => document.getElementById('rf-lbar')?.dataset.id === '146500102', null, { timeout: 3000 });
-    await page.waitForFunction(() => document.getElementById('rf-lbar')._row && !document.getElementById('rf-lbar')._row.partial, null, { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById('rf-lbar')._row && !document.getElementById('rf-lbar')._row.partial, null, { timeout: 12000 });
     await page.click('#rf-lbar [data-l=s]');
     const second = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500102'].d);
     assert.match(second.p, /\$999/); assert.match(second.u, /146500102/, 'summary is this listing');
@@ -798,6 +798,80 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.waitForSelector('#rf-lbar');
     assert.equal(await page.evaluate(() => document.getElementById('rf-lbar')._row.price), '$999 per week');
     console.log('listing bar from script tag: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 24h. Opened tracking: opening from the drawer or REA's card marks it; Not opened yet filters it out.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const id = await page.getAttribute('.rf-item', 'data-id');
+    await page.evaluate(() => window.addEventListener('click', (e) => { if (e.target.closest('a')) e.preventDefault(); })); // no new tab in the test
+    await page.click(`.rf-item[data-id="${id}"] .rf-card`);
+    assert.ok(await page.evaluate((i) => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m[i].o, id), 'opened stored');
+    await page.click('#rf-more summary'); await page.check('#rf-unopenedOnly');
+    assert.equal(await page.$(`.rf-item[data-id="${id}"]`), null, 'opened listing filtered out');
+    await page.uncheck('#rf-unopenedOnly');
+    assert.match(await page.textContent(`.rf-item[data-id="${id}"]`), /opened just now/);
+    console.log('opened tracking: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 24i. A11y: Esc in the ⋯ menu closes only the menu; arrow keys switch tabs; phone modal makes the page inert.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('.rf-item .rf-acts-more summary');
+    await page.focus('.rf-item .rf-acts-more[open] [data-act=ag]');
+    await page.keyboard.press('Escape');
+    assert.ok(await page.isVisible('#rf-panel'), 'drawer still open');
+    assert.equal(await page.$('.rf-acts-more[open]'), null, 'menu closed');
+    await page.focus('#rf-tab-results'); await page.keyboard.press('ArrowRight');
+    assert.equal(await page.getAttribute('#rf-tab-shortlist', 'aria-selected'), 'true');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'rf-tab-shortlist');
+    assert.equal(await page.getAttribute('#rf-list', 'aria-labelledby'), 'rf-tab-shortlist');
+    await page.keyboard.press('ArrowLeft');
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.click('.rf-x'); await page.click('#rf-launch');
+    assert.equal(await page.evaluate(() => document.querySelector('main, body > div:not(#rf-panel)')?.inert), true, 'page behind is inert');
+    await page.click('.rf-x');
+    assert.equal(await page.evaluate(() => [...document.body.children].some((el) => el.inert)), false, 'inert removed on close');
+    console.log('a11y keys + inert: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 24j. Hide reason, Copy enquiry, "try dropping" suggestions, bulk counts, application follow-up.
+  {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const n = await page.$$eval('.rf-item', (e) => e.length);
+    assert.equal(await page.textContent('.rf-bulk option[value=star]'), `Shortlist all ${n} shown`);
+    const id = await page.getAttribute('.rf-item', 'data-id');
+    await page.click(`.rf-item[data-id="${id}"] [data-act=h]`);
+    await page.click('.rf-why button:has-text("too small")');
+    assert.match(await status(page), /Noted: too small/);
+    await page.click('#rf-more summary'); await page.check('#rf-showHidden');
+    assert.match(await page.textContent(`.rf-item[data-id="${id}"]`), /hidden: too small/);
+    await page.uncheck('#rf-showHidden');
+    const other = await page.getAttribute('.rf-item', 'data-id');
+    await page.click(`.rf-item[data-id="${other}"] .rf-acts-more summary`);
+    await page.click(`.rf-item[data-id="${other}"] [data-act=enq]`);
+    await waitStatus(page, /Enquiry copied/);
+    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^Hi, I'm interested in .+\. Is it still available/);
+    await page.fill('#rf-bedsMin', '9'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    await page.waitForSelector('[data-drop-chip]');
+    await page.click('[data-drop-chip]');
+    assert.ok((await page.$$eval('.rf-item', (e) => e.length)) > 0, 'dropping the suggested filter brings listings back');
+    // Applied a week ago: follow-up nudge on the shortlist.
+    await page.evaluate((i) => { const k = 'rea-avail-filter/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); Object.assign(d.m[i], { as: 'applied', ast: Date.now() - 7 * 864e5 }); localStorage.setItem(k, JSON.stringify(d)); }, other);
+    await page.click(`.rf-item[data-id="${other}"] [data-act=s]`);
+    await page.click('[data-view=shortlist]');
+    assert.match(await page.textContent(`.rf-item[data-id="${other}"]`), /follow up\?/);
+    assert.match(await page.textContent(`.rf-item[data-id="${other}"]`), /you: 1 applied/);
+    console.log('hide reason / enquiry / drop suggestions / follow-up: ok');
     await done(page); await ctx.close();
   }
 

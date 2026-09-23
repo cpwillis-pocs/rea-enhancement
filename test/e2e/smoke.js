@@ -186,7 +186,7 @@ const html = (n) => {
   assert.equal(await page.$eval('.rf-controls', (c) => c.hidden), true);
   assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
   assert.match(await page.textContent('.rf-count'), /\(1\)/);
-  const [bk] = await Promise.all([page.waitForEvent('download'), page.click('[data-sl=backup]')]);
+  const [bk] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('[data-sl=backup]'))]);
   const backup = fs.readFileSync(await bk.path(), 'utf8');
   assert.equal(JSON.parse(backup).m[firstId].n, 'Ask about pets');
   // Wipe, then restore from the backup file.

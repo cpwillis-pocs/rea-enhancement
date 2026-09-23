@@ -265,7 +265,7 @@ test('cfgError: conflicting settings explained', () => {
 test('diffStats / ago / isFresh', () => {
   const a = core.toRow(listing({ id: 'a' }), false), b = core.toRow(listing({ id: 'b' }), true), b2 = core.toRow(listing({ id: 'b' }), false);
   a.sinceLast = true; b.hidden = b2.hidden = true; b2.prevPrice = '$1';
-  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 1, redated: 0, hidden: 1 });
+  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 1, redated: 0, featured: 0, hidden: 1 });
   assert.equal(core.ago(30e3), 'just now');
   assert.equal(core.ago(5 * 60e3), '5 min ago');
   assert.equal(core.ago(3 * 36e5), '3h ago');
@@ -503,4 +503,37 @@ test('findListing: finds the listing by id anywhere in unpacked page data', () =
   const data = { a: { b: [{ id: '146500002', price: { display: '$2' } }, { id: '146500001', price: { display: '$1' } }] } };
   assert.equal(core.findListing(data, '146500001').price.display, '$1');
   assert.equal(core.findListing(data, '146500009'), null);
+});
+
+test('QA round 8: sort sanitised, yearless dates roll back, month checked, pm rents, ICS/URL, CSV dash, inspectOn tz', () => {
+  assert.doesNotThrow(() => core.applyFilters([{ id: '1', url: 'a' }, { id: '2', url: 'b' }], { ...core.DEFAULT_CFG, sort: '__proto__' }));
+  assert.equal(core.sanitizeCfg({ sort: 'valueOf' }).sort, undefined);
+  const jan5 = new Date(2027, 0, 5);
+  assert.equal(+core.parseAvail('Available Sat 20th Dec', jan5), +new Date(2027, 0, 5), 'last December: available now');
+  assert.equal(core.parseAvail('31/13/2026'), null);
+  for (const t of ['$2,600 pm', '$2,600 p/m', '$2,600 per calendar month', '$2,600/m']) assert.equal(core.parsePrice(t), 600, t);
+  assert.equal(core.parsePrice('$600 pw'), 600);
+  assert.equal(core.safeUrl('https://www.realestate.com.au/p-1\r\nEND:VEVENT'), '');
+  const ics = core.toIcs([{ id: '146500001', url: 'https://www.realestate.com.au/p-1', address: 'A\rB', price: '', inspections: [{ at: Date.now() + 864e5, label: 'x' }] }]);
+  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 1);
+  assert.ok(!/A\rB/.test(ics));
+  assert.ok(!core.toCsv([{ id: '1', url: 'u', available: '-' }]).includes("'-"));
+  // Sydney 09:00 Sat 26 Sep is still 26 Sep for the filter whatever the browser zone.
+  const r = { id: '1', url: 'u', address: '1 George St, Sydney NSW 2000', inspections: [{ at: Date.parse('2026-09-25T23:00:00Z') }] };
+  assert.equal(core.filterRows([r], { ...core.DEFAULT_CFG, inspectOn: '2026-09-26' }).length, 1);
+});
+
+test('enquiryText: default and custom templates', () => {
+  const r = { address: '4 Hall St', price: '$800 pw', available: 'Available 12 Oct 2026', inspections: [{ label: 'Sat 26 Sep 10:30am' }], url: 'https://www.realestate.com.au/p-1' };
+  assert.equal(core.enquiryText(r), "Hi, I'm interested in 4 Hall St ($800 pw). Is it still available from 12 Oct 2026? I'd like to come to the inspection on Sat 26 Sep 10:30am. Thanks.");
+  assert.match(core.enquiryText({ ...r, available: 'Available now', inspections: [] }), /available now\? Could I arrange an inspection\?/);
+  assert.equal(core.enquiryText(r, 'Re {address}: {link}'), 'Re 4 Hall St: https://www.realestate.com.au/p-1');
+});
+
+test('marketStats.bySuburb only for multi-suburb results', () => {
+  const mk = (i, suburb, p) => ({ id: String(i), url: `u${i}`, beds: 2, priceNum: p, ppb: p / 2, suburb });
+  const rows = [...[500, 510, 520, 530, 540].map((p, i) => mk(i, 'Bondi', p)), mk(9, 'Manly', 900)];
+  const m = core.marketStats(rows);
+  assert.deepEqual(m.bySuburb.map((g) => [g.suburb, g.n, g.median]), [['Bondi', 5, 520], ['Manly', 1, null]]);
+  assert.deepEqual(core.marketStats(rows.slice(0, 5)).bySuburb, []);
 });
