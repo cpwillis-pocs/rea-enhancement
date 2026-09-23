@@ -45,6 +45,8 @@
   const ROWS_VERSION = 4; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROWS_TTL_MS = 10 * 60 * 1000;
+  const ROWS_KEEP = 2; // searches kept in sessionStorage
+  const ROWS_TEXT_MAX = 600;
 
   // ---------------------------------------------------------------- config
 
@@ -70,22 +72,29 @@
         return v;
       } catch { return null; }
     },
+    // sessionStorage (~5MB) is shared with REA's own code, so keep it small: at most
+    // ROWS_KEEP searches, and the keyword blob truncated (full text stays in memory).
     set(key, rows, truncated) {
-      const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ v: ROWS_VERSION, at: now(), truncated, rows }));
-      try {
-        for (let i = storage.length - 1; i >= 0; i--) {
+      const slim = rows.map((r) => (r.text?.length > ROWS_TEXT_MAX ? { ...r, text: r.text.slice(0, ROWS_TEXT_MAX) } : r));
+      const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ v: ROWS_VERSION, at: now(), truncated, rows: slim }));
+      const ours = () => {
+        const out = [];
+        for (let i = 0; i < storage.length; i++) {
           const k = storage.key(i);
           if (k?.startsWith(ROWS_PREFIX) && k !== ROWS_PREFIX + key) {
-            try { if (now() - JSON.parse(storage.getItem(k)).at > ROWS_TTL_MS) storage.removeItem(k); } catch { storage.removeItem(k); }
+            let at = 0;
+            try { at = JSON.parse(storage.getItem(k)).at || 0; } catch { /* corrupt: evict first */ }
+            out.push([k, at]);
           }
         }
+        return out.sort((a, b) => b[1] - a[1]); // newest first
+      };
+      try {
+        ours().forEach(([k, at], i) => { if (i >= ROWS_KEEP - 1 || now() - at > ROWS_TTL_MS) storage.removeItem(k); });
         put();
       } catch {
         try { // quota: drop every other cached search and retry once
-          for (let i = storage.length - 1; i >= 0; i--) {
-            const k = storage.key(i);
-            if (k?.startsWith(ROWS_PREFIX)) storage.removeItem(k);
-          }
+          for (const [k] of ours()) storage.removeItem(k);
           put();
         } catch { /* unavailable */ }
       }

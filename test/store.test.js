@@ -51,3 +51,14 @@ test('rowStore: quota error clears other searches and retries', () => {
   assert.equal(st.get('a'), null);
   assert.ok(st.get('b'));
 });
+
+test('rowStore: keeps at most two searches, truncates text', () => {
+  let t = 1e12;
+  const mem = memStorage();
+  const st = core.rowStore(mem, () => t);
+  for (const k of ['a', 'b', 'c']) { t += 1000; st.set(k, [{ text: 'x'.repeat(5000) }], false); }
+  assert.equal(mem._m.size, 2);
+  assert.equal(st.get('a'), null);
+  assert.ok(st.get('b') && st.get('c'));
+  assert.equal(st.get('c').rows[0].text.length, 600);
+});
