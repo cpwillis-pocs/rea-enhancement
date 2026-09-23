@@ -25,7 +25,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     await page.waitForSelector('article > .rf-badge');
     await act(page);
     await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+    await page.screenshot({ path: path.join(OUT, `${name}.jpg`), type: 'jpeg', quality: 82 });
     console.log('wrote', name);
     await ctx.close();
   };
@@ -47,8 +47,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     return { c: now - 7 * day, m };
   };
   await shot('shortlist', { seed: history, act: async (page) => { await search(page); await page.hover('.rf-item:nth-child(2)'); } });
-  await shot('badges-marks', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
-  await shot('badges', { act: async (page) => { await page.evaluate(() => window.scrollTo(0, 60)); } });
+  await shot('badges', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
   await shot('drawer', { act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
   await shot('filters', { act: async (page) => {
     await search(page);
