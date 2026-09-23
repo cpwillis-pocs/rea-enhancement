@@ -45,6 +45,9 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
 - The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; filter by status and export it.
 - **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
+- **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, exportable to your calendar.
+- **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
+- **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
 - Price changes show "was $X" (hover for the full history). A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
@@ -68,11 +71,12 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ## When REA changes something
 
-REA's data format is undocumented and changes. The script tries several likely field names and degrades to blank rather than breaking. If the drawer says the format may have changed, or a field is always empty, open DevTools on a results page and run:
+REA's data format is undocumented and changes. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, or a field is always empty, open DevTools on a results page and run:
 
 ```js
-reaFilter.probe()   // every field path the script reads, and whether it exists
-reaFilter.raw()     // one raw listing object
+reaFilter.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue
+reaFilter.probe()     // every field path the script reads, and whether it exists (plus discovered paths)
+reaFilter.raw()       // one raw listing object
 ```
 
 Then [open an issue](../../issues/new?template=rea-format-changed.md) with the output.

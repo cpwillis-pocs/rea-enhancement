@@ -2,6 +2,15 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.8.0
+
+- **Re-check** the shortlist: fetches each shortlisted listing's page (one at a time, polite delay, only when you click) to update price, availability and inspections, and tags listings REA has taken down as "no longer listed".
+- **Share** a shortlist as a link: the data lives in the URL fragment, which is never sent to a server; whoever opens it (with the script) can add the listings to their shortlist. Notes only if you choose.
+- **Print** the shortlist (or Save as PDF) with a notes box per listing.
+- **Inspection planner**: pick a day to see shortlisted inspections in order, with clashes and too-tight travel gaps flagged; calendar export for that day.
+- **Drift canary**: remembers how often each field is present; if one that's usually there suddenly isn't, the drawer says so. `reaFilter.selfcheck()` copies a diagnostics report for bug reports.
+- Settings (card badges, fading, remembering) moved to their own section; launcher shows the shortlist count; Best match explains what it needs; shortlisted listings show when they were last seen.
+
 ## 2.7.0
 
 - **Star / Hide buttons on REA's own result cards** (append-only; clicks don't reach REA's link).
