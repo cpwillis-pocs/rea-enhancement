@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.13.2
+
+- Heads-up tags ignore good news next to a mention: "no application fee", "water usage not charged", "rent bidding is prohibited", "fee: nil", "no break lease fees", "we do not accept offers above". They also catch more phrasing ("6-12 month lease", "6mth lease", "water usage charges apply", "tenant pays water", "break-fee"). So **Hide if mentioned** no longer hides listings for their disclaimers.
+- Remembered searches saved before heads-up tags existed get them when loaded.
+- A non-numeric saved filter value no longer shows a "$NaN" chip.
+
 ## 2.13.1
 
 - Tab-cached results from older versions are refetched so heads-up tags show on them.
