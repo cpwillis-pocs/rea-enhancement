@@ -16,6 +16,9 @@ test('parseAvail: formats', () => {
   assert.equal(p('Available October 5, 2027'), '2027-10-5');
   assert.equal(p('Contact agent'), null);
   assert.equal(p(''), null);
+  assert.equal(p('Available 05/11/2026'), '2026-11-5');
+  assert.equal(p('Available 5-11-26'), '2026-11-5');
+  assert.equal(p('Available 31/02/2026'), null);
 });
 
 test('parseAvail: year rollover for year-less dates', () => {
@@ -27,6 +30,11 @@ test('parsePrice', () => {
   assert.equal(core.parsePrice('$750 per week'), 750);
   assert.equal(core.parsePrice('$1,050 pw'), 1050);
   assert.equal(core.parsePrice('Contact agent'), Infinity);
+  assert.equal(core.parsePrice('$650 - $700 per week'), 650);
+  assert.equal(core.parsePrice('$2,600 per month'), 600);
+  assert.equal(core.parsePrice('$2600 pcm'), 600);
+  assert.equal(core.parsePrice('$52,000 p.a.'), 1000);
+  assert.equal(core.parsePrice('$52k per annum'), 1000);
 });
 
 test('extractResults: reads nested cache', () => {

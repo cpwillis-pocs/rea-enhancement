@@ -54,6 +54,12 @@
     if (!display) return null;
     const today = new Date(now); today.setHours(0, 0, 0, 0);
     if (/\bnow\b/i.test(display)) return today;
+    // AU numeric order: dd/mm/yyyy, dd-mm-yy
+    const num = display.match(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})\b/);
+    if (num) {
+      const d = new Date(+num[3] < 100 ? 2000 + +num[3] : +num[3], +num[2] - 1, +num[1]);
+      return isNaN(d) || d.getDate() !== +num[1] ? null : d;
+    }
     // "12th Oct 2026" or "October 12, 2026"
     const dm = display.match(/(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3})[a-z]*\.?(?:,?\s+(\d{4}))?/i);
     const md = !dm && display.match(/\b([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?/i);
@@ -66,9 +72,16 @@
     return isNaN(d) ? null : d;
   };
 
+  // Weekly rent as a number. Ranges take the lower bound; monthly/annual figures are
+  // converted so mixed listings sort and filter on one scale. Unparseable -> Infinity.
   const parsePrice = (display) => {
-    const m = (display || '').replace(/,/g, '').match(/\$\s*(\d+(?:\.\d+)?)/);
-    return m ? +m[1] : Infinity;
+    const s = (display || '').replace(/,/g, '');
+    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k)?/i);
+    if (!m) return Infinity;
+    let v = +m[1] * (m[2] ? 1000 : 1);
+    if (/\b(per\s*month|p\.?\s*c\.?\s*m|pcm|monthly|\/\s*month|a\s*month)\b/i.test(s)) v = (v * 12) / 52;
+    else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|\/\s*year)\b/i.test(s)) v /= 52;
+    return Math.round(v);
   };
 
   function extractResults(html) {
