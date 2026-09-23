@@ -90,7 +90,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-  const safeUrl = (u) => (/^https:\/\//i.test(u || '') ? u : '');
+  const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : '');
 
   // ------------------------------------------------------------ extraction
 
@@ -200,27 +200,34 @@
 
   const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
 
+  // One malformed listing must not sink a page: rows that throw are dropped.
+  const safeRow = (listing, surrounding) => { try { return toRow(listing, surrounding); } catch { return null; } };
+  const rowsFrom = (results) => [
+    ...(results?.exact?.items || []).map((i) => i?.listing && safeRow(i.listing, false)),
+    ...(results?.surrounding?.items || []).map((i) => i?.listing && safeRow(i.listing, true)),
+  ].filter(Boolean);
+
   const toRow = (listing, surrounding) => {
-    const display = listing.availableDate?.display || '';
-    const price = listing.price?.display || '';
+    const display = str(listing.availableDate);
+    const price = str(listing.price);
     const row = {
       avail: parseAvail(display),
       available: display.replace(/^Available\s*/i, '') || '-',
       price,
       priceNum: parsePrice(price),
-      bond: listing.bond?.display || '',
-      address: listing.address?.display?.fullAddress || listing.address?.display?.shortAddress || '',
-      suburb: listing.address?.suburb || '',
-      beds: listing.generalFeatures?.bedrooms?.value ?? '',
-      baths: listing.generalFeatures?.bathrooms?.value ?? '',
-      cars: listing.generalFeatures?.parkingSpaces?.value ?? '',
-      type: listing.propertyType?.display || '',
-      img: safeUrl(listing.media?.mainImage?.templatedUrl?.replace('{size}', IMG_SIZE)),
-      url: safeUrl(listing._links?.canonical?.href),
+      bond: str(listing.bond),
+      address: str(listing.address?.display?.fullAddress) || str(listing.address?.display?.shortAddress),
+      suburb: str(listing.address?.suburb),
+      beds: scalar(listing.generalFeatures?.bedrooms?.value),
+      baths: scalar(listing.generalFeatures?.bathrooms?.value),
+      cars: scalar(listing.generalFeatures?.parkingSpaces?.value),
+      type: str(listing.propertyType),
+      img: safeUrl(str(listing.media?.mainImage?.templatedUrl).replace('{size}', IMG_SIZE)),
+      url: safeUrl(str(listing._links?.canonical?.href)),
       surrounding,
       headline: str(listing.title) || str(listing.headline) || '',
       // Cards are matched by the id in their href, so prefer the URL-derived id.
-      id: listingId(listing._links?.canonical?.href) || String(listing.id ?? ''),
+      id: listingId(str(listing._links?.canonical?.href)) || String(listing.id ?? ''),
       inspections: extractInspections(listing),
       listed: extractListed(listing),
     };
@@ -233,7 +240,9 @@
     return row;
   };
 
+  // Coercers for fields REA might reshape: anything unexpected becomes ''.
   const str = (v) => (typeof v === 'string' ? v : typeof v?.display === 'string' ? v.display : '');
+  const scalar = (v) => (typeof v === 'number' || typeof v === 'string' ? v : '');
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const jitter = (ms) => Math.round(ms * (0.75 + Math.random() * 0.75));
@@ -275,8 +284,7 @@
       });
       total = results.pagination?.maxPageNumberAvailable || 1;
       max = Math.min(total, MAX_PAGES);
-      for (const it of results.exact?.items || []) if (it.listing) rows.push(toRow(it.listing, false));
-      for (const it of results.surrounding?.items || []) if (it.listing) rows.push(toRow(it.listing, true));
+      rows.push(...rowsFrom(results));
       sample ??= results.exact?.items?.find((i) => i.listing)?.listing ?? null;
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
@@ -409,7 +417,7 @@
   // Node test harness: expose pure functions, skip all DOM work.
   if (typeof window === 'undefined') {
     module.exports = {
-      parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
+      parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
       fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
@@ -503,7 +511,8 @@
   })();
 
   const bootAt = Date.now();
-  const store = rowStore(window.sessionStorage);
+  // sessionStorage access itself throws when the browser blocks site data.
+  const store = (() => { try { return rowStore(window.sessionStorage); } catch { return { get: () => null, set: () => {} }; } })();
   let rawSample = boot?.results?.exact?.items?.find((i) => i.listing)?.listing ?? null;
 
   function build() {
@@ -795,10 +804,7 @@
   };
   let knownVer = 0;
   const learn = (rows) => { for (const r of rows) if (r.id) known.set(r.id, r); knownVer++; };
-  const rowsOf = (results) => [
-    ...(results.exact?.items || []).filter((i) => i.listing).map((i) => toRow(i.listing, false)),
-    ...(results.surrounding?.items || []).filter((i) => i.listing).map((i) => toRow(i.listing, true)),
-  ];
+  const rowsOf = rowsFrom;
 
   const badgeHtml = (r) => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -921,11 +927,15 @@
     raw: () => rawSample,
   };
 
-  build();
-  ui.launch.hidden = !isSearchPage(location.href);
-  if (boot) learn(rowsOf(boot.results));
-  watchNavigation();
-  watchCards();
-  restore();
-  ensureVisiblePage();
+  // Each step isolated: a failure in one (eg REA drift) must not take the others down.
+  const step = (name, fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn(`[reaFilter] ${name}:`, e)); } catch (e) { console.warn(`[reaFilter] ${name}:`, e); } };
+  step('build', build);
+  if (ui) {
+    step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); });
+    step('boot', () => { if (boot) learn(rowsOf(boot.results)); });
+    step('navigation', watchNavigation);
+    step('cards', watchCards);
+    step('restore', restore);
+    step('annotate', ensureVisiblePage);
+  }
 })();

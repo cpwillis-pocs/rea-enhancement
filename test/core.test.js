@@ -178,3 +178,17 @@ test('toRow: id prefers canonical URL id', () => {
   const r = core.toRow(listing({ id: '999', _links: { canonical: { href: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500010' } } }), false);
   assert.equal(r.id, '146500010');
 });
+
+test('toRow/rowsFrom: reshaped fields degrade instead of throwing', () => {
+  const weird = listing({
+    availableDate: { display: { text: 'Available now' } }, price: { display: 750 },
+    media: { mainImage: { templatedUrl: { a: 1 } } }, generalFeatures: { bedrooms: { value: { n: 2 } } },
+  });
+  const r = core.toRow(weird, false);
+  assert.equal(r.avail, null);
+  assert.equal(r.priceNum, Infinity);
+  assert.equal(r.img, '');
+  assert.equal(r.beds, '');
+  const rows = core.rowsFrom({ exact: { items: [{ listing: listing() }, { listing: null }, {}] }, surrounding: null });
+  assert.equal(rows.length, 1);
+});
