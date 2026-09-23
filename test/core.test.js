@@ -272,3 +272,15 @@ test('diffStats / ago / isFresh', () => {
   assert.equal(core.ago(2 * 864e5), '2d ago');
   assert.equal(core.isFresh({ isNew: false, sinceLast: false }), false);
 });
+
+test('moveIn: bond + 2 weeks, bond weeks, unknowns', () => {
+  assert.deepEqual(core.moveIn('$3,000', 750), { bondNum: 3000, upfront: 4500, bondWeeks: 4 });
+  assert.equal(core.moveIn('$4,500', 750).bondWeeks, 6);
+  assert.deepEqual(core.moveIn('', 750), { bondNum: Infinity, upfront: Infinity, bondWeeks: null });
+  assert.equal(core.moveIn('$3000', Infinity).upfront, Infinity);
+  const r = core.toRow(listing(), false);
+  assert.equal(r.upfront, 4500);
+  const ids = (cfg) => core.applyFilters([r, core.toRow(listing({ id: 'nob', bond: {} }), false)], cfg).map((x) => x.url.split('-').pop());
+  assert.deepEqual(ids({ upfrontMax: '5000' }), ['1001']);
+  assert.deepEqual(ids({ upfrontMax: '4000' }), []);
+});

@@ -49,7 +49,7 @@
   const RENDER_CHUNK = 100;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
-  const ROWS_VERSION = 5; // bump when toRow() shape changes
+  const ROWS_VERSION = 6; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROWS_TTL_MS = 10 * 60 * 1000;
   const ROWS_KEEP = 2; // searches kept in sessionStorage
@@ -134,9 +134,22 @@
   // across searches, f=first seen, l=last seen, p/ps=last weekly price and its display,
   // pp/pps=previous, pt=when it changed.
   const NOTE_MAX = 500;
+  const ADVANCE_WEEKS = 2; // rent usually paid in advance at signing
+  const BOND_CAP_WEEKS = 4; // typical state cap on bond for standard rents; above it is flagged, not filtered
   const INSPECT_KEEP = 3; // inspections kept per stored row
   const isListingId = (v) => /^\d{1,15}$/.test(String(v));
   // Studios report 0 beds: price per bed is then the full price.
+  // Money needed to move in: bond + ADVANCE_WEEKS of rent. bondWeeks = bond in weeks of rent.
+  const moveIn = (bondDisplay, priceNum) => {
+    const m = String(bondDisplay || '').replace(/,/g, '').match(/\$\s*(\d+(?:\.\d+)?)/);
+    const bondNum = m ? +m[1] : Infinity;
+    const ok = isFinite(bondNum) && isFinite(priceNum) && priceNum > 0;
+    return {
+      bondNum,
+      upfront: ok ? Math.round(bondNum + ADVANCE_WEEKS * priceNum) : Infinity,
+      bondWeeks: ok ? Math.round((bondNum / priceNum) * 10) / 10 : null,
+    };
+  };
   const perBed = (priceNum, beds) => (isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +beds || 0)) : Infinity);
   const cleanInspections = (a) => (Array.isArray(a) ? a : []).slice(0, INSPECT_KEEP)
     .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }));
@@ -301,6 +314,7 @@
     r.id = isListingId(o?.id) ? String(o.id) : listingId(r.url);
     r.priceNum = typeof o?.priceNum === 'number' ? o.priceNum : parsePrice(r.price);
     r.ppb = typeof o?.ppb === 'number' ? o.ppb : perBed(r.priceNum, r.beds);
+    Object.assign(r, moveIn(r.bond, r.priceNum));
     r.surrounding = !!o?.surrounding;
     r.headline = clip(o?.headline, 160);
     r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
@@ -563,6 +577,7 @@
     row.nextInspect = next ? new Date(next.at) : null;
     row.inspect = row.inspections.map((i) => i.label).join('; ');
     row.ppb = perBed(row.priceNum, row.beds);
+    Object.assign(row, moveIn(row.bond, row.priceNum));
     row.text = [row.headline, str(listing.description), row.address, row.type].filter(Boolean).join(' ').toLowerCase();
     return row;
   };
@@ -641,7 +656,7 @@
 
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
-    priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
+    priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
     remember: true, newOnly: false, showGone: false,
@@ -655,9 +670,9 @@
 
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
-  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
+  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
     'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly'];
-  const MORE_KEYS = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
+  const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
     'onlyStarred', 'showHidden', 'newOnly', 'showGone'];
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember'];
 
@@ -739,7 +754,7 @@
     // saved setting never goes stale the way a fixed date does.
     const w = windowEndDate(cfg.withinDays, now);
     if (w && (!to || w < to)) to = w;
-    const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax);
+    const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax), upMax = num(cfg.upfrontMax);
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
@@ -752,6 +767,7 @@
       .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
+      .filter((r) => upMax == null || (r.upfront ?? Infinity) <= upMax) // unknown bond fails a move-in cap
       .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
       .filter((r) => !cfg.type || r.type === cfg.type)
       .filter((r) => !cfg.hideNoImage || r.img)
@@ -764,7 +780,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
@@ -815,7 +831,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG, moveIn, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -933,6 +949,7 @@
   .rf-was.down{color:#087a50;background:rgba(8,122,80,.12)}
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
+  .rf-warn{color:#b45309;font-weight:600}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
@@ -1033,6 +1050,7 @@
           <div class="rf-grid3">
             <label>Min $/wk<input type="number" min="0" step="25" id="rf-priceMin" inputmode="numeric"></label>
             <label>Max $/wk<input type="number" min="0" step="25" id="rf-priceMax" inputmode="numeric"></label>
+            <label title="Bond + 2 weeks' rent">Max move-in $<input type="number" min="0" step="100" id="rf-upfrontMax" inputmode="numeric"></label>
             <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
             <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
             <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
@@ -1367,6 +1385,7 @@
             r.bond ? `bond ${r.bond}` : '',
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
+          ${isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
           ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
             r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',

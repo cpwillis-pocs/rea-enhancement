@@ -170,6 +170,22 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 10. Move-in cost shown and filterable; high bond flagged.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const txt = await page.textContent('.rf-list');
+    assert.match(txt, /Move-in \$\d/);
+    const total = await page.$$eval('.rf-item', (e) => e.length);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-upfrontMax', '3000'); await page.dispatchEvent('#rf-upfrontMax', 'change');
+    const capped = await page.$$eval('.rf-item', (e) => e.length);
+    assert.ok(capped < total, `move-in cap filters (${capped} < ${total})`);
+    console.log('move-in cost:', capped, 'of', total, 'under $3000');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
