@@ -50,7 +50,11 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
-  const ROWS_VERSION = 8; // bump when toRow() shape changes
+  const ROWS_VERSION = 8;
+  // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
+  const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
+    'openedAt', 'hideReason', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
+    'km', 'placeKm', '_kmFor', 'median', 'vsMedian']; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROW_INFINITE = ['priceNum', 'ppb', 'upfront', 'bondNum']; // "unknown" numbers held as Infinity
   const ROWS_TTL_MS = 10 * 60 * 1000;
@@ -105,7 +109,12 @@
     // sessionStorage (~5MB) is shared with REA's own code, so keep it small: at most
     // ROWS_KEEP searches, and the keyword blob truncated (full text stays in memory).
     set(key, rows, truncated) {
-      const slim = rows.map((r) => (r.text?.length > ROWS_TEXT_MAX ? { ...r, text: r.text.slice(0, ROWS_TEXT_MAX) } : r));
+      const slim = rows.map((r) => {
+        const o = { ...r, text: r.text?.length > ROWS_TEXT_MAX ? r.text.slice(0, ROWS_TEXT_MAX) : r.text };
+        for (const k of ROW_RUNTIME) delete o[k]; // rebuilt by decorate/score/distance after restore
+        if (o.amen) o.amen = Object.fromEntries(Object.entries(o.amen).filter(([, v]) => v === 'yes' || v === 'no'));
+        return o;
+      });
       const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ v: ROWS_VERSION, at: now(), truncated, rows: slim }));
       const ours = () => {
         const out = [];
@@ -548,17 +557,18 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'inspect', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch'];
+    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch']; // inspect/nextInspect: re-derived on load
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
-    for (const k of ROW_DATES) o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
+    for (const k of ROW_DATES) if (k !== 'nextInspect') o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
     o.headline = clip(r.headline, 160);
     o.text = clip(r.text, SNAP_TEXT_MAX);
     o.inspections = cleanInspections(r.inspections);
     o.features = (Array.isArray(r.features) ? r.features : []).slice(0, 40).map((f) => clip(f, 80));
     // Stored as computed: the text kept here is clipped, so recomputing could miss a late "no pets".
-    o.amen = Object.fromEntries(AMENITIES.map((a) => [a.id, r.amen?.[a.id] ?? null]));
+    // Only known answers are kept (most are unknown): about a fifth of a remembered search's size.
+    o.amen = Object.fromEntries(AMENITIES.map((a) => [a.id, r.amen?.[a.id]]).filter(([, v]) => v === 'yes' || v === 'no'));
     return o;
   };
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.

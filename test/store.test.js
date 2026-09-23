@@ -187,3 +187,19 @@ test('snapshots saved before heads-up tags get them on load; bad numeric cfg mak
   assert.equal(core.snapshotStore(m).get(k).rows[0].watch, 'water');
   assert.deepEqual(core.activeFilters({ ...core.DEFAULT_CFG, priceMin: 'abc' }), []);
 });
+
+test('rowStore / snapshots keep only what cannot be rebuilt', () => {
+  const m = memStorage();
+  const st = core.rowStore(m);
+  const r = { id: '146500001', url: 'https://www.realestate.com.au/p-1', starred: true, score: 80, km: 2, placeKm: [], amen: { pets: 'yes', pool: null }, priceNum: 500 };
+  st.set('https://www.realestate.com.au/rent/in-a/list-1', [r], false);
+  const got = st.get('https://www.realestate.com.au/rent/in-a/list-1').rows[0];
+  assert.equal(got.starred, undefined); assert.equal(got.score, undefined); assert.equal(got.km, undefined);
+  assert.deepEqual(got.amen, { pets: 'yes' });
+  assert.equal(r.starred, true, 'in-memory row untouched');
+  const sn = core.snapshotStore(memStorage());
+  sn.save('https://www.realestate.com.au/rent/in-a/list-1', [{ ...r, inspect: 'x', nextInspect: new Date(), inspections: [] }], false);
+  const raw = sn.exportData()['https://www.realestate.com.au/rent/in-a/list-1'].rows[0];
+  assert.equal('inspect' in raw, false); assert.equal('nextInspect' in raw, false);
+  assert.deepEqual(raw.amen, { pets: 'yes' });
+});
