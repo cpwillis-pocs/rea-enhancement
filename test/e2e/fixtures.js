@@ -24,6 +24,7 @@ const EXTRAS = {
   2: { address: '7/2 Curlewis St' }, // same building as listing 0 (10/2 Curlewis St)
   3: { address: '10/2 Curlewis St', listingCompany: { name: 'Other Agency' } }, // same unit, second agency
   4: { description: '6 month lease only. Dishwasher.' },
+  5: { title: 'DEPOSIT TAKEN - Bright 2 bed', description: 'Professional clean required on vacating.' },
 };
 function pageResults(n, { pages = 3, perPage = 6, noInspections = false, extras = false } = {}) {
   const items = [];
@@ -45,7 +46,7 @@ function pageResults(n, { pages = 3, perPage = 6, noInspections = false, extras 
         floorplans: k % 2 ? [] : [0] },
       listingCompany: x.listingCompany || { name: ['Bondi Realty', 'Harbour Property Co', 'Eastside Agents'][k % 3] },
       _links: { canonical: { href: `${ORIGIN}/property-apartment-nsw-bondi-${id}` } },
-      title: ['Light-filled with harbour glimpses', 'Renovated with pool', 'Moments to the beach', 'Quiet leafy street'][k % 4],
+      title: x.title || ['Light-filled with harbour glimpses', 'Renovated with pool', 'Moments to the beach', 'Quiet leafy street'][k % 4],
       inspections: noInspections || k % 2 ? [] : [{ startTime: new Date(Date.UTC(2026, 8, 26 + (k % 3), 0, 30)).toISOString() }],
       description: x.description || ['Pets considered on application. Split system air conditioning.', 'Sorry, no pets. Dishwasher and sunny balcony.',
         'Offered unfurnished. Built-in robes throughout. Water usage charged to tenant.'][k % 3],

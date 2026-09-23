@@ -102,3 +102,24 @@ test('snapshotStore: amenity states survive the round trip even when text is cli
   bad.importData({ [KEY]: { at: 5, rows: [{ id: '146500091', url: 'https://www.realestate.com.au/property-x-146500091', amen: { pets: '<b>', pool: 'yes' } }] } });
   assert.deepEqual([bad.get(KEY).rows[0].amen.pets, bad.get(KEY).rows[0].amen.pool], [null, 'yes']);
 });
+
+test('pinned saved searches are forgotten last; evictions are reported; all pinned refuses a new one', () => {
+  let t = Date.UTC(2026, 8, 1);
+  const st = core.snapshotStore(mem(), () => t);
+  const key = (s) => `https://www.realestate.com.au/rent/in-${s}/list-1`;
+  st.save(key('a'), [row('146500001')]); t += H;
+  st.pin(key('a'), true);
+  st.save(key('b'), [row('146500002')]); t += H;
+  st.save(key('c'), [row('146500003')]); t += H;
+  const out = st.save(key('d'), [row('146500004')]);
+  assert.deepEqual(out.evicted, [key('b')], 'oldest unpinned goes');
+  assert.ok(st.get(key('a')), 'pinned kept');
+  st.pin(key('c'), true); st.pin(key('d'), true); t += H;
+  const refused = st.save(key('e'), [row('146500005')]);
+  assert.equal(refused.refused, true);
+  assert.equal(st.get(key('e')), null);
+  assert.equal(refused.rows.length, 1, 'this run still gets its rows');
+  const other = core.snapshotStore(mem(), () => t);
+  other.importData(st.exportData());
+  assert.equal(other.exportData()[key('a')].pin, 1, 'pins survive a backup');
+});

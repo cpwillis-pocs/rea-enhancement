@@ -52,11 +52,11 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 9;
+  const ROWS_VERSION = 10;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'hideReason', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
-    'km', 'placeKm', '_kmFor', 'median', 'vsMedian']; // bump when toRow() shape changes
+    'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope']; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROW_INFINITE = ['priceNum', 'ppb', 'upfront', 'bondNum']; // "unknown" numbers held as Infinity
   const ROWS_TTL_MS = 10 * 60 * 1000;
@@ -179,12 +179,12 @@
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
-    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10),
+    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10), tk: clip(r.taken, 12),
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   // Summary fields a search result always carries in full (empty means none, not unknown).
-  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am'];
+  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk'];
   // Label of an upcoming stored inspection missing from the fresh list ('' if none went).
   const cancelledInspection = (old, next, t) => {
     const keep = new Set((next || []).map((i) => i.at ?? i.label));
@@ -241,11 +241,11 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 1; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 2; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -605,7 +605,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText']; // inspect/nextInspect: re-derived on load
+    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken']; // inspect/nextInspect: re-derived on load
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -634,6 +634,7 @@
     r.headline = clip(o?.headline, 160);
     r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
     r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
+    if (typeof o?.taken !== 'string') r.taken = takenOf(r.headline, r.text); // saved before this was detected
     if (typeof o?.watch !== 'string') r.watch = watchOf([r.headline, r.text, ...(Array.isArray(o?.features) ? o.features : [])].join(' ')).join(','); // saved before heads-up existed
     // Stored next-inspection time and text go stale as sessions pass: derive them again.
     if (Array.isArray(o?.inspections)) {
@@ -705,19 +706,21 @@
       } catch { /* corrupt */ }
       return { v: 1, s: {} };
     };
-    // Newest SNAP_MAX kept; on quota, drop older searches, then the gone lists, then give up.
+    // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
+    // lists, then give up. Returns the keys it stopped remembering.
     const persist = (d) => {
-      const keys = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
-      for (const k of keys.slice(SNAP_MAX)) delete d.s[k];
+      const keys = Object.keys(d.s).sort((a, b) => (d.s[b].pin ? 1 : 0) - (d.s[a].pin ? 1 : 0) || d.s[b].at - d.s[a].at);
+      const evicted = keys.slice(SNAP_MAX);
+      for (const k of evicted) delete d.s[k];
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { const out = JSON.stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return true; } catch {
+        try { const out = JSON.stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return evicted; } catch {
           memo = null;
           const ks = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
           if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) delete d.s[k];
           else for (const k of ks) d.s[k].gone = [];
         }
       }
-      return false;
+      return evicted;
     };
     const newSince = (ids, baseIds) => {
       if (!baseIds) return new Set();
@@ -754,9 +757,18 @@
             for (const r of prev.rows || []) if (!cur.has(String(r.id)) && base.has(String(r.id)) && !seen.has(String(r.id))) gone.push(r);
           }
         }
-        d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX) };
+        const entry = d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX), ...(prev?.pin ? { pin: 1 } : {}) };
+        const evicted = persist(d);
+        // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
+        return { ...view(entry), evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) };
+      },
+      // Pinned searches are the last to be forgotten when a new one is remembered.
+      pin(key, on) {
+        const d = load();
+        if (!d.s[key]) return false;
+        if (on) d.s[key].pin = 1; else delete d.s[key].pin;
         persist(d);
-        return view(d.s[key]);
+        return true;
       },
       clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
       exportData: () => load().s,
@@ -774,6 +786,7 @@
             at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
             ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
             gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
+            ...(e.pin ? { pin: 1 } : {}),
           };
           n++;
         }
@@ -1185,6 +1198,10 @@
     { id: 'bid', label: 'Invites higher offers', re: /\b(?:offers?|bids?) (?:above|over|in excess of)\b|\bhighest offer|\bbest offer/ },
     { id: 'strata', label: 'Subject to strata approval', re: /\bsubject to (?:strata|body corporate|owners? corporation)\b[^.;]{0,25}?\bapproval/ },
     { id: 'break', label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)?[- ]fees?\b|\blease[- ]break (?:fee|cost|clause)|\bbreaking (?:the|your) lease (?:incurs|costs|will)/ },
+    // Appended only: signatures are bitmasks by position (featSig).
+    { id: 'clean', label: 'Professional clean required', re: /\b(?:professional(?:ly)?|carpets?|steam)(?: end[- ]of[- ]lease| bond)? clean(?:ed|ing)?\b[^.;]{0,30}?\b(?:required|must|on vacating|upon vacating|at (?:the )?end of)|\bmust be (?:professionally|steam) cleaned\b/ },
+    { id: 'payfee', label: 'Rent payment fee', re: /\b(?:rent )?(?:payment|processing|transaction|convenience) fees?\b/ },
+    { id: 'garden', label: 'You maintain garden/pool', re: /\btenants? (?:is |are |will be )?(?:responsible for|to maintain|must maintain|maintains?) (?:the |all )?(?:gardens?|lawns?|yard|pool)\b/ },
   ];
   // A mention right next to a negation ("no application fee", "water usage not charged", "rent
   // bidding is prohibited", "fee: nil") is the good news, not a heads-up. Checked per clause.
@@ -1229,6 +1246,18 @@
     ['tApp', /\btapp\b/],
     ['Inspect Real Estate', /\binspect\s?real\s?estate\b/],
   ];
+  // Listings agents leave up once taken: "DEPOSIT TAKEN", "Under application", "LEASED".
+  // "Leased" only counts in the headline (descriptions say "leased parking", "previously leased").
+  const TAKEN = [
+    ['deposit', /\b(?:holding )?deposit (?:has been |now |already )?(?:taken|received|paid)\b/, true],
+    ['application', /\bunder application\b|\bapplications? (?:(?:now|are) )?closed\b|\bapplication (?:approved|accepted)\b/, true],
+    ['leased', /^\W*(?:leased|let agreed)\b|\b(?:now|just|has been) leased\b/, false],
+  ];
+  const TAKEN_LABELS = { deposit: 'Deposit taken', application: 'Under application', leased: 'Leased' };
+  const takenOf = (headline, text) => {
+    const h = String(headline || '').toLowerCase(), t = String(text || '').toLowerCase();
+    return TAKEN.find(([, re, inText]) => re.test(h) || (inText && re.test(t)))?.[0] || '';
+  };
   const applyViaOf = (text) => { const t = String(text || '').toLowerCase(); return APPLY_VIA.find(([, re]) => re.test(t))?.[0] || ''; };
 
   // Lease term in months from the text: { min, max } or { flexible }; null when not stated.
@@ -1355,6 +1384,7 @@
     const said = [row.headline, str(listing.description), ...row.features].join(' ');
     row.watch = watchOf(said).join(',');
     row.applyVia = applyViaOf(said);
+    row.taken = takenOf(row.headline, str(listing.description));
     row.lease = leaseCode(leaseTermOf(said));
     if (!row.avail) { // REA's field missing or unreadable: the description often says it
       const t = availFromText(said);
@@ -1439,9 +1469,9 @@
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
-    type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
+    type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
-    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '',
+    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1453,10 +1483,10 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
+    'inspectOn', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein']; // Clear keeps your "from" point
+  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -1493,29 +1523,36 @@
   // of MEDIAN_MIN or more). vsMedian = % above (+) or below (-); null when not comparable.
   const MEDIAN_MIN = 5;
   const STALE_MS = 21 * DAY_MS; // listed this long ago: rent may be negotiable
+  // Median rent per bed count. When the search spans suburbs, a listing is compared with its own
+  // suburb's median for that bed count (when that has MEDIAN_MIN listings), so a cheaper suburb
+  // doesn't read as a bargain against a dearer one.
   const withMedians = (rows) => {
-    const groups = new Map();
-    for (const r of dedupe(rows)) {
-      if (r.surrounding || !Number.isFinite(r.priceNum) || r.beds === '') continue;
-      const k = +r.beds;
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(r.priceNum);
+    const byBeds = new Map(), bySuburb = new Map();
+    const add = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+    const priced = dedupe(rows).filter((r) => Number.isFinite(r.priceNum) && r.beds !== '');
+    for (const r of priced) {
+      if (!r.surrounding) add(byBeds, +r.beds, r.priceNum);
+      if (r.suburb) add(bySuburb, `${String(r.suburb).toLowerCase()}|${+r.beds}`, r.priceNum);
     }
-    const med = new Map();
-    for (const [k, v] of groups) {
-      if (v.length < MEDIAN_MIN) continue;
-      v.sort((a, b) => a - b);
-      med.set(k, v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2);
-    }
+    const mid = (v) => { v.sort((a, b) => a - b); return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2; };
+    const medians = (groups) => new Map([...groups].filter(([, v]) => v.length >= MEDIAN_MIN).map(([k, v]) => [k, mid(v)]));
+    const med = medians(byBeds);
+    const multi = new Set(priced.map((r) => String(r.suburb).toLowerCase())).size > 1;
+    const sub = multi ? medians(bySuburb) : new Map();
     for (const r of rows) {
-      const m = r.beds === '' ? undefined : med.get(+r.beds);
+      const sm = r.beds === '' || !r.suburb ? undefined : sub.get(`${String(r.suburb).toLowerCase()}|${+r.beds}`);
+      const m = sm ?? (r.beds === '' ? undefined : med.get(+r.beds));
       r.median = m ?? null;
+      r.medianScope = sm != null ? r.suburb : '';
       r.vsMedian = m && Number.isFinite(r.priceNum) ? Math.round(((r.priceNum - m) / m) * 100) : null;
     }
     return rows;
   };
-  const medianLabel = (r) => (r.vsMedian == null ? '' : r.vsMedian === 0 ? `at median for ${+r.beds || 'studio'}${+r.beds ? '-bed' : ''}`
-    : `${Math.abs(r.vsMedian)}% ${r.vsMedian < 0 ? 'below' : 'above'} median ${+r.beds ? `${r.beds}-bed` : 'studio'}`);
+  const medianLabel = (r) => {
+    if (r.vsMedian == null) return '';
+    const what = `${r.medianScope ? `${r.medianScope} ` : ''}${+r.beds ? `${r.beds}-bed` : 'studio'}`;
+    return r.vsMedian === 0 ? `at median for ${what}` : `${Math.abs(r.vsMedian)}% ${r.vsMedian < 0 ? 'below' : 'above'} ${what} median`;
+  };
 
   // "Best match": mean of whichever signals the user has set up, each 0..1 (1 = best).
   // Explainable on purpose: scoreWhy lists the parts. Needs 2+ signals to mean anything.
@@ -1564,7 +1601,7 @@
     from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
     bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
-    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has a photo',
+    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has a photo', hideTaken: () => 'Not taken',
     exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet', leaseMin: (v) => `Lease ${v}+ mo`, onePerBuilding: () => 'One per building', building: (v) => `Building: ${v.split('|')[1] || 'one building'}`,
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
@@ -1747,6 +1784,7 @@
       .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
       .filter((r) => !cfg.type || r.type === cfg.type)
       .filter((r) => !cfg.hideNoImage || r.img)
+      .filter((r) => !cfg.hideTaken || !r.taken)
       .filter((r) => !kw || kw(r.text || ''))
       .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)))
       .filter((r) => !bKey || buildingKey(r.address) === bKey)
@@ -1798,7 +1836,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
@@ -1806,7 +1844,7 @@
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
+      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -1840,7 +1878,9 @@
     out.push(cur);
     return out.join('\r\n');
   };
-  const toIcs = (rows, now = Date.now()) => {
+  // `alarm`: minutes before each inspection for a reminder (0 = none; some calendars ignore
+  // reminders in imported files).
+  const toIcs = (rows, now = Date.now(), { alarm = 0 } = {}) => {
     const events = [];
     const seen = new Set();
     for (const r of rows) {
@@ -1852,7 +1892,8 @@
         events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`,
           `DURATION:PT${INSPECT_MINUTES}M`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
           `LOCATION:${icsText(r.address)}`, r.url ? `URL:${r.url}` : '',
-          `DESCRIPTION:${icsText([r.price, r.available && `Available ${r.available}`, r.note].filter(Boolean).join(' | '))}`,
+          `DESCRIPTION:${icsText([r.price, r.available && `Available ${r.available}`, r.agency, r.applyVia && `Apply via ${r.applyVia}`, leaseText(r.lease), r.appStatus && `Status: ${r.appStatus}`, r.note].filter(Boolean).join(' | '))}`,
+          ...(alarm > 0 ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(`Inspection: ${r.address || 'rental'}`)}`, `TRIGGER:-PT${Math.round(alarm)}M`, 'END:VALARM'] : []),
           'END:VEVENT'].filter(Boolean));
       }
     }
@@ -2079,7 +2120,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   function downloadIcs(rows) {
-    const ics = toIcs(rows);
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0 });
     if (!ics) return setStatus('No upcoming inspection times in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
   }
@@ -2204,6 +2245,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-acts button[data-act=s][aria-pressed=true]{color:var(--rf-star-fg)}
   .rf-tag.rf-new{background:#087a50;color:#fff}
   .rf-tag.rf-gone{background:#6b6b75;color:#fff}
+  .rf-tag.rf-taken{background:#b42318;color:#fff}
   .rf-was{font-weight:600;font-size:11px;padding:1px 5px;border-radius:4px}
   .rf-was.down{color:var(--rf-accent-fg);background:rgba(8,122,80,.12)}
   .rf-was.up{color:var(--rf-up);background:rgba(204,102,0,.12)}
@@ -2263,6 +2305,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-warn-t{color:var(--rf-err)}
   .rf-saved-list{list-style:none;margin:6px 0;padding:0;display:grid;gap:6px;font-size:13px}
   .rf-saved-list a{color:inherit;font-weight:600}
+  .rf-saved-list .rf-pin{margin-left:6px;font-size:11px;padding:1px 8px}
+  .rf-saved-list .rf-pin[aria-pressed=true]{background:var(--rf-accent);color:#fff;border-color:var(--rf-accent)}
   .rf-market{padding:8px 12px;font-size:12px;min-width:0}
   .rf-market-t{overflow-x:auto;max-width:100%}
   .rf-market table{border-collapse:collapse;width:100%;margin:6px 0 12px}
@@ -2317,6 +2361,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
   .rf-badge .rf-b-star{background:#e6a700;color:#111}
   .rf-badge .rf-b-new{background:#2563eb}
+  .rf-badge .rf-b-taken{background:#b42318}
   .rf-badge .rf-b-down{background:#087a50}
   .rf-badge .rf-b-up{background:#a84f00}
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
@@ -2472,6 +2517,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
+          <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
           <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
           <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price, date or details changed recently</label>
           <label class="rf-check"><input type="checkbox" id="rf-unopenedOnly">Not opened yet</label>
@@ -2493,6 +2539,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
             ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
               <option value="0">Ignore</option><option value="1">Less</option><option value="2">Normal</option><option value="3">More</option></select></label>`).join('')}
           </fieldset>
+          <label title="Some calendar apps ignore reminders in imported files">Calendar reminder<select id="rf-icsAlarm">
+            ${[['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
           <label>My current lease ends (optional)<input type="date" id="rf-leaseEnd" title="Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap"></label>
           <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
           <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
@@ -2829,6 +2877,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         onChange({ type: 'change' });
         return setStatus(msg);
       }
+      if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
       if (b.dataset.act === 'enq') {
         const r = rowOf(id);
         if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
@@ -3049,6 +3098,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.saved = panel.querySelector('.rf-saved');
     ui.savedResult = new Map();
     ui.saved.querySelector('[data-saved-check]').addEventListener('click', (e) => checkSaved(e.currentTarget));
+    ui.saved.querySelector('.rf-saved-list').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-saved-pin]');
+      if (!b) return;
+      const on = b.getAttribute('aria-pressed') !== 'true';
+      snaps.pin(b.dataset.savedPin, on);
+      renderSaved();
+      ui.saved.querySelector(`[data-saved-pin="${CSS.escape(b.dataset.savedPin)}"]`)?.focus();
+      setStatus(on ? `Pinned ${searchLabel(b.dataset.savedPin)}.` : `Unpinned ${searchLabel(b.dataset.savedPin)}.`);
+    });
     ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
       const rows = shortlistRows();
       if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
@@ -3175,6 +3233,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const r = ui.savedResult.get(k);
       const found = r ? ` · <strong>${r.added} new</strong>${r.gone ? `, ${r.gone} gone` : ''}` : '';
       return `<li><a href="${esc(safeUrl(k))}">${esc(searchLabel(k))}</a>${k === here ? ' <span class="rf-tag">this search</span>' : ''}
+        <button type="button" class="rf-chip rf-pin" data-saved-pin="${esc(k)}" aria-pressed="${!!e.pin}" title="${e.pin ? 'Pinned: kept when you open other searches' : `Keep this one when more than ${SNAP_MAX} searches are opened`}">${e.pin ? 'Pinned' : 'Pin'}</button>
         <div class="rf-meta">${(e.ids || e.rows || []).length} listings · checked ${esc(ago(Date.now() - e.at))}${found}</div></li>`;
     }).join('');
   }
@@ -3498,7 +3557,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}${r.taken ? `<span class="rf-tag rf-taken" title="Going by the listing text">${esc(TAKEN_LABELS[r.taken])}</span>` : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
@@ -3535,6 +3594,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
+          ${r.inspections?.some((i) => typeof i.at === 'number' && i.at > now) ? '<button data-act="ics" title="Download this listing\'s inspection times for your calendar">Add to calendar</button>' : ''}
           ${r.lat != null ? `<button data-act="anchor" title="Measure distances from this listing">Measure from here</button><button data-act="place" title="Add this listing's location to Other places">Add as a place</button>` : ''}
           ${r.suburb && !sl ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
           ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
@@ -3690,7 +3750,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       try { drops = health.record(res.rows); } catch (e) { logError(`health: ${e.message}`); }
       setWarn('drift', drops.length ? `REA may have changed its data: ${drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`).join('; ')}. Run reaFilter.selfcheck() in the console and report it.` : '');
       store.set(key, res.rows, res.truncated);
-      adopt(key, res.rows, res.truncated, '', cfg.remember ? snaps.save(key, res.rows, res.truncated) : null, true);
+      const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
+      setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
+        : snap?.evicted.length ? `Stopped remembering ${snap.evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : '');
+      adopt(key, res.rows, res.truncated, '', snap, true);
     } catch (err) {
       if (id !== runId || ctrl.signal.aborted) return;
       cache = null;
@@ -3749,7 +3812,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const availMoved = r.prevAvail ? `<span title="Availability date changed">Avail was ${esc(r.prevAvail)}</span>` : '';
     const pets = r.amen?.pets === 'yes' ? '<span class="rf-b-pets">Pets OK</span>' : '';
     const km = r.km != null ? `<span>${esc(kmLabel(r).replace(' away', ''))}</span>` : '';
-    return star + fresh + avail + availMoved + moved + pets + km + insp + ppb;
+    const taken = r.taken ? `<span class="rf-b-taken">${esc(TAKEN_LABELS[r.taken])}</span>` : '';
+    return star + taken + fresh + avail + availMoved + moved + pets + km + insp + ppb;
   };
 
   // Listing (property) page: a small bar to shortlist, set status, note or hide this listing

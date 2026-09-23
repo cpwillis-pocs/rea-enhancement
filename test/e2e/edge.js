@@ -205,7 +205,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(med.length > 0 && med.every((t) => /median/.test(t)), 'median comparisons shown');
     await page.selectOption('#rf-sort', 'value');
     const first = await page.textContent('.rf-item .rf-med');
-    assert.match(first, /below median/, 'best value first');
+    assert.match(first, /below [\w -]*median/, 'best value first');
     console.log('median:', med.length, 'listings compared; first by value:', first);
     await done(page); await ctx.close();
   });
@@ -1020,6 +1020,45 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.$('#rf-remind'), null, 'not again the same day');
     console.log('saved-search reminder: ok');
     await done(page); await ctx.close();
+  });
+
+  // 29. 2.17: taken listings (tag, filter), per-listing calendar with reminder, pinned saved
+  // search, a cancelled open home flagged on the shortlist.
+  await block('29', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
+    const item = (id) => page.textContent(`.rf-item[data-id="${id}"]`);
+    await run(page);
+    assert.match(await item('146500005'), /Deposit taken/);
+    assert.match(await item('146500005'), /Professional clean required/);
+    const total = await count(page);
+    await page.click('#rf-more summary');
+    await page.check('#rf-hideTaken');
+    assert.equal(await count(page), total - 1, 'taken listing hidden');
+    assert.ok(await page.$('.rf-achip:has-text("Not taken")'));
+    await page.uncheck('#rf-hideTaken');
+    // Add to calendar from the ⋯ menu: one listing, with the default 1-hour reminder.
+    await page.click('.rf-item[data-id="146500000"] .rf-acts-more summary');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-item[data-id="146500000"] [data-act=ics]')]);
+    const ics = fs.readFileSync(await dl.path(), 'utf8');
+    assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 1);
+    assert.match(ics, /TRIGGER:-PT60M/);
+    // Pin this search in Saved searches.
+    await page.waitForSelector('.rf-saved:not([hidden])');
+    await page.click('.rf-saved summary');
+    await page.click('.rf-saved-list [data-saved-pin]');
+    assert.equal(await page.getAttribute('.rf-saved-list [data-saved-pin]', 'aria-pressed'), 'true');
+    assert.equal(await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('rea-avail-filter/snapshots/v1')).s)[0].pin), 1);
+    // Shortlist it, then the next search shows no inspection for it: cancelled.
+    await page.evaluate(() => document.querySelectorAll('.rf-acts-more[open]').forEach((d) => { d.open = false; }));
+    await page.click('.rf-item[data-id="146500000"] [data-act=s]');
+    await done(page);
+    const later = await open(ctx, SEARCH, { route: serve([], { extras: true, noInspections: true }) });
+    await run(later);
+    await later.click('[data-view=shortlist]');
+    assert.match(await later.textContent('.rf-item[data-id="146500000"]'), /Inspection .+ cancelled/);
+    console.log('taken, listing calendar, pinned search, cancelled inspection: ok');
+    await done(later); await ctx.close();
   });
 
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.

@@ -312,7 +312,7 @@ test('withMedians / medianLabel / staleOnly / value sort', () => {
   assert.equal(rows[0].median, 650); // 400..900 six values -> (600+700)/2
   assert.equal(rows[0].vsMedian, -23);
   assert.equal(rows[5].vsMedian, null, 'group too small');
-  assert.match(core.medianLabel(rows[0]), /23% below median 2-bed/);
+  assert.match(core.medianLabel(rows[0]), /23% below 2-bed median/);
   assert.equal(core.medianLabel(rows[5]), '');
   const ids = (cfg) => core.applyFilters(rows, cfg, now).map((r) => r.url.split('-').pop());
   assert.deepEqual(ids({ staleOnly: true }), ['g']);
@@ -694,4 +694,49 @@ test('2.17 fixes: fortnightly and nightly rents, yearless d/m dates, inspection 
   const cell = (h) => line.split(',')[head.split(',').indexOf(h)];
   assert.equal(cell('application_date'), '2026-09-20');
   assert.equal(cell('checklist'), '✗ Noise; ✓ Light');
+});
+
+test('medians: a multi-suburb search compares each listing with its own suburb; small suburbs fall back', () => {
+  const mk = (suburb, rents) => rents.map((p, i) => ({ id: `${suburb}${i}`, url: `${suburb}${i}`, suburb, beds: 2, priceNum: p }));
+  const rows = [...mk('Bondi', [900, 950, 1000, 1050, 1100]), ...mk('Maroubra', [600, 650, 700, 750, 800]), ...mk('Coogee', [800, 820])];
+  core.withMedians(rows);
+  const m = rows.find((r) => r.id === 'Maroubra2');
+  assert.equal(m.vsMedian, 0); assert.equal(core.medianLabel(m), 'at median for Maroubra 2-bed');
+  const c = rows.find((r) => r.id === 'Coogee0');
+  assert.equal(c.medianScope, '', 'too few in Coogee: overall 2-bed median');
+  assert.equal(c.median, 810);
+  const one = mk('Bondi', [900, 950, 1000, 1050, 1100]);
+  core.withMedians(one);
+  assert.equal(core.medianLabel(one[0]), '10% below 2-bed median', 'one suburb: no suburb name');
+});
+
+test('taken listings: detected from headline/description, filtered, kept across a snapshot', () => {
+  const t = (h, d = '') => core.toRow(listing({ title: h, description: d }), false).taken;
+  assert.equal(t('DEPOSIT TAKEN - Sunny 2 bed'), 'deposit');
+  assert.equal(t('Sunny 2 bed', 'Holding deposit has been taken, thanks for your interest.'), 'deposit');
+  assert.equal(t('Sunny 2 bed', 'A holding deposit of 1 week secures the property.'), '');
+  assert.equal(t('UNDER APPLICATION | Bondi'), 'application');
+  assert.equal(t('LEASED'), 'leased');
+  assert.equal(t('Bondi unit', 'Previously leased to long-term tenants; leased parking available.'), '', '"leased" only in the headline');
+  const rows = [{ id: '1', url: 'a', taken: 'deposit' }, { id: '2', url: 'b', taken: '' }];
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, hideTaken: true }).map((r) => r.id), ['2']);
+  assert.equal(core.activeFilters({ ...core.DEFAULT_CFG, hideTaken: true })[0].label, 'Not taken');
+});
+
+test('calendar: optional reminder, richer description', () => {
+  const now = Date.now();
+  const r = { id: '146500001', url: 'https://www.realestate.com.au/p-146500001', address: '1 Test St', agency: 'Harbour Co', applyVia: 'Snug', lease: '12', inspections: [{ at: now + 864e5, label: 'x' }] };
+  const plain = core.toIcs([r], now);
+  assert.ok(!plain.includes('VALARM'));
+  assert.match(plain, /Harbour Co \| Apply via Snug \| Lease 12 mo/);
+  const alarm = core.toIcs([r], now, { alarm: 60 });
+  assert.match(alarm, /BEGIN:VALARM\r\nACTION:DISPLAY\r\n.*\r\nTRIGGER:-PT60M\r\nEND:VALARM\r\nEND:VEVENT/);
+});
+
+test('heads-up: cleaning, payment fees and garden upkeep; negated mentions ignored', () => {
+  assert.deepEqual(core.watchOf('Professional clean required at the end of the lease.'), ['clean']);
+  assert.deepEqual(core.watchOf('Freshly professionally cleaned apartment.'), []);
+  assert.deepEqual(core.watchOf('A rent payment fee of $2.50 applies.'), ['payfee']);
+  assert.deepEqual(core.watchOf('No payment fees.'), []);
+  assert.deepEqual(core.watchOf('Tenant is responsible for the garden and lawns.'), ['garden']);
 });
