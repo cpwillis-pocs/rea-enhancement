@@ -2,6 +2,18 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.16.0
+
+- **Lease overlap**: set "My current lease ends" in Settings and each listing shows the overlap you'd pay ("6 days overlap ≈ $600") or the gap to cover ("9 nights gap"); new sort **Least overlap with my lease** and a Compare row.
+- **Availability from the description** when REA's date is missing ("Available from 1st December" → "1 Dec 2026 (from text)"), so those listings stop dropping out of date filters.
+- **After-inspection prompts** on the shortlist: once an inspection you were down for has passed, "Did you inspect? Yes / Didn't go"; inspected two days ago and not applied, "apply?". New shortlist filter **Needs action**.
+- **Apply via** tag when the text names the portal (2Apply, Snug, Ignite, tApp, Inspect Real Estate), and the **lease term** ("Lease 6–12 mo", "Flexible lease") on listings and in Compare. New filter **Lease at least** 6/12/24 months (only a stated shorter lease is hidden).
+- **Same building**: "3 in this building" on units (click to show just that building, removable chip), "Also listed by …" when the same address is listed twice, and **One listing per building** (keeps the cheapest).
+- **Measure from here** / **Add as a place** in a listing's ⋯ menu use its own location; Other places now says which lines it understood.
+- **Saved-search reminder**: at most once a day, a small prompt by the launcher when your saved searches haven't been checked for a day ("Check now" / "Later"; nothing is fetched until you click; can be turned off in Settings).
+- Data-format warnings appear in their own dismissible banner, so the status line keeps "N of M match"; money facts (move-in, lease overlap, % of income, vs median) share one line.
+- Fixed: after typing in Other places, the first click in the list was lost.
+
 ## 2.15.2
 
 - Faster: reading a results page is about 40% quicker (heads-up and pool checks no longer recompile or backtrack), shortlist/hide/note clicks write about half as much work (the stored shortlist is reused until another tab changes it), and re-rendering after a click keeps the listings you had shown in one pass.

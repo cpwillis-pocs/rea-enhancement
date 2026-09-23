@@ -28,6 +28,9 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
 - Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
+- **Lease overlap**: with your current lease end set, each listing shows the days of double rent (and cost) or the nights you'd need to cover, sortable.
+- **Lease term** and **Apply via** portal picked out of the text; filter out leases shorter than you need; availability read from the description when REA's date is missing.
+- **Same building**: see other units in the building, spot the same place listed twice, or keep one listing per building.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
 - **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
 - **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval and lease-break terms, picked out of the listing text; **Hide if mentioned** filters them out.
@@ -55,10 +58,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
-- **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time).
+- **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder.
 - **Opened tracking**: "opened 2d ago" on listings you've looked at, and a **Not opened yet** filter.
 - **Hide with a reason** (too small, location, condition, price) so you remember why later.
-- **Application follow-up**: time since you applied, a "follow up?" nudge, and your record with each agency.
+- **Application follow-up**: "did you inspect?" after an inspection passes, time since you applied, a "follow up?" nudge, a **Needs action** filter, and your record with each agency.
 - **Copy enquiry**: a ready-made message for the agent from a template you can edit.
 - **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly.
 - Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
