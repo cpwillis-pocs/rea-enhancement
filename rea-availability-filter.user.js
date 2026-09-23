@@ -27,6 +27,8 @@
   const IMG_SIZE = '345x260';
   const PAGE_DELAY_MS = 600;
   const MAX_PAGES = 20;
+  const RETRIES = 3;
+  const RETRY_BASE_MS = 1000;
 
   // ---------------------------------------------------------------- config
 
@@ -84,12 +86,12 @@
     return Math.round(v);
   };
 
-  function extractResults(html) {
-    const m = html.match(/window\.ArgonautExchange=(\{.*?\});?<\/script>/s);
-    if (!m) throw new Error('Hydration blob missing - probably a bot-check interstitial. Reload the page and retry.');
-    const raw = JSON.parse(m[1])['resi-property_listing-experience-web']?.urqlClientCache;
+  // REA's SSR payload: ArgonautExchange -> app key -> urqlClientCache (JSON string)
+  // -> entries whose `data` is (usually) a further JSON string.
+  function parseExchange(exchange) {
+    const raw = exchange?.['resi-property_listing-experience-web']?.urqlClientCache;
     if (!raw) throw new Error('Listing cache missing from page markup.');
-    const cache = JSON.parse(raw);
+    const cache = typeof raw === 'string' ? JSON.parse(raw) : raw;
     for (const key of Object.keys(cache)) {
       const entry = cache[key];
       const data = typeof entry?.data === 'string' ? JSON.parse(entry.data) : entry?.data;
@@ -98,13 +100,24 @@
     throw new Error('No rentSearch results found in cache.');
   }
 
+  function extractResults(html) {
+    const m = html.match(/window\.ArgonautExchange=(\{.*?\});?<\/script>/s);
+    if (!m) throw new Error('Hydration blob missing - probably a bot-check interstitial. Reload the page and retry.');
+    return parseExchange(JSON.parse(m[1]));
+  }
+
   const pageUrl = (base, n) => {
     const u = new URL(base);
+    u.hash = '';
     u.pathname = /\/(list|map)-\d+/.test(u.pathname)
       ? u.pathname.replace(/\/(list|map)-\d+/, `/list-${n}`)
       : u.pathname.replace(/\/?$/, `/list-${n}`);
     return u.href;
   };
+
+  // Identity of a search regardless of which page / view is showing.
+  const searchKey = (href) => pageUrl(href, 1);
+  const pageNum = (href) => +(new URL(href).pathname.match(/\/(?:list|map)-(\d+)/)?.[1] || 1);
 
   const toRow = (listing, surrounding) => {
     const display = listing.availableDate?.display || '';
@@ -127,20 +140,51 @@
     };
   };
 
-  async function fetchAllPages(base, onProgress) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const jitter = (ms) => Math.round(ms * (0.75 + Math.random() * 0.75));
+
+  // Retries 429/5xx/network errors with exponential backoff, honouring Retry-After.
+  // Any other non-2xx, or a page without the blob (bot check), fails immediately.
+  async function fetchResults(url, { fetchImpl = fetch, wait = sleep, onRetry = () => {} } = {}) {
+    for (let attempt = 0; ; attempt++) {
+      let res, err;
+      try { res = await fetchImpl(url, { credentials: 'include' }); } catch (e) { err = e; }
+      const retryable = err || res.status === 429 || res.status >= 500;
+      if (!retryable) {
+        if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+        return extractResults(await res.text());
+      }
+      if (attempt >= RETRIES) {
+        throw new Error(err ? `Network error: ${err.message}` :
+          res.status === 429 ? 'Rate limited by REA (HTTP 429) - wait a minute and retry.' : `HTTP ${res.status} from ${url}`);
+      }
+      const after = +res?.headers?.get?.('Retry-After');
+      const ms = after > 0 ? after * 1000 : jitter(RETRY_BASE_MS * 2 ** attempt);
+      onRetry(attempt + 1, ms);
+      await wait(ms);
+    }
+  }
+
+  // `seed` = { key, page, results } from the already-loaded document, reused instead of refetching.
+  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep } = {}) {
     const rows = [];
+    const key = searchKey(base);
     let page = 1, max = 1, total = 1;
     do {
-      onProgress(`Reading page ${page}${max > 1 ? ` of ${max}` : ''}…`);
-      const res = await fetch(pageUrl(base, page), { credentials: 'include' });
-      if (!res.ok) throw new Error(`Page ${page} returned HTTP ${res.status}${res.status === 429 ? ' (rate limited - wait and retry)' : ''}.`);
-      const results = extractResults(await res.text());
+      const label = `page ${page}${max > 1 ? ` of ${max}` : ''}`;
+      onProgress(`Reading ${label}…`);
+      const seeded = seed && seed.key === key && seed.page === page;
+      const results = seeded ? seed.results : await fetchResults(pageUrl(base, page), {
+        fetchImpl, wait,
+        onRetry: (n, ms) => onProgress(`Retrying ${label} in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`),
+      });
       total = results.pagination?.maxPageNumberAvailable || 1;
       max = Math.min(total, MAX_PAGES);
       for (const it of results.exact?.items || []) if (it.listing) rows.push(toRow(it.listing, false));
       for (const it of results.surrounding?.items || []) if (it.listing) rows.push(toRow(it.listing, true));
       page++;
-      if (page <= max) await new Promise((r) => setTimeout(r, PAGE_DELAY_MS));
+      const nextSeeded = seed && seed.key === key && seed.page === page;
+      if (page <= max && !seeded && !nextSeeded) await wait(jitter(PAGE_DELAY_MS));
     } while (page <= max);
     return { rows, truncated: total > MAX_PAGES };
   }
@@ -179,7 +223,10 @@
 
   // Node test harness: expose pure functions, skip all DOM work.
   if (typeof window === 'undefined') {
-    module.exports = { parseAvail, parsePrice, extractResults, pageUrl, toRow, applyFilters, toTsv, esc, safeUrl };
+    module.exports = {
+      parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
+      fetchResults, fetchAllPages, applyFilters, toTsv, esc, safeUrl,
+    };
     return;
   }
 
@@ -230,10 +277,24 @@
 
   let cfg = Object.assign({ from: '', to: '', exactOnly: false }, loadCfg());
   let cache = null; // raw rows for the current search URL
-  let cacheUrl = null;
+  let cacheKey = null; // searchKey() of the cached rows
   let truncated = false;
   let runId = 0; // bumped on navigation so an in-flight run can't write stale rows
   let ui = null;
+
+  // The document we were loaded with already holds one page of results; after SPA
+  // navigation it is stale, which the key/page match in fetchAllPages guards against.
+  const boot = (() => {
+    try {
+      let ex = window.ArgonautExchange;
+      if (!ex) {
+        const tag = [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+        if (tag) return { key: searchKey(location.href), page: pageNum(location.href), results: extractResults(tag.textContent + '</script>') };
+        return null;
+      }
+      return { key: searchKey(location.href), page: pageNum(location.href), results: parseExchange(ex) };
+    } catch { return null; }
+  })();
 
   function build() {
     const style = document.createElement('style');
@@ -343,11 +404,11 @@
     ui.run.disabled = true;
     ui.exportBtn.disabled = true;
     try {
-      const res = await fetchAllPages(base, (m) => { if (id === runId) setStatus(m); });
+      const res = await fetchAllPages(base, (m) => { if (id === runId) setStatus(m); }, { seed: boot });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
       cache = res.rows;
       truncated = res.truncated;
-      cacheUrl = base;
+      cacheKey = searchKey(base);
       showResults();
     } catch (err) {
       if (id !== runId) return;
@@ -361,7 +422,7 @@
 
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
   function watchNavigation() {
-    let lastUrl = location.href;
+    let lastKey = searchKey(location.href);
     const fire = () => window.dispatchEvent(new Event('rf:navigate'));
     for (const fn of ['pushState', 'replaceState']) {
       const orig = history[fn];
@@ -369,14 +430,15 @@
     }
     window.addEventListener('popstate', fire);
     window.addEventListener('rf:navigate', () => {
-      if (location.href === lastUrl) return;
-      lastUrl = location.href;
+      const key = searchKey(location.href);
+      if (key === lastKey) return; // same search, different page/view
+      lastKey = key;
       const inFlight = ui.run.disabled;
-      if (!cacheUrl && !inFlight) return;
-      if (cacheUrl && location.href === cacheUrl) return;
+      if (!cacheKey && !inFlight) return;
+      if (cacheKey === key) return;
       runId++;
       cache = null;
-      cacheUrl = null;
+      cacheKey = null;
       ui.run.disabled = false;
       ui.exportBtn.disabled = true;
       setStatus('Search changed - run again to refresh.');
