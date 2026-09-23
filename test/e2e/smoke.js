@@ -160,6 +160,27 @@ const html = (n) => {
   await page.uncheck('#rf-showHidden');
   assert.ok(await page.$(`.rf-item[data-id="${secondId}"]`), 'unhidden listing back');
 
+  // Note on the shortlisted listing, then the cross-search Shortlist tab.
+  await page.hover(`.rf-item[data-id="${firstId}"]`);
+  await page.click(`.rf-item[data-id="${firstId}"] >> [data-act=n]`);
+  await page.fill('.rf-note-edit', 'Ask about pets');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.textContent(`.rf-item[data-id="${firstId}"] .rf-note`), 'Ask about pets');
+  await page.click('[data-view=shortlist]');
+  assert.equal(await page.$eval('.rf-controls', (c) => c.hidden), true);
+  assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
+  assert.match(await page.textContent('.rf-count'), /\(1\)/);
+  const [bk] = await Promise.all([page.waitForEvent('download'), page.click('[data-sl=backup]')]);
+  const backup = fs.readFileSync(await bk.path(), 'utf8');
+  assert.equal(JSON.parse(backup).m[firstId].n, 'Ask about pets');
+  // Wipe, then restore from the backup file.
+  await page.evaluate(() => localStorage.removeItem('rea-avail-filter/marks/v1'));
+  await page.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
+  await page.waitForFunction(() => /Restored 1 listing/.test(document.querySelector('.rf-status').textContent));
+  assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
+  await page.click('[data-view=results]');
+  assert.equal(await page.$eval('.rf-controls', (c) => c.hidden), false);
+
   await page.click('.rf-clear');
   assert.equal(await page.inputValue('#rf-from'), '');
   assert.equal(await page.$$eval('.rf-card', (els) => els.length), PAGES * 2 + 1);

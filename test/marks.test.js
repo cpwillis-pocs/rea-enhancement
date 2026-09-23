@@ -50,7 +50,7 @@ test('marksStore: toggle, filter, persistence, prune', () => {
   assert.equal(ids({ showHidden: true }).length, 3);
   // Reload from storage.
   const again = core.marksStore(storage, () => t);
-  assert.deepEqual(again.counts(), { starred: 1, hidden: 1 });
+  assert.deepEqual(again.counts(), { starred: 1, hidden: 1, notes: 0 });
   // 91 days later unstarred/unhidden entries are pruned on next save.
   t += 91 * 864e5;
   again.observe([]);
@@ -60,5 +60,46 @@ test('marksStore: toggle, filter, persistence, prune', () => {
 test('marksStore: corrupt storage recovers', () => {
   const s = mem(); s.setItem('rea-avail-filter/marks/v1', '{nope');
   const st = core.marksStore(s);
-  assert.deepEqual(st.counts(), { starred: 0, hidden: 0 });
+  assert.deepEqual(st.counts(), { starred: 0, hidden: 0, notes: 0 });
+});
+
+test('marksStore: cross-search shortlist, notes, backup/restore', () => {
+  let t = 1e12;
+  const a = core.marksStore(mem(), () => t);
+  const r1 = row('146500010', '$2,600 per month'), r2 = row('146500011');
+  a.observe([r1, r2]);
+  a.toggle(r1.id, 's', r1); t += 1000;
+  a.toggle(r2.id, 's', r2);
+  a.setNote(r1.id, '  call agent re pets  ');
+  a.setNote(r2.id, 'x'.repeat(900));
+  const sl = a.shortlist();
+  assert.deepEqual(sl.map((r) => r.id), [r2.id, r1.id], 'newest starred first');
+  assert.equal(sl[1].note, 'call agent re pets');
+  assert.equal(sl[0].note.length, 500);
+  assert.equal(sl[1].priceNum, 600, 'monthly normalised from summary');
+  a.setNote(r2.id, '');
+  assert.equal(a.note(r2.id), '');
+  // Unstar drops it from the shortlist but keeps note-bearing entries.
+  a.toggle(r2.id, 's');
+  assert.deepEqual(a.shortlist().map((r) => r.id), [r1.id]);
+
+  const backup = a.exportJson();
+  const b = core.marksStore(mem(), () => t);
+  assert.equal(b.importJson(backup), 1);
+  assert.deepEqual(b.shortlist().map((r) => [r.id, r.note, r.url]), [[r1.id, 'call agent re pets', r1.url]]);
+});
+
+test('marksStore: import rejects junk and sanitises', () => {
+  const b = core.marksStore(mem());
+  assert.throws(() => b.importJson('nope'), /Not a JSON/);
+  assert.throws(() => b.importJson('{"app":"x"}'), /Not an rea-enhancement/);
+  const evil = JSON.stringify({ app: 'rea-enhancement', kind: 'marks', v: 1, m: {
+    '__proto__': { s: 1 }, 'abc': { s: 1 },
+    '146500099': { s: 1, n: 'ok', d: { u: 'javascript:alert(1)', a: '<img onerror=x>', i: 'http://insecure/x.jpg', p: '$1' } },
+  } });
+  assert.equal(b.importJson(evil), 1);
+  const [r] = b.shortlist().length ? b.shortlist() : [null];
+  assert.equal(r, null, 'entry without a safe URL is not listed');
+  assert.equal(b.note('146500099'), 'ok');
+  assert.equal(({}).s, undefined, 'no prototype pollution');
 });

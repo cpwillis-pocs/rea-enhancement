@@ -112,8 +112,17 @@
     },
   });
 
-  // Per-listing memory in localStorage, keyed by listing id: s=shortlisted, h=hidden,
-  // f=first seen, l=last seen, p/ps=last weekly price and its display, pp/pps=previous.
+  // Per-listing memory in localStorage, keyed by listing id: s=shortlisted (st=when),
+  // h=hidden, n=note, d=summary kept for shortlisted listings so the shortlist works
+  // across searches, f=first seen, l=last seen, p/ps=last weekly price and its display,
+  // pp/pps=previous.
+  const NOTE_MAX = 500;
+  const clip = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const summary = (r) => ({
+    u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
+    t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
+  });
+  const keep = (e) => e.s || e.h || e.n;
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
     const load = () => {
@@ -124,10 +133,10 @@
     };
     const prune = () => {
       const { m } = data;
-      for (const [id, e] of Object.entries(m)) if (!e.s && !e.h && now() - (e.l || e.f || 0) > MARKS_TTL_MS) delete m[id];
+      for (const [id, e] of Object.entries(m)) if (!keep(e) && now() - (e.l || e.f || 0) > MARKS_TTL_MS) delete m[id];
       const ids = Object.keys(m);
       if (ids.length > MARKS_MAX) {
-        ids.filter((id) => !m[id].s && !m[id].h).sort((a, b) => (m[a].l || 0) - (m[b].l || 0))
+        ids.filter((id) => !keep(m[id])).sort((a, b) => (m[a].l || 0) - (m[b].l || 0))
           .slice(0, ids.length - MARKS_MAX).forEach((id) => delete m[id]);
       }
     };
@@ -140,6 +149,7 @@
           if (!r.id) continue;
           const e = m[r.id] || (m[r.id] = { f: t });
           e.l = t;
+          if (e.s) e.d = summary(r); // keep the shortlist's copy current
           if (isFinite(r.priceNum)) {
             if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; }
             e.p = r.priceNum;
@@ -155,23 +165,80 @@
           const e = m[r.id];
           r.starred = !!e?.s;
           r.hidden = !!e?.h;
+          r.note = e?.n || '';
           r.isNew = !!e && e.f - c > BASELINE_MS && t - e.f < NEW_MS;
           r.prevPrice = e && e.pp != null && e.pp !== e.p ? e.pps || `$${e.pp}` : '';
           r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
         }
         return rows;
       },
-      toggle(id, k) {
+      // `row` lets a newly shortlisted listing carry its summary for the cross-search view.
+      toggle(id, k, row) {
         const { m } = load();
         const e = m[id] || (m[id] = { f: now(), l: now() });
         e[k] = e[k] ? 0 : 1;
+        if (k === 's') {
+          if (e.s) { e.st = now(); if (row) e.d = summary(row); } else { delete e.st; }
+        }
         save();
         return !!e[k];
+      },
+      note: (id) => load().m[id]?.n || '',
+      setNote(id, text) {
+        const { m } = load();
+        const e = m[id] || (m[id] = { f: now(), l: now() });
+        const n = clip(String(text ?? '').trim(), NOTE_MAX);
+        if (n) e.n = n; else delete e.n;
+        save();
+      },
+      // Shortlisted listings from every search, newest-starred first, as drawer rows.
+      shortlist() {
+        const { m } = load();
+        return Object.entries(m).filter(([, e]) => e.s && e.d?.u)
+          .sort(([, a], [, b]) => (b.st || 0) - (a.st || 0))
+          .map(([id, e]) => {
+            const d = e.d, priceNum = parsePrice(d.p);
+            return {
+              id, url: d.u, address: d.a, suburb: d.su || '', price: d.p, priceNum, available: d.v || '-',
+              avail: parseAvail(d.v === 'Available now' ? 'now' : d.v), img: d.i, type: d.t,
+              beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: '',
+              ppb: isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +d.b || 0)) : Infinity,
+              starred: true, hidden: !!e.h, note: e.n || '', inspections: [], listed: null,
+            };
+          });
+      },
+      // Backup/restore of what the user chose (shortlist, hidden, notes); sighting history is not exported.
+      exportJson() {
+        const { m } = load();
+        const out = {};
+        for (const [id, e] of Object.entries(m)) {
+          if (keep(e)) out[id] = { s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, d: e.s ? e.d : undefined };
+        }
+        return JSON.stringify({ app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out }, null, 1);
+      },
+      // Merges a backup: imported choices win per listing. Untrusted input: ids and
+      // fields are validated and strings clipped; URLs pass through safeUrl.
+      importJson(text) {
+        let src;
+        try { src = JSON.parse(text); } catch { throw new Error('Not a JSON file.'); }
+        if (src?.app !== 'rea-enhancement' || src?.kind !== 'marks' || typeof src.m !== 'object' || !src.m) throw new Error('Not an rea-enhancement backup.');
+        const { m } = load();
+        let n = 0;
+        for (const [id, e] of Object.entries(src.m)) {
+          if (!/^\d{1,15}$/.test(id) || !e || typeof e !== 'object') continue;
+          const cur = m[id] || (m[id] = { f: now(), l: now() });
+          if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary({ url: e.d.u, address: e.d.a, price: e.d.p, available: e.d.v, img: e.d.i, type: e.d.t, beds: e.d.b, baths: e.d.ba, cars: e.d.c, suburb: e.d.su }); }
+          if (e.h) cur.h = 1;
+          if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
+          n++;
+        }
+        save();
+        return n;
       },
       counts() {
         const { m } = load();
         const v = Object.values(m);
-        return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length };
+        return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length, notes: v.filter((e) => e.n).length };
       },
     };
   };
@@ -486,7 +553,7 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -619,11 +686,22 @@
   .rf-meta{color:var(--rf-soft);font-size:12px;margin-top:3px}
   .rf-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--rf-tag);
     color:var(--rf-muted);font-size:10px;font-weight:600;text-transform:uppercase;vertical-align:1px}
+  .rf-tabs{display:flex;gap:4px;padding:6px 16px 0;border-bottom:1px solid var(--rf-line)}
+  .rf-tabs button{border:0;background:none;padding:8px 10px;font:600 12px system-ui,sans-serif;color:var(--rf-muted);
+    cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .rf-tabs button[aria-selected=true]{color:var(--rf-fg);border-bottom-color:var(--rf-accent)}
+  .rf-sl-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
+  .rf-sl-bar[hidden],.rf-controls[hidden]{display:none}
+  .rf-sl-bar .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
+  .rf-note{margin:-2px 9px 8px 124px;padding:6px 8px;border-radius:6px;background:var(--rf-hover);font-size:12px;
+    white-space:pre-wrap;overflow-wrap:anywhere}
+  .rf-note-edit{display:block;width:calc(100% - 133px);margin:-2px 9px 8px 124px;min-height:54px;padding:6px 8px;
+    border:1px solid var(--rf-input);border-radius:6px;font:12px/1.4 system-ui,sans-serif;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-item{position:relative}
   .rf-item.rf-hidden .rf-card{opacity:.45}
   .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
   .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-starred .rf-acts,.rf-hidden .rf-acts{opacity:1}
-  .rf-starred:not(:hover) .rf-acts [data-act=h]{display:none}
+  .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n]){display:none}
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
@@ -697,6 +775,16 @@
         <button class="rf-clear" title="Reset all filters">Clear</button>
         <button class="rf-x" title="Close (Esc)">&times;</button>
       </div>
+      <div class="rf-tabs" role="tablist">
+        <button role="tab" data-view="results" aria-selected="true">Results</button>
+        <button role="tab" data-view="shortlist" aria-selected="false">Shortlist <span class="rf-count"></span></button>
+      </div>
+      <div class="rf-sl-bar" hidden>
+        <span class="rf-label">Shortlist, all searches</span>
+        <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings and notes as JSON">Backup</button>
+        <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+        <input type="file" accept="application/json,.json" hidden>
+      </div>
       <div class="rf-controls">
         <div class="rf-dates">
           <label>Available from<input type="date" id="rf-from"></label>
@@ -760,6 +848,11 @@
       refresh: panel.querySelector('#rf-refresh'),
       exports: [...panel.querySelectorAll('[data-export]')],
       status: panel.querySelector('.rf-status'),
+      controls: panel.querySelector('.rf-controls'),
+      tabs: [...panel.querySelectorAll('[role=tab]')],
+      slBar: panel.querySelector('.rf-sl-bar'),
+      slCount: panel.querySelector('.rf-count'),
+      slFile: panel.querySelector('.rf-sl-bar input[type=file]'),
       list: panel.querySelector('.rf-list'),
     };
 
@@ -805,23 +898,40 @@
       if (el.type === 'text' || el.type === 'number') el.addEventListener('input', onChange);
     }
 
-    // Shortlist / hide: one delegated handler; re-render keeps scroll position.
+    // Shortlist / hide / note: one delegated handler; re-render keeps scroll position.
     ui.list.addEventListener('click', (e) => {
       if (e.target.closest('.rf-more-btn')) return renderMore();
       const b = e.target.closest('.rf-acts button');
       if (!b) return;
       const id = b.closest('.rf-item')?.dataset.id;
       if (!id) return;
-      marks.toggle(id, b.dataset.act);
+      if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
+      marks.toggle(id, b.dataset.act, rowById(id));
       refreshMarks();
+    });
+
+    for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
+    ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () =>
+      download(`rea-shortlist-${stamp()}.json`, marks.exportJson(), 'application/json'));
+    ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
+    ui.slFile.addEventListener('change', async () => {
+      const f = ui.slFile.files?.[0];
+      ui.slFile.value = '';
+      if (!f) return;
+      try {
+        if (f.size > 5e6) throw new Error('File too large for a backup.');
+        const n = marks.importJson(await f.text());
+        refreshMarks();
+        setStatus(`Restored ${n} listing${n === 1 ? '' : 's'} from backup.`);
+      } catch (err) { setStatus(err.message, true); }
     });
 
     ui.run.addEventListener('click', () => run());
     ui.refresh.addEventListener('click', () => run(true));
     for (const b of ui.exports) {
       b.addEventListener('click', async () => {
-        if (!cache) return;
-        const rows = applyFilters(cache, cfg);
+        const rows = ui.view === 'shortlist' ? marks.shortlist() : cache ? applyFilters(cache, cfg) : null;
+        if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
         else {
@@ -842,13 +952,67 @@
     }
   }
 
+  const rowById = (id) => known.get(id) || cache?.find((r) => r.id === id) || null;
+
+  function setView(view) {
+    ui.view = view;
+    for (const t of ui.tabs) t.setAttribute('aria-selected', String(t.dataset.view === view));
+    const sl = view === 'shortlist';
+    ui.controls.hidden = sl;
+    ui.slBar.hidden = !sl;
+    if (sl) renderShortlist();
+    else if (cache) showResults();
+    else { ui.list.innerHTML = '<div class="rf-empty">Set your dates, then search.<br>Every result page is merged and sorted by availability.</div>'; setStatus(''); setExport(true); }
+  }
+
+  function renderShortlist() {
+    const rows = marks.shortlist();
+    ui.rows = rows;
+    setExport(rows.length === 0);
+    ui.list.innerHTML = rows.length
+      ? itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK)
+      : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>';
+    setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
+  }
+
+  const updateCounts = () => { ui.slCount.textContent = `(${marks.counts().starred})`; };
+
+  // Inline note editor; Enter saves, Shift+Enter newline, Esc cancels (without closing the drawer).
+  function editNote(item) {
+    if (item.querySelector('.rf-note-edit')) return;
+    const id = item.dataset.id;
+    const ta = document.createElement('textarea');
+    ta.className = 'rf-note-edit';
+    ta.maxLength = NOTE_MAX;
+    ta.placeholder = 'Note (Enter to save, Esc to cancel)';
+    ta.setAttribute('aria-label', 'Note for this listing');
+    ta.value = marks.note(id);
+    item.querySelector('.rf-note')?.remove();
+    item.appendChild(ta);
+    ta.focus();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save) marks.setNote(id, ta.value);
+      refreshMarks();
+    };
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+    });
+    ta.addEventListener('blur', () => finish(true));
+  }
+
   function refreshMarks() {
     if (cache) marks.decorate(cache);
     marks.decorate([...known.values()]);
     knownVer++;
+    updateCounts();
     const top = ui.list.scrollTop;
     const shown = ui.list.querySelectorAll('.rf-item').length;
-    if (cache) showResults();
+    if (ui.view === 'shortlist') renderShortlist();
+    else if (cache) showResults();
     while (ui.rows && ui.list.querySelectorAll('.rf-item').length < Math.min(shown, ui.rows.length)) renderMore();
     ui.list.scrollTop = top;
     scheduleAnnotate();
@@ -862,6 +1026,7 @@
   };
 
   function showResults(note = '') {
+    if (ui.view === 'shortlist') return; // results update in the background; shown on tab switch
     if (cfg.from && cfg.to && cfg.from > cfg.to) {
       render([]);
       return setStatus('"Available from" is after "Available to".', true);
@@ -873,11 +1038,10 @@
     }
     const rows = applyFilters(cache, cfg);
     render(rows);
-    const extra = [
-      cache.filter((r) => r.isNew).length && `${cache.filter((r) => r.isNew).length} new`,
-      cache.filter((r) => r.prevPrice).length && `${cache.filter((r) => r.prevPrice).length} price changed`,
-      !cfg.showHidden && cache.filter((r) => r.hidden).length && `${cache.filter((r) => r.hidden).length} hidden`,
-    ].filter(Boolean).join(' · ');
+    let nNew = 0, nMoved = 0, nHidden = 0;
+    for (const r of cache) { nNew += r.isNew ? 1 : 0; nMoved += r.prevPrice ? 1 : 0; nHidden += r.hidden ? 1 : 0; }
+    const extra = [nNew && `${nNew} new`, nMoved && `${nMoved} price changed`, !cfg.showHidden && nHidden && `${nHidden} hidden`]
+      .filter(Boolean).join(' · ');
     setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : ''));
@@ -927,7 +1091,9 @@
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>
+      ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
+        <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}">Note</button>
         <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
         <button data-act="h" aria-pressed="${r.hidden}" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
       </div>
@@ -996,7 +1162,7 @@
       cacheKey = null;
       ui.launch.textContent = 'Availability filter';
       setStatus(err.message, true);
-      ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
+      if (ui.view !== 'shortlist') ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
     } finally {
       if (id === runId) ui.run.disabled = ui.refresh.disabled = false;
       if (runCtrl === ctrl) runCtrl = null;
@@ -1167,8 +1333,9 @@
       ui.refresh.hidden = true;
       setExport(true);
       if (restore() || !hadState) return;
-      ui.list.innerHTML = '<div class="rf-empty">Search changed.</div>';
       ui.launch.textContent = 'Availability filter';
+      if (ui.view === 'shortlist') return; // shortlist is search-independent
+      ui.list.innerHTML = '<div class="rf-empty">Search changed.</div>';
       setStatus('Search changed - run again to refresh.');
     });
   }
@@ -1178,6 +1345,7 @@
     version: (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev',
     rows: () => cache,
     marks: () => marks.counts(),
+    shortlist: () => marks.shortlist(),
     filtered: () => (cache ? applyFilters(cache, cfg) : null),
     cfg: () => ({ ...cfg }),
     probe: () => {
@@ -1194,7 +1362,7 @@
   const step = (name, fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn(`[reaFilter] ${name}:`, e)); } catch (e) { console.warn(`[reaFilter] ${name}:`, e); } };
   step('build', build);
   if (ui) {
-    step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); });
+    step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });
     step('boot', () => { if (boot) learn(rowsOf(boot.results)); });
     step('navigation', watchNavigation);
     step('cards', watchCards);
