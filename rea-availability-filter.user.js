@@ -753,7 +753,7 @@
   // Colours are tokens on #rf-panel so the dark scheme only swaps values.
   const css = `
   #rf-panel,#rf-launch{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#767680;--rf-line:#e4e4e7;--rf-input:#cfcfd4;
-    --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#0b7;--rf-accent-hover:#0a6;--rf-accent-fg:#0a6;
+    --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
     --rf-err:#c00;--rf-tag:#eee}
   @media (prefers-color-scheme: dark){
     #rf-panel,#rf-launch{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#3a3a43;
@@ -771,6 +771,12 @@
   #rf-panel *{box-sizing:border-box}
   .rf-head{padding:14px 16px;border-bottom:1px solid var(--rf-line);display:flex;align-items:center;gap:8px}
   .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1;color:var(--rf-fg)}
+  #rf-panel :focus-visible,#rf-launch:focus-visible{outline:2px solid var(--rf-accent-fg);outline-offset:2px}
+  .rf-btn[aria-disabled=true]{opacity:.6;cursor:progress}
+  .rf-n{font-weight:400;color:var(--rf-soft)}
+  .rf-undo{margin-left:8px;border:0;background:none;padding:0;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);
+    text-decoration:underline;cursor:pointer}
+  @media (hover:none){.rf-acts{opacity:1}}
   .rf-clear[hidden]{display:none}
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
@@ -834,10 +840,10 @@
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
   .rf-acts button[data-act=s][aria-pressed=true]{color:#e6a700}
-  .rf-tag.rf-new{background:#0a6;color:#fff}
+  .rf-tag.rf-new{background:#087a50;color:#fff}
   .rf-tag.rf-gone{background:#8a8a95;color:#fff}
   .rf-was{font-weight:600;font-size:11px;padding:1px 5px;border-radius:4px}
-  .rf-was.down{color:#0a6;background:rgba(0,170,102,.12)}
+  .rf-was.down{color:#087a50;background:rgba(8,122,80,.12)}
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
@@ -847,14 +853,14 @@
   .rf-badge{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
     font:600 11px/1 system-ui,-apple-system,sans-serif}
   .rf-badge span{padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;white-space:nowrap}
-  .rf-badge .rf-b-now{background:#0a6}
+  .rf-badge .rf-b-now{background:#087a50}
   .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
   .rf-badge .rf-b-star{background:#e6a700;color:#111}
   .rf-badge .rf-b-new{background:#2563eb}
-  .rf-badge .rf-b-down{background:#0a6}
+  .rf-badge .rf-b-down{background:#087a50}
   .rf-badge .rf-b-up{background:#c60}
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
-    .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} }
+    .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:40vh} }
   `;
 
   let cfg = { ...DEFAULT_CFG, ...loadCfg() };
@@ -907,7 +913,7 @@
       <div class="rf-head">
         <h2>Availability filter</h2>
         <button class="rf-clear" title="Reset all filters">Clear</button>
-        <button class="rf-x" title="Close (Esc)">&times;</button>
+        <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
       </div>
       <div class="rf-tabs" role="tablist">
         <button role="tab" data-view="results" aria-selected="true">Results</button>
@@ -943,8 +949,8 @@
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
           <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
           <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
-          <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only</label>
-          <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings</label>
+          <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
+          <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show availability on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
@@ -1005,12 +1011,25 @@
     ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn', 'onlyStarred', 'showHidden', 'newOnly', 'showGone']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
-    const setOpen = (open) => { panel.hidden = !open; launch.setAttribute('aria-expanded', String(open)); };
+    // Full-screen on phones, so modal there (focus trapped); a side drawer on desktop.
+    const narrow = window.matchMedia('(max-width: 480px)');
+    const setOpen = (open) => {
+      panel.hidden = !open;
+      launch.setAttribute('aria-expanded', String(open));
+      panel.setAttribute('aria-modal', String(open && narrow.matches));
+    };
     ui.setOpen = setOpen;
     launch.addEventListener('click', () => { setOpen(true); ui.run.focus(); });
-    panel.querySelector('.rf-x').addEventListener('click', () => setOpen(false));
+    panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !panel.hidden) { setOpen(false); launch.focus(); }
+      if (panel.hidden) return;
+      if (e.key === 'Escape') { setOpen(false); launch.focus(); return; }
+      if (e.key === 'Tab' && narrow.matches) {
+        const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled);
+        if (!f.length) return;
+        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      }
     });
     panel.querySelector('.rf-clear').addEventListener('click', () => {
       // Resets filters only; display preferences (sort, annotate, dim) are kept.
@@ -1020,9 +1039,20 @@
     });
 
     let t;
+    // The blur after typing fires "change" with nothing new; re-rendering then would
+    // replace the list between mousedown and mouseup and swallow the user's click.
+    let lastSig = JSON.stringify(cfg);
     const onChange = (e) => {
+      const next = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
+      const sig = JSON.stringify(next);
+      if (sig === lastSig) {
+        // Same config: only flush a pending debounced render (eg Enter right after typing).
+        if (t && e?.type === 'change') { clearTimeout(t); t = null; if (cache) showResults(); }
+        return;
+      }
+      lastSig = sig;
       const wasRemember = cfg.remember;
-      cfg = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
+      cfg = next;
       saveCfg(cfg);
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
         snaps.clear();
@@ -1033,7 +1063,7 @@
       scheduleAnnotate();
       if (e?.target === ui.annotateBox && cfg.annotate) ensureVisiblePage();
       if (!cache) return;
-      if (e?.type === 'input') t = setTimeout(showResults, 200); // debounce typing
+      if (e?.type === 'input') t = setTimeout(() => { t = null; showResults(); }, 200); // debounce typing
       else showResults(); // re-filter without refetching
     };
     for (const [, el] of fields) {
@@ -1049,9 +1079,16 @@
       const id = b.closest('.rf-item')?.dataset.id;
       if (!id) return;
       if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
-      marks.toggle(id, b.dataset.act, rowById(id));
+      const act = b.dataset.act;
+      const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
+      const on = marks.toggle(id, act, rowById(id));
       refreshMarks();
+      // Re-render replaced the button: put focus back (or on the next item if this one left the list).
+      const q = (i) => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(i)}"] [data-act="${act}"]`);
+      (q(id) || (next && q(next)) || ui.list).focus?.();
+      if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
     });
+    ui.list.tabIndex = -1;
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
@@ -1074,8 +1111,8 @@
       } catch (err) { setStatus(err.message, true); }
     });
 
-    ui.run.addEventListener('click', () => run());
-    ui.refresh.addEventListener('click', () => run(true));
+    ui.run.addEventListener('click', () => busy || run());
+    ui.refresh.addEventListener('click', () => busy || run(true));
     for (const b of ui.exports) {
       b.addEventListener('click', async () => {
         const rows = ui.view === 'shortlist' ? marks.shortlist() : cache ? applyFilters(pool(), cfg) : null;
@@ -1124,7 +1161,11 @@
     setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
-  const updateCounts = () => { ui.slCount.textContent = `(${marks.counts().starred})`; };
+  const updateCounts = () => {
+    const c = marks.counts();
+    ui.slCount.textContent = `(${c.starred})`;
+    for (const el of ui.panel.querySelectorAll('[data-count]')) el.textContent = `(${c[el.dataset.count]})`;
+  };
 
   // Inline note editor; Enter saves, Shift+Enter newline, Esc cancels (without closing the drawer).
   function editNote(item) {
@@ -1165,6 +1206,14 @@
     while (ui.rows && ui.list.querySelectorAll('.rf-item').length < Math.min(shown, ui.rows.length)) renderMore();
     ui.list.scrollTop = top;
     scheduleAnnotate();
+  }
+
+  // One-shot Undo link in the status line.
+  function offerUndo(msg, undo) {
+    setStatus(msg);
+    const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: 'Undo' });
+    b.addEventListener('click', () => { b.remove(); undo(); }, { once: true });
+    ui.status.appendChild(b);
   }
 
   const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; };
@@ -1243,9 +1292,9 @@
       </a>
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
-        <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}">Note</button>
-        <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
-        <button data-act="h" aria-pressed="${r.hidden}" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+        <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
+        <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
+        <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
       </div>
       </div>`).join('');
   }
@@ -1306,6 +1355,14 @@
     return true;
   }
 
+  // aria-disabled rather than disabled: a disabled button drops keyboard focus to <body>.
+  let busy = false;
+  const setBusy = (b) => {
+    busy = b;
+    for (const el of [ui.run, ui.refresh]) el.setAttribute('aria-disabled', String(b));
+    ui.status.setAttribute('aria-busy', String(b)); // screen readers announce the result, not each page
+  };
+
   let runCtrl = null; // AbortController of the in-flight search, aborted on navigation
   async function run(force = false) {
     if (!force && restoreSession()) return;
@@ -1314,7 +1371,7 @@
     const id = ++runId;
     const base = location.href;
     const key = searchKey(base);
-    ui.run.disabled = ui.refresh.disabled = true;
+    setBusy(true);
     setExport(true);
     try {
       if (force) pageMemo.clear();
@@ -1337,7 +1394,7 @@
       setStatus(err.message, true);
       if (ui.view !== 'shortlist') ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
     } finally {
-      if (id === runId) ui.run.disabled = ui.refresh.disabled = false;
+      if (id === runId) setBusy(false);
       if (runCtrl === ctrl) runCtrl = null;
     }
   }
@@ -1474,7 +1531,7 @@
     new MutationObserver((muts) => {
       if (!isSearchPage(location.href)) return;
       // Ignore mutations confined to our own badges/panel.
-      const ours = (m) => m.type === 'childList' && (m.target.closest?.('.rf-badge, #rf-panel') ||
+      const ours = (m) => m.type === 'childList' && (m.target.closest?.('.rf-badge, #rf-panel, #rf-launch') ||
         m.removedNodes.length === 0 && m.addedNodes.length > 0 && [...m.addedNodes].every((n) => n.classList?.contains('rf-badge')));
       if (muts.every(ours)) return;
       scheduleAnnotate();
@@ -1499,13 +1556,13 @@
       if (key === lastKey) return; // same search, different page/view
       lastKey = key;
       if (cacheKey && cacheKey === key) return;
-      const hadState = cacheKey || ui.run.disabled;
+      const hadState = cacheKey || busy;
       runCtrl?.abort(); // stop crawling the old search
       runId++;
       applySnap(null);
       cache = null;
       cacheKey = null;
-      ui.run.disabled = ui.refresh.disabled = false;
+      setBusy(false);
       ui.refresh.hidden = true;
       setExport(true);
       if (restore() || !hadState) return;

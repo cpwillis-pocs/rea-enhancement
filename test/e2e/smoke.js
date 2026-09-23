@@ -149,7 +149,17 @@ const html = (n) => {
   await page.hover('.rf-item:nth-child(2)');
   await page.click('.rf-item:nth-child(2) >> [data-act=h]');
   assert.equal(await page.$(`.rf-item[data-id="${secondId}"]`), null, 'hidden listing removed');
+  assert.ok(await page.$('.rf-status .rf-undo'), 'undo offered after hide');
+  // Undo on a second hide restores that listing.
+  const thirdId = await page.$eval('.rf-item:nth-child(2)', (el) => el.dataset.id);
+  await page.hover('.rf-item:nth-child(2)');
+  await page.click('.rf-item:nth-child(2) >> [data-act=h]');
+  assert.equal(await page.$(`.rf-item[data-id="${thirdId}"]`), null);
+  await page.click('.rf-status .rf-undo');
+  assert.ok(await page.$(`.rf-item[data-id="${thirdId}"]`), 'undo brought it back');
   assert.match(await page.textContent('.rf-status'), /1 hidden/);
+  // Keyboard: focus returned to a real control after toggling, not <body>.
+  assert.notEqual(await page.evaluate(() => document.activeElement.tagName), 'BODY');
   await page.check('#rf-onlyStarred');
   assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
   await page.uncheck('#rf-onlyStarred');
@@ -202,7 +212,7 @@ const html = (n) => {
   // Refresh bypasses the seed and memo: every page refetched once.
   const pre = hits.length;
   await page.click('#rf-refresh');
-  await page.waitForFunction(() => !document.querySelector('#rf-refresh').disabled, null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('#rf-refresh').getAttribute('aria-disabled') !== 'true', null, { timeout: 15000 });
   assert.deepEqual(hits.slice(pre).sort(), [1, 2, 3], 'refresh refetched all pages');
 
   // Reload: rows restored from session cache without refetching.
@@ -244,7 +254,7 @@ const html = (n) => {
     await slow.waitForTimeout(2500);
     console.log('fetches after nav-abort:', got.length - at, '| status:', await slow.textContent('.rf-status'));
     assert.ok(got.length - at <= 2, 'crawl stopped (annotation may fetch the new page once)');
-    assert.equal(await slow.$eval('#rf-run', (b) => b.disabled), false);
+    assert.notEqual(await slow.getAttribute('#rf-run', 'aria-disabled'), 'true');
     await slow.close();
   }
 
