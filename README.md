@@ -23,9 +23,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type, photo required, inspection on a given day, listed over 3 weeks ago.
 - Keywords over headline, description, address and features: `pool -studio "north facing"`.
 - **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
+- **Other places**: up to 3 named points (work, school, partner) with km to each and a "Nearest to all places" sort.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
-- Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost; hover it to see the parts.
+- Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
 - **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
@@ -48,6 +49,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
 - The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; search it, filter by status and export it.
 - **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
+- **Inspection checklist** per shortlisted listing (damp, water pressure, signal, light, noise, storage, or your own), shown in Compare and on the printout.
 - **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, exportable to your calendar.
 - **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
 - **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.

@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.15.0
+
+- **Other places**: add up to 3 named points ("Work: -33.87, 151.21", or a Google Maps link) under More filters. Each listing shows the straight-line km to each; new sort **Nearest to all places** (shortest longest trip); Best match's distance uses the furthest place; Compare adds a Places row.
+- **Best match weights** in Settings: Rent, Timing, Distance and Move-in each Ignore / Less / Normal / More; the score's tooltip shows the weighting.
+- **Inspection checklist** on shortlisted listings: tap items (damp or mould, water pressure, phone signal, natural light, noise, storage, or your own list in Settings) to mark ✓ / ✗. Shown in Compare, printed with the shortlist and kept in backups.
+
 ## 2.14.0
 
 - **Opened tracking**: listings you've opened (from the drawer, REA's cards or the listing page) show "opened 2d ago"; new filter **Not opened yet**.
