@@ -2,6 +2,15 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.4.0
+
+- Move-in cost (bond + 2 weeks) per listing, bond-over-4-weeks flag, max move-in filter.
+- Application status per shortlisted listing, shortlist status filter, CSV export from the Shortlist tab.
+- Calendar (.ics) export of upcoming inspections, from results or the shortlist.
+- Rent vs median for the same bed count; "best value" sort; "listed over 3 weeks ago" filter.
+- Fixed: stale rows could reappear under "Nothing matches"; touch screens hid shortlist/hide buttons; a corrupt saved setting or reshaped REA item list could stop the script; Clear re-enabled "Remember results"; "30 s ago" read "1 min ago".
+- Internals: shared helpers replace duplicated row/summary/storage/backup code; pure logic moved above the test guard; named constants; every line covered by unit or browser tests (`npm run coverage`).
+
 ## 2.3.0
 
 - Remembers results per search between visits; Refresh tags listings new since the last visit and counts ones no longer listed (optionally shown). "New since last visit only" filter; "Newest first" falls back to first-seen time. Opt-out setting clears stored results.

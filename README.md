@@ -20,9 +20,11 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Filter and sort across every page**
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
-- Weekly rent min/max (monthly and annual rents converted to weekly), min beds/baths/cars, property type, photo required, inspection on a given day.
+- Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type, photo required, inspection on a given day, listed over 3 weeks ago.
 - Keywords over headline, description and address: `pool -studio "north facing"`.
-- Sort by available date, price, price per bed, most beds, next inspection, newest listed.
+- Sort by available date, price, price per bed, best value vs median, most beds, next inspection, newest first.
+- **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
+- **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
 **On REA's own result cards**
@@ -33,14 +35,14 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
-- The **Shortlist** tab collects starred listings from every search you've run, with a private note per listing.
+- The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; filter by status and export it.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
 - Price changes show "was $X".
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
 
-**Export**: CSV (opens cleanly in Excel), TSV, or copy to clipboard for Google Sheets. Includes weekly rent, $/bed, inspections, shortlist and previous price.
+**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist. Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and previous price.
 
 **Dark mode and mobile width** follow your system settings. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 
