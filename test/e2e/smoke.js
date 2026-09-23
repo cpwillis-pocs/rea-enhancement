@@ -221,6 +221,22 @@ const html = (n) => {
     await slow.close();
   }
 
+  // Large result set renders in chunks of 100.
+  {
+    const big = await browser.newPage();
+    await big.route('**/*', require('./fixtures').serve([], { pages: 6, perPage: 25 }));
+    await big.goto(SEARCH);
+    await big.addScriptTag({ content: SCRIPT.replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;') });
+    await big.click('#rf-launch');
+    await big.click('#rf-run');
+    await big.waitForFunction(() => /150 of 150/.test(document.querySelector('.rf-status').textContent), null, { timeout: 20000 });
+    assert.equal(await big.$$eval('.rf-item', (e) => e.length), 100);
+    await big.click('.rf-more-btn');
+    assert.equal(await big.$$eval('.rf-item', (e) => e.length), 150);
+    assert.equal(await big.$('.rf-more-btn'), null);
+    await big.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   await browser.close();
   console.log('e2e smoke: ok');

@@ -44,6 +44,7 @@
   const ANNOTATE_DEBOUNCE_MS = 120;
   const ANNOTATE_MAX_WAIT_MS = 500;
   const KNOWN_MAX = 2000;
+  const RENDER_CHUNK = 100;
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
   const ROWS_VERSION = 5; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -620,6 +621,7 @@
   .rf-was{font-weight:600;font-size:11px;padding:1px 5px;border-radius:4px}
   .rf-was.down{color:#0a6;background:rgba(0,170,102,.12)}
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
+  .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
@@ -789,6 +791,7 @@
 
     // Shortlist / hide: one delegated handler; re-render keeps scroll position.
     ui.list.addEventListener('click', (e) => {
+      if (e.target.closest('.rf-more-btn')) return renderMore();
       const b = e.target.closest('.rf-acts button');
       if (!b) return;
       const id = b.closest('.rf-item')?.dataset.id;
@@ -828,7 +831,9 @@
     marks.decorate([...known.values()]);
     knownVer++;
     const top = ui.list.scrollTop;
+    const shown = ui.list.querySelectorAll('.rf-item').length;
     if (cache) showResults();
+    while (ui.rows && ui.list.querySelectorAll('.rf-item').length < Math.min(shown, ui.rows.length)) renderMore();
     ui.list.scrollTop = top;
     scheduleAnnotate();
   }
@@ -871,7 +876,21 @@
       ui.list.innerHTML = '<div class="rf-empty">Nothing matches those filters.</div>';
       return;
     }
-    ui.list.innerHTML = rows.map((r) => `
+    ui.rows = rows;
+    ui.list.innerHTML = itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
+    ui.list.scrollTop = 0;
+  }
+
+  // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
+  const moreHtml = (left) => (left > 0 ? `<button class="rf-btn sec rf-more-btn">Show ${Math.min(left, RENDER_CHUNK)} more (${left} left)</button>` : '');
+  function renderMore() {
+    const shown = ui.list.querySelectorAll('.rf-item').length;
+    ui.list.querySelector('.rf-more-btn')?.remove();
+    ui.list.insertAdjacentHTML('beforeend', itemsHtml(ui.rows.slice(shown, shown + RENDER_CHUNK)) + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
+  }
+
+  function itemsHtml(rows) {
+    return rows.map((r) => `
       <div class="rf-item${r.hidden ? ' rf-hidden' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
@@ -897,7 +916,6 @@
         <button data-act="h" aria-pressed="${r.hidden}" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
       </div>
       </div>`).join('');
-    ui.list.scrollTop = 0;
   }
 
   const ago = (ms) => {
