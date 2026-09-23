@@ -28,10 +28,15 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
+- **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
+- **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
+- **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
+- **Keyboard**: j/k move, s shortlist, h hide, n note, o open, / keywords, ? help; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
 **On REA's own result cards**
-- Badges: availability, next inspection, $/bed, shortlisted, new, price changed.
+- Badges: availability, next inspection, $/bed, distance, pets, shortlisted, new, price changed.
+- **Star** and **Hide** buttons right on each card.
 - Cards that don't match your filters fade out; hover to bring one back.
 
 ![Badges on REA's result cards](docs/screenshots/badges.jpg)

@@ -2,6 +2,15 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.7.0
+
+- **Star / Hide buttons on REA's own result cards** (append-only; clicks don't reach REA's link).
+- **Active filter chips** above the results, each showing how many listings it removes; click to drop one. "More filters" shows the active count. **Clear** has Undo.
+- **Keyboard**: j/k or arrows move, s shortlist, h hide, n note, o/Enter open, / keyword, ? help; Alt+Shift+F opens/closes the drawer anywhere on REA.
+- **Bulk actions** with one-step Undo: shortlist all shown (up to 50), hide all shown; on the shortlist, mark shown with a status, remove declined, remove all shown.
+- **Filter presets**: save named presets, or save one for the current search so it applies automatically when you return; included in backups.
+- Fixed: rows restored from the tab cache could crash rendering (unknown move-in cost came back as null).
+
 ## 2.6.0
 
 - Shortlist **Compare** table: up to 6 listings side by side (rent, $/bed, move-in, availability, beds/baths/cars, distance, next inspection, amenities, agency, status, note), best values highlighted; the drawer widens for it.
