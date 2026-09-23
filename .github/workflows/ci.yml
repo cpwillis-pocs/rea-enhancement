@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # version check diffs against the PR base
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -23,3 +25,24 @@ jobs:
       - run: npx -y playwright@1.56.1 install --with-deps chromium
       - run: npm install --no-save playwright@1.56.1
       - run: npm run e2e
+
+  # Installs auto-update from main via @updateURL, and Tampermonkey only installs a
+  # higher @version, so a script change without a bump would never reach users.
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require @version bump when the userscript changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          f=rea-availability-filter.user.js
+          if git diff --quiet "$BASE" HEAD -- "$f"; then echo "script unchanged"; exit 0; fi
+          ver() { sed -n 's#^// @version *##p' | head -1; }
+          old=$(git show "$BASE:$f" | ver); new=$(ver < "$f")
+          echo "base $old -> head $new"
+          [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -1)" = "$new" ] && [ "$old" != "$new" ] \
+            || { echo "::error file=$f::Bump // @version (currently $new, base $old)"; exit 1; }
