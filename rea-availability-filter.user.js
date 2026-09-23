@@ -154,8 +154,10 @@
     };
   };
   const perBed = (priceNum, beds) => (isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +beds || 0)) : Infinity);
-  const cleanInspections = (a) => (Array.isArray(a) ? a : []).slice(0, INSPECT_KEEP)
-    .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }));
+  // Past sessions drop out (stored summaries age), so later ones aren't crowded out by the cap.
+  const cleanInspections = (a) => (Array.isArray(a) ? a : [])
+    .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }))
+    .filter((i) => i.label && (i.at == null || i.at >= Date.now() - INSPECT_GRACE_MS)).slice(0, INSPECT_KEEP);
   const clip = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : '');
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
@@ -179,7 +181,7 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: d.in, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);

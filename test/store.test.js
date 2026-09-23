@@ -132,3 +132,12 @@ test('discovery: an empty renamed field does not hide it on same-shaped listings
   assert.equal(core.extractListed({ id: 1, listedOn: null }), null);
   assert.ok(core.extractListed({ id: 2, listedOn: '2026-09-01T00:00:00Z' }) instanceof Date);
 });
+
+test('stored inspections: past sessions drop out before the per-row cap', () => {
+  const marks = core.marksStore(memStorage());
+  const t = Date.now();
+  const r = { id: '333333', url: 'https://www.realestate.com.au/p-333333', address: 'A',
+    inspections: [1, 2, 3].map((h) => ({ at: t - h * 864e5, label: `past ${h}` })).concat([{ at: t + 864e5, label: 'tomorrow' }]) };
+  marks.toggle('333333', 's', r);
+  assert.deepEqual(marks.shortlist()[0].inspections.map((i) => i.label), ['tomorrow']);
+});
