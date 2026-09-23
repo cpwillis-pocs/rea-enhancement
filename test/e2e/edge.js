@@ -385,6 +385,41 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 19. Keyboard: Alt+Shift+F toggles, j/k move, s shortlists, h hides, ? help, / keyword.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.keyboard.press('Alt+Shift+F');
+    assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false, 'Alt+Shift+F opens');
+    await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.focus('.rf-list');
+    await page.keyboard.press('j');
+    const first = await page.evaluate(() => document.activeElement.closest('.rf-item')?.dataset.id);
+    await page.keyboard.press('j');
+    const second = await page.evaluate(() => document.activeElement.closest('.rf-item')?.dataset.id);
+    assert.ok(first && second && first !== second, 'j moves down');
+    await page.keyboard.press('k');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('.rf-item')?.dataset.id), first, 'k moves up');
+    await page.keyboard.press('s');
+    await page.waitForFunction((id) => document.querySelector(`.rf-item[data-id="${id}"] [data-act=s]`)?.getAttribute('aria-pressed') === 'true', first);
+    await page.keyboard.press('h');
+    await page.waitForFunction((id) => !document.querySelector(`.rf-item[data-id="${id}"]`), first);
+    await page.keyboard.press('?');
+    assert.equal(await page.$eval('.rf-help', (h) => h.hidden), false);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$eval('.rf-help', (h) => h.hidden), true, 'Esc closes help first');
+    await page.focus('.rf-list');
+    await page.keyboard.press('/');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'rf-keyword');
+    await page.keyboard.type('s');
+    assert.equal(await page.inputValue('#rf-keyword'), 's', 'typing in a field is not a shortcut');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Alt+Shift+F');
+    assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false);
+    console.log('keyboard shortcuts: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

@@ -1285,6 +1285,14 @@
     text-decoration:underline;cursor:pointer}
   .rf-clear[hidden]{display:none}
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
+  .rf-keys{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
+    color:var(--rf-muted);cursor:pointer;padding:0}
+  .rf-help{padding:10px 16px;border-bottom:1px solid var(--rf-line);font-size:12px;background:var(--rf-hover)}
+  .rf-help[hidden]{display:none}
+  .rf-help dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 0}
+  .rf-help dt{font:600 11px ui-monospace,monospace;color:var(--rf-fg)}
+  .rf-help dd{margin:0;color:var(--rf-muted)}
+  .rf-item:focus{outline:2px solid var(--rf-accent-fg);outline-offset:-2px;border-radius:8px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
   .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;gap:10px;max-height:60vh;overflow-y:auto}
   .rf-dates{display:grid;grid-template-columns:1fr 1fr .8fr;gap:10px}
@@ -1466,6 +1474,7 @@
       <div class="rf-head">
         <h2>Availability filter</h2>
         <button class="rf-clear" title="Reset all filters">Clear</button>
+        <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false">?</button>
         <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
       </div>
       <div class="rf-tabs" role="tablist">
@@ -1553,6 +1562,12 @@
           <button class="rf-btn sec" data-export="ics" disabled title="Upcoming inspections as a calendar file">Calendar</button>
         </div>
       </div>
+      <div class="rf-help" hidden>
+        <strong>Keyboard</strong>
+        <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
+        <dt>n</dt><dd>note</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
+        <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
+      </div>
       <div class="rf-status" role="status" aria-live="polite"></div>
       <div class="rf-active" hidden aria-label="Active filters"></div>
       <div class="rf-list"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
@@ -1623,9 +1638,48 @@
     ui.setOpen = setOpen;
     launch.addEventListener('click', () => { setOpen(true); ui.run.focus(); });
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
+    const help = panel.querySelector('.rf-help'), helpBtn = panel.querySelector('.rf-keys');
+    const toggleHelp = () => { help.hidden = !help.hidden; helpBtn.setAttribute('aria-expanded', String(!help.hidden)); };
+    helpBtn.addEventListener('click', toggleHelp);
+    const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    // List shortcuts: act on the focused listing (or the first one).
+    const listKeys = (e) => {
+      const items = [...ui.list.querySelectorAll('.rf-item')];
+      if (!items.length) return false;
+      const cur = document.activeElement?.closest?.('.rf-item');
+      const i = cur ? items.indexOf(cur) : -1;
+      const move = (d) => { const n = items[Math.max(0, Math.min(items.length - 1, i + d))] || items[0]; n.focus(); n.scrollIntoView({ block: 'nearest' }); };
+      const act = (a) => (cur || items[0]).querySelector(`[data-act="${a}"]`)?.click();
+      switch (e.key) {
+        case 'j': case 'ArrowDown': move(i < 0 ? 0 : 1); return true;
+        case 'k': case 'ArrowUp': move(i < 0 ? 0 : -1); return true;
+        case 's': act('s'); return true;
+        case 'h': act('h'); return true;
+        case 'n': act('n'); return true;
+        case 'o': case 'Enter': if (!cur) return false; cur.querySelector('.rf-card')?.click(); return true;
+        default: return false;
+      }
+    };
     document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href)) {
+        e.preventDefault();
+        setOpen(panel.hidden);
+        if (!panel.hidden) ui.run.focus(); else launch.focus();
+        return;
+      }
       if (panel.hidden) return;
-      if (e.key === 'Escape') { setOpen(false); launch.focus(); return; }
+      if (e.key === 'Escape') {
+        if (!help.hidden) { toggleHelp(); return; }
+        setOpen(false); launch.focus(); return;
+      }
+      const inPanel = panel.contains(document.activeElement);
+      if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+        if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
+        if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
+          if (listKeys(e)) { e.preventDefault(); return; }
+        }
+      }
       if (e.key === 'Tab' && narrow.matches) {
         const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled);
         if (!f.length) return;
@@ -1962,7 +2016,7 @@
 
   function itemsHtml(rows) {
     return rows.map((r) => `
-      <div class="rf-item${r.gone || r.hidden || r.agencyHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
+      <div tabindex="-1" class="rf-item${r.gone || r.hidden || r.agencyHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
