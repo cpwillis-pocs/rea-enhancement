@@ -560,3 +560,19 @@ test('withScores: weights change the ranking; Ignore drops a part', () => {
   assert.equal(cheapFar.score, null, 'only one part left: no score');
   assert.doesNotMatch(core.withScores([dearNear], base)[0].scoreWhy, /×/);
 });
+
+test('small helpers: listingId, unpackJson, startOfDay, setDistances, AMENITIES/HIDE_REASONS shape', () => {
+  assert.equal(core.listingId('https://www.realestate.com.au/property-unit-nsw-bondi-146500123?x=1'), '146500123');
+  assert.equal(core.listingId('/rent/in-bondi/list-1'), '');
+  assert.deepEqual(core.unpackJson({ a: JSON.stringify({ b: JSON.stringify({ c: 1 }) }) }), { a: { b: { c: 1 } } });
+  const d = core.startOfDay(new Date(2026, 8, 23, 15, 30));
+  assert.deepEqual([d.getHours(), d.getMinutes(), d.getDate()], [0, 0, 23]);
+  const r = { lat: -33.88, lng: 151.24 };
+  core.setDistances(r, { ...core.DEFAULT_CFG, anchor: '-33.89,151.27', places: 'Work: -33.87,151.21' });
+  assert.ok(r.km > 0 && r.placeKm[0].label === 'Work');
+  const km = r.km; r.km = 99; core.setDistances(r, { ...core.DEFAULT_CFG, anchor: '-33.89,151.27', places: 'Work: -33.87,151.21' });
+  assert.equal(r.km, 99, 'memoised for the same settings and position');
+  assert.ok(km < 5);
+  assert.ok(core.AMENITIES.every((a) => a.id && a.label && a.pos instanceof RegExp && a.neg instanceof RegExp));
+  assert.ok(core.HIDE_REASONS.includes('other'));
+});
