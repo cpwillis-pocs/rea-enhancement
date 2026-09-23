@@ -520,6 +520,28 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 21c. A bound preset's "previous filters" survive a reload, so they don't leak to other searches.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    page.on('dialog', (d) => d.accept('Bondi pets'));
+    const pets = () => page.getAttribute('[data-amen=pets]', 'aria-label');
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.click('[data-amen=pets]');
+    await page.selectOption('.rf-preset', 'c:bind');
+    await page.click('.rf-clear');
+    await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
+    await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
+    await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 3000 });
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
+    await page.waitForFunction(() => !/required/.test(document.querySelector('[data-amen=pets]').getAttribute('aria-label')), null, { timeout: 3000 });
+    assert.doesNotMatch(await pets(), /required/, 'previous filters restored after reload');
+    console.log('preset restore after reload: ok');
+    await done(page); await ctx.close();
+  }
+
   // 22. Print: opens a document with one block per shortlisted listing.
   {
     const ctx = await browser.newContext();

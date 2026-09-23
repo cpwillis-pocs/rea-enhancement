@@ -182,12 +182,16 @@
     inspections: d.in, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
     const load = () => {
       if (data) return data;
       try { data = JSON.parse(storage.getItem(MARKS_KEY)); } catch { data = null; }
-      if (!data || typeof data !== 'object' || !data.m || typeof data.m !== 'object' || Array.isArray(data.m)) data = { c: now(), m: {} };
+      if (!isObj(data) || !isObj(data.m)) data = { c: now(), m: {} };
+      // One bad entry (hand-edited, or a half-written sync) mustn't break every later write.
+      for (const [id, e] of Object.entries(data.m)) if (!isObj(e)) delete data.m[id];
+      if (data.ad != null && !isObj(data.ad)) delete data.ad;
       return data;
     };
     // Writes re-read storage first so another tab's changes aren't overwritten by this
@@ -489,7 +493,10 @@
     const load = () => {
       try {
         const d = JSON.parse(storage.getItem(SNAP_KEY));
-        if (d && typeof d.s === 'object' && d.s) return d;
+        if (isObj(d) && isObj(d.s)) {
+          for (const [k, e] of Object.entries(d.s)) if (!isObj(e) || typeof e.at !== 'number') delete d.s[k];
+          return d;
+        }
       } catch { /* corrupt */ }
       return { v: 1, s: {} };
     };
@@ -575,7 +582,10 @@
   const PRESETS_MAX = 30;
   const presetStore = (storage) => {
     const load = () => {
-      try { const d = JSON.parse(storage.getItem(PRESETS_KEY)); if (Array.isArray(d?.list)) return d; } catch { /* corrupt */ }
+      try {
+        const d = JSON.parse(storage.getItem(PRESETS_KEY));
+        if (Array.isArray(d?.list)) { d.list = d.list.filter((p) => isObj(p) && typeof p.name === 'string' && p.name && isObj(p.cfg)); return d; }
+      } catch { /* corrupt */ }
       return { v: 1, list: [] };
     };
     const save = (d) => { try { storage.setItem(PRESETS_KEY, JSON.stringify(d)); } catch { /* quota/blocked */ } };
@@ -598,18 +608,19 @@
       exportData: () => load().list,
       importData(list) {
         if (!Array.isArray(list)) return 0;
+        // Imported presets win (a restore is deliberate): they go first, replacing same-named
+        // ones and any existing preset bound to the same search.
         const d = load();
-        let n = 0;
+        const incoming = [];
         for (const p of list.slice(0, PRESETS_MAX)) {
           const name = clip(String(p?.name || '').trim(), 60);
-          if (!name || !p.cfg || typeof p.cfg !== 'object') continue;
-          d.list = d.list.filter((x) => x.name !== name);
-          d.list.push({ name, cfg: sanitizeCfg(pick(p.cfg)), key: isSearchKey(p.key) ? p.key : null });
-          n++;
+          if (!name || !isObj(p.cfg) || incoming.some((x) => x.name === name)) continue;
+          const key = isSearchKey(p.key) && !incoming.some((x) => x.key === p.key) ? p.key : null;
+          incoming.push({ name, cfg: sanitizeCfg(pick(p.cfg)), key });
         }
-        d.list = d.list.slice(0, PRESETS_MAX);
+        d.list = [...incoming, ...d.list.filter((x) => !incoming.some((p) => p.name === x.name || (p.key && p.key === x.key)))].slice(0, PRESETS_MAX);
         save(d);
-        return n;
+        return incoming.length;
       },
     };
   };
@@ -772,7 +783,7 @@
   // Subtrees describing other people/places: their coordinates, names and dates aren't the listing's.
   const DISCOVER_SKIP = /lister|agent|agenc|company|brand|advertis|school|nearby|similar|history|related|suggest/i;
   const NO_SKIP = /$^/;
-  const discover = (obj, keyRe, ok = () => true, skip = DISCOVER_SKIP) => {
+  const discover = (obj, keyRe, ok = () => true, skip = DISCOVER_SKIP, stats = null) => {
     const queue = [[obj, '', 0]];
     let seen = 0;
     for (let qi = 0; qi < queue.length && seen < DISCOVER_NODES; qi++) { // index cursor: shift() is O(n)
@@ -782,7 +793,10 @@
         const v = node[k];
         seen++;
         const p = path ? `${path}.${k}` : k;
-        if (keyRe.test(k) && ok(v)) return { path: p, value: v };
+        if (keyRe.test(k)) {
+          if (ok(v)) return { path: p, value: v };
+          if (stats) stats.keyed = true; // the key is there, just empty on this listing
+        }
         if (v && typeof v === 'object' && depth + 1 < DISCOVER_DEPTH && !skip.test(k)) queue.push([v, p, depth + 1]);
       }
     }
@@ -804,9 +818,11 @@
     const shape = Object.keys(obj || {}).sort().join(',');
     const miss = misses.get(field) || new Set();
     if (miss.has(shape)) return undefined;
-    const hit = discover(obj, keyRe, ok, skip);
+    const stats = {};
+    const hit = discover(obj, keyRe, ok, skip, stats);
     if (hit) { pathHint[field] = hit.path; if (!found[field]) found[field] = hit.path; return hit.value; }
-    if (miss.size < MISS_SHAPES_MAX) miss.add(shape);
+    // Only a shape with no matching key at all is a reliable miss for its siblings.
+    if (!stats.keyed && miss.size < MISS_SHAPES_MAX) miss.add(shape);
     misses.set(field, miss);
     return undefined;
   };
@@ -2467,12 +2483,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     try {
       for (const [i, r] of rows.entries()) {
         setStatus(`Re-checking ${i + 1} of ${rows.length}…`);
-        let res;
-        try { res = await fetch(r.url, { credentials: 'include', signal: withTimeout(ctrl.signal, FETCH_TIMEOUT_MS) }); } catch (err) {
+        let res, html;
+        try { // body read inside too: a reset mid-download is one unreadable listing, not the end
+          res = await fetch(r.url, { credentials: 'include', signal: withTimeout(ctrl.signal, FETCH_TIMEOUT_MS) });
+          html = res.ok ? await res.text() : '';
+        } catch (err) {
           if (ctrl.signal.aborted) throw err;
           tally.unknown++; continue;
         }
-        const out = parseListingPage(res.ok ? await res.text() : '', r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
+        const out = parseListingPage(html, r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
         tally[out.status]++;
         if (out.status === 'gone') marks.setGone(r.id, true);
         if (out.status === 'ok') { const row = safeRow(out.listing, false); if (row) learn([row]); }
@@ -2674,8 +2693,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   function planHtml(slots, day) {
-    const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const t = (ms, tz) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}), ...(tz && tz !== here ? { timeZoneName: 'short' } : {}) })
+    // Zone name only when the listing's clock differs from yours (Melbourne from Sydney doesn't).
+    const clock = (ms, tz) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) });
+    const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }) : clock(ms, tz))
       .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
     const clashes = slots.filter((x) => x.flag).length;
     return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${slots.length} inspection${slots.length === 1 ? '' : 's'}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
@@ -2800,23 +2820,32 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   // A search's bound preset applies once per visit in this tab (a reload doesn't re-apply it
   // over your edits). Leaving for a search without one puts back the filters you had before.
+  // The filters from before a bound preset live in localStorage (like cfg), so a reload or a
+  // new tab still puts them back when you leave the preset's search.
   const PRESET_VISIT_KEY = 'rea-avail-filter/preset-visit';
+  const PRESET_PREV_KEY = 'rea-avail-filter/preset-prev/v1';
+  const prevStore = {
+    get() { try { const v = JSON.parse(window.localStorage.getItem(PRESET_PREV_KEY)); return isObj(v) ? sanitizeCfg(v) : null; } catch { return null; } },
+    set(v) { try { window.localStorage.setItem(PRESET_PREV_KEY, JSON.stringify(v)); } catch { /* quota/blocked */ } },
+    clear() { try { window.localStorage.removeItem(PRESET_PREV_KEY); } catch { /* blocked */ } },
+  };
   function enterSearchPresets(key) {
     const bound = key && presets.forSearch(key);
     let visited = null;
     try { visited = window.sessionStorage.getItem(PRESET_VISIT_KEY); } catch { /* blocked */ }
     if (bound) {
       if (visited === key) return;
-      if (!ui.prePreset) ui.prePreset = { ...cfg };
+      if (!prevStore.get()) prevStore.set(Object.fromEntries([...FILTER_KEYS, 'anchor', 'sort'].map((k) => [k, cfg[k]])));
       applyPreset(bound);
       try { window.sessionStorage.setItem(PRESET_VISIT_KEY, key); } catch { /* blocked */ }
       return;
     }
+    if (!key) return; // a listing page or other REA page between searches isn't "leaving"
     try { window.sessionStorage.removeItem(PRESET_VISIT_KEY); } catch { /* blocked */ }
-    if (ui.prePreset) {
-      const before = ui.prePreset;
-      ui.prePreset = null;
-      applyPreset({ name: 'your previous filters', cfg: Object.fromEntries([...FILTER_KEYS, 'anchor', 'sort'].map((k) => [k, before[k]])) });
+    const before = prevStore.get();
+    if (before) {
+      prevStore.clear();
+      applyPreset({ name: 'your previous filters', cfg: before });
     }
   }
 

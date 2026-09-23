@@ -92,3 +92,43 @@ test('healthStore: corrupt stored data starts fresh instead of throwing', () => 
     assert.equal(st.usual().n, 1, bad);
   }
 });
+
+test('corrupt entries: marks, snapshots and presets drop bad items instead of breaking', () => {
+  const m = memStorage();
+  m.setItem('rea-avail-filter/marks/v1', JSON.stringify({ c: 1, m: { 111111: null, 111112: [1], 111113: { s: 1, f: 1, l: 1 } }, ad: 5 }));
+  const marks = core.marksStore(m);
+  assert.equal(marks.toggle('222222', 's', { id: '222222', url: 'https://www.realestate.com.au/p-222222' }), true);
+  assert.ok(JSON.parse(m.getItem('rea-avail-filter/marks/v1')).m['222222'].s, 'write persisted');
+  assert.ok(marks.shortlist().some((r) => r.id === '222222'));
+  assert.doesNotThrow(() => marks.counts());
+
+  const k = 'https://www.realestate.com.au/rent/in-x/list-1';
+  m.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: null, bad: { at: 'x' } } }));
+  const snaps = core.snapshotStore(m);
+  assert.doesNotThrow(() => snaps.save(k, [{ id: '146500001', url: 'https://www.realestate.com.au/p-1' }], false));
+  assert.deepEqual(Object.keys(snaps.exportData()), [k]);
+
+  m.setItem('rea-avail-filter/presets/v1', JSON.stringify({ v: 1, list: [null, 'x', { name: 'ok', cfg: {} }, { name: 'nocfg' }] }));
+  const pr = core.presetStore(m);
+  assert.deepEqual(pr.list().map((p) => p.name), ['ok']);
+  assert.equal(pr.save('two', {}), 'two');
+});
+
+test('presetStore.importData: imported presets win, fit under the cap, one bound per search', () => {
+  const pr = core.presetStore(memStorage());
+  const K = 'https://www.realestate.com.au/rent/in-bondi/list-1';
+  for (let i = 0; i < 30; i++) pr.save(`p${i}`, {});
+  pr.save('mine', {}, K);
+  assert.equal(pr.importData([{ name: 'new1', cfg: {} }, { name: 'theirs', cfg: {}, key: K }, { name: 'dup', cfg: {}, key: K }]), 3);
+  assert.ok(pr.get('new1'), 'kept despite a full list');
+  assert.equal(pr.forSearch(K).name, 'theirs');
+  assert.equal(pr.list().filter((p) => p.key === K).length, 1);
+  assert.equal(pr.get('dup').key, null);
+});
+
+test('discovery: an empty renamed field does not hide it on same-shaped listings', () => {
+  assert.equal(core.extractInspections({ id: 1, openHomeSlots: [] }).length, 0);
+  assert.equal(core.extractInspections({ id: 2, openHomeSlots: [{ startTime: '2026-09-26T00:00:00Z' }] }).length, 1);
+  assert.equal(core.extractListed({ id: 1, listedOn: null }), null);
+  assert.ok(core.extractListed({ id: 2, listedOn: '2026-09-01T00:00:00Z' }) instanceof Date);
+});
