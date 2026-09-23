@@ -327,7 +327,10 @@
         if (src.ag && typeof src.ag === 'object') {
           const d = load();
           d.ag = d.ag && typeof d.ag === 'object' ? d.ag : {};
-          for (const name of Object.values(src.ag)) if (typeof name === 'string' && agencyKey(name)) d.ag[agencyKey(name)] = clip(name, 80);
+          for (const raw of Object.values(src.ag)) {
+            const name = clip(raw, 80); // key the clipped name, the same one shown and toggled
+            if (agencyKey(name)) d.ag[agencyKey(name)] = name;
+          }
         }
         save();
         return n;
@@ -338,12 +341,13 @@
         return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length, notes: v.filter((e) => e.n).length };
       },
       // Hidden agencies live beside the per-listing marks: data.ag = { normalisedName: displayName }.
-      toggleAgency(name) {
+      toggleAgency(raw) {
+        const name = clip(raw, 80);
         const k = agencyKey(name);
         if (!k) return false;
         const d = fresh();
         d.ag = d.ag && typeof d.ag === 'object' ? d.ag : {};
-        if (d.ag[k]) delete d.ag[k]; else d.ag[k] = clip(name, 80);
+        if (d.ag[k]) delete d.ag[k]; else d.ag[k] = name;
         save();
         return !!d.ag[k];
       },
@@ -580,6 +584,7 @@
     if (v == null || v === '') return null;
     const raw = typeof v === 'object' ? v.value ?? v.iso ?? v.dateTime ?? v.date ?? null : v;
     if (raw == null) return null;
+    if (typeof raw === 'number' && raw < 1e9) return null; // counts/flags, not epoch times (1e9 s = 2001)
     const d = typeof raw === 'number' ? new Date(raw < 1e12 ? raw * 1000 : raw) : new Date(raw);
     return isNaN(d) || !/\d{4}/.test(String(raw)) && typeof raw !== 'number' ? null : d;
   };
@@ -593,29 +598,55 @@
   // where each one was found.
   const DISCOVER_DEPTH = 4;
   const DISCOVER_NODES = 3000;
-  const discover = (obj, keyRe, ok = () => true) => {
-    const queue = [[obj, '']];
+  // Subtrees describing other people/places: their coordinates, names and dates aren't the listing's.
+  const DISCOVER_SKIP = /lister|agent|agenc|company|brand|advertis|school|nearby|similar|history|related|suggest/i;
+  const NO_SKIP = /$^/;
+  const discover = (obj, keyRe, ok = () => true, skip = DISCOVER_SKIP) => {
+    const queue = [[obj, '', 0]];
     let seen = 0;
-    while (queue.length && seen < DISCOVER_NODES) {
-      const [node, path] = queue.shift();
+    for (let qi = 0; qi < queue.length && seen < DISCOVER_NODES; qi++) { // index cursor: shift() is O(n)
+      const [node, path, depth] = queue[qi];
       if (!node || typeof node !== 'object') continue;
-      for (const [k, v] of Object.entries(node)) {
+      for (const k of Object.keys(node)) {
+        const v = node[k];
         seen++;
         const p = path ? `${path}.${k}` : k;
         if (keyRe.test(k) && ok(v)) return { path: p, value: v };
-        if (v && typeof v === 'object' && p.split('.').length < DISCOVER_DEPTH) queue.push([v, p]);
+        if (v && typeof v === 'object' && depth + 1 < DISCOVER_DEPTH && !skip.test(k)) queue.push([v, p, depth + 1]);
       }
     }
     return null;
   };
   const found = {}; // field -> discovered path, for probe()
-  const note = (field, hit) => { if (hit && !found[field]) found[field] = hit.path; return hit?.value; };
+  const pathHint = {}; // field -> last discovered path, tried first on the next listing
+  const misses = new Map(); // field -> Set of listing shapes where discovery found nothing
+  const MISS_SHAPES_MAX = 50;
+  const atPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
+  // Discovery with two shortcuts: REA listings on a page share a shape, so reuse the path
+  // that worked last time, and don't re-walk a shape that already came up empty.
+  const find = (field, obj, keyRe, ok, skip) => {
+    const hint = pathHint[field];
+    if (hint) {
+      const v = atPath(obj, hint);
+      if (v !== undefined && ok(v)) { if (!found[field]) found[field] = hint; return v; }
+    }
+    const shape = Object.keys(obj || {}).sort().join(',');
+    const miss = misses.get(field) || new Set();
+    if (miss.has(shape)) return undefined;
+    const hit = discover(obj, keyRe, ok, skip);
+    if (hit) { pathHint[field] = hit.path; if (!found[field]) found[field] = hit.path; return hit.value; }
+    if (miss.size < MISS_SHAPES_MAX) miss.add(shape);
+    misses.set(field, miss);
+    return undefined;
+  };
 
   const inspectionList = (src) => (Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : null);
 
   function extractInspections(listing, now = new Date()) {
     let src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
-    if (!inspectionList(src)) src = note('inspections', discover(listing, /inspection|openhome|open_home/i, (v) => !!inspectionList(v)?.length));
+    // A discovered list must look like times, not eg "Book an inspection" options.
+    if (!inspectionList(src)) src = find('inspections', listing, /inspection|openhome|open_home/i,
+      (v) => !!inspectionList(v)?.some((it) => toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt)));
     const list = inspectionList(src) || [];
     const cutoff = now.getTime() - INSPECT_GRACE_MS;
     return list
@@ -631,7 +662,7 @@
   const LISTED_KEY = /^(date)?(first)?listed(at|date|on)?$|^listing(date|start)$|^datefirstlisted$/i;
   const extractListed = (listing) =>
     toDate(listing.dateListed ?? listing.listedDate ?? listing.listingDate ?? listing.dateFirstListed ?? listing.listedAt) ??
-    toDate(note('listed', discover(listing, LISTED_KEY, (v) => !!toDate(v))));
+    toDate(find('listed', listing, LISTED_KEY, (v) => !!toDate(v)));
 
   // Coordinates: an object holding lat + lng within Australia's bounding box.
   const LAT_KEYS = ['latitude', 'lat'];
@@ -645,19 +676,23 @@
   };
   const extractCoords = (listing) =>
     coordsOf(listing.address?.location) || coordsOf(listing.address) || coordsOf(listing.location) ||
-    coordsOf(note('coords', discover(listing, /location|geo|coord|address/i, (v) => !!coordsOf(v)))) || null;
+    coordsOf(find('coords', listing, /location|geo|coord|address/i, (v) => !!coordsOf(v))) || null;
 
   // Agency name: listingCompany/agency objects, else any *agency*/*company* object with a name.
   const nameOf = (o) => str(o?.name) || str(o?.displayName) || str(o?.brandName) || (typeof o === 'string' ? o : '');
   const extractAgency = (listing) => clipText(
     nameOf(listing.listingCompany) || nameOf(listing.agency) || nameOf(listing.agencies?.[0]) ||
-    nameOf(note('agency', discover(listing, /agenc|listingcompany|company|brand/i, (v) => !!nameOf(v)))), 80);
+    // Objects only: a string under an "agency*" key is usually an id, type, colour or URL.
+    nameOf(find('agency', listing, /agenc|listingcompany|company|brand/i, (v) => v && typeof v === 'object' && !!nameOf(v), NO_SKIP)), 80);
 
   // Feature labels (strings) from any features/amenities arrays.
-  const featureLabel = (f) => (typeof f === 'string' ? f : str(f?.displayLabel) || str(f?.label) || str(f?.name) || str(f?.value) || '');
+  const featureLabel = (f) => {
+    const l = typeof f === 'string' ? f : str(f?.displayLabel) || str(f?.label) || str(f?.name) || str(f?.featureName) || str(f?.value) || '';
+    return /^https?:/i.test(l) ? '' : l; // image URLs under "featured*" keys aren't features
+  };
   const extractFeatures = (listing) => {
     const srcs = [listing.propertyFeatures, listing.features, listing.generalFeatures?.features, listing.keyFeatures];
-    if (!srcs.some(Array.isArray)) srcs.push(note('features', discover(listing, /feature|amenit/i, (v) => Array.isArray(v) && v.some((x) => featureLabel(x)))));
+    if (!srcs.some(Array.isArray)) srcs.push(find('features', listing, /feature|amenit/i, (v) => Array.isArray(v) && v.some((x) => featureLabel(x))));
     const out = [];
     for (const a of srcs) {
       if (!Array.isArray(a)) continue;
@@ -717,10 +752,17 @@
   // Distance from a user-chosen point. Accepts "-33.87, 151.21" or a Google Maps URL/text
   // containing "@-33.87,151.21" (no geocoding: nothing leaves the browser).
   const parseAnchor = (v) => {
-    const m = String(v || '').match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{2,3}\.\d+)/);
-    if (!m) return null;
-    const lat = +m[1], lng = +m[2];
-    return inAu(lat, lng) ? { lat, lng } : null;
+    const s = String(v || '').replace(/[−–]/g, '-');
+    // Google Maps place URLs: the pin is !3d<lat>!4d<lng>; "@lat,lng" is only the map centre.
+    const pin = s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (pin && inAu(+pin[1], +pin[2])) return { lat: +pin[1], lng: +pin[2] };
+    // "lat, lng", "lat lng", "lat;lng", degrees with N/S/E/W, or lng-first.
+    for (const m of s.matchAll(/(-?\d{1,3}\.\d+)\s*°?\s*([NS]\b)?\s*(?:[,;]\s*|\s+)(-?\d{1,3}\.\d+)\s*°?\s*([EW]\b)?/gi)) {
+      const a = +m[1] * (/s/i.test(m[2] || '') ? -1 : 1), b = +m[3] * (/w/i.test(m[4] || '') ? -1 : 1);
+      if (inAu(a, b)) return { lat: a, lng: b };
+      if (inAu(b, a)) return { lat: b, lng: a };
+    }
+    return null;
   };
   const EARTH_KM = 6371;
   const haversineKm = (a, b) => {
@@ -1146,7 +1188,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, extractListed, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1589,10 +1631,10 @@
       if (b.dataset.act === 'ag') {
         const r = rowById(id);
         if (!r?.agency) return;
-        marks.toggleAgency(r.agency);
+        const on = marks.toggleAgency(r.agency);
         refreshMarks();
         ui.list.focus();
-        return offerUndo(`Hidden all listings from ${r.agency}.`, () => { marks.toggleAgency(r.agency); refreshMarks(); });
+        return offerUndo(on ? `Hidden all listings from ${r.agency}.` : `Showing ${r.agency} again.`, () => { marks.toggleAgency(r.agency); refreshMarks(); });
       }
       const act = b.dataset.act;
       const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
@@ -1840,7 +1882,7 @@
 
   function itemsHtml(rows) {
     return rows.map((r) => `
-      <div class="rf-item${r.gone || r.hidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
+      <div class="rf-item${r.gone || r.hidden || r.agencyHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
@@ -1873,7 +1915,7 @@
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
         <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
-        ${r.agency ? `<button data-act="ag" title="Hide every listing from ${esc(r.agency)}" aria-label="Hide agency ${esc(r.agency)}">Hide agency</button>` : ''}
+        ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
       </div>
       </div>`).join('');
   }

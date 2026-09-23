@@ -304,6 +304,15 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('[data-unhide-ag]');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
     assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), true);
+    // With "Show hidden" on, an agency-hidden row is dimmed and offers "Unhide agency".
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=ag]');
+    await page.check('#rf-showHidden');
+    const hid = await page.$('.rf-item.rf-hidden [data-act=ag]');
+    assert.equal(await hid.textContent(), 'Unhide agency');
+    await hid.evaluate((b) => b.click());
+    assert.match(await status(page), /Showing .* again/);
+    await page.uncheck('#rf-showHidden');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
     await page.check('#rf-floorplanOnly');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total / 2);
     assert.match(await page.textContent('.rf-item'), /photos · floorplan/);

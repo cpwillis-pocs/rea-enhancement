@@ -237,3 +237,11 @@ test('marksStore: shortlist summary keeps bond, amenities, coords, agency for co
   assert.equal(s.lat, -33.9);
   assert.equal(s.agency, 'Acme');
 });
+
+test('marksStore: long agency names import and toggle by the clipped name', () => {
+  const st = core.marksStore(mem(), () => 1e12);
+  const long = 'A'.repeat(120);
+  st.importJson({ app: 'rea-enhancement', kind: 'marks', v: 1, m: {}, ag: { x: long } });
+  assert.equal(st.hiddenAgencies()[0].length, 80);
+  assert.equal(st.toggleAgency(st.hiddenAgencies()[0]), false, 'unhide works with the shown name');
+});

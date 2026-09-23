@@ -63,3 +63,33 @@ test('distance: anchor parsing, haversine, filter, sort, validation', () => {
   assert.equal(rows[1].km < 1, true);
   assert.match(core.cfgError({ ...core.DEFAULT_CFG, anchor: 'somewhere' }), /coordinates in Australia/);
 });
+
+test('discovery precision: other parties\' coords/dates/strings are not the listing\'s', () => {
+  assert.equal(core.extractCoords({ listingCompany: { address: { location: { latitude: -33.8688, longitude: 151.2093 } } } }), null);
+  assert.equal(core.extractCoords({ nearbySchools: [{ location: { lat: -33.9, lng: 151.26 } }] }), null);
+  assert.equal(core.extractListed({ history: [{ dateListed: '2019-03-01' }] }), null);
+  assert.equal(core.extractListed({ listedDate: 0 }), null);
+  assert.equal(core.extractListed({ listed: 3 }), null);
+  for (const l of [{ agencyType: 'residential' }, { listingCompany: { companyId: 'XRAYWH' } }, { listingCompany: { brandColour: '#ffe512' } }, { agencyLogo: 'https://i/l.png' }]) {
+    assert.equal(core.extractAgency(l), '', JSON.stringify(l));
+  }
+  assert.equal(core.extractAgency({ advertiser: { agencyInfo: { brandName: 'JC' } } }), 'JC');
+  assert.deepEqual(core.extractInspections({ inspectionOptions: [{ label: 'Book an inspection' }] }), []);
+  assert.deepEqual(core.extractFeatures({ featuredImages: ['https://x/pool-view.jpg'] }), []);
+  assert.deepEqual(core.extractFeatures({ features: [{ featureName: 'Gas cooking' }] }), ['Gas cooking']);
+});
+
+test('parseAnchor: formats', () => {
+  const P = { lat: -33.8688, lng: 151.2093 };
+  for (const s of ['-33.8688 151.2093', '−33.8688, 151.2093', '33.8688° S, 151.2093° E', '151.2093, -33.8688', '-33.8688;151.2093']) assert.deepEqual(core.parseAnchor(s), P, s);
+  assert.deepEqual(core.parseAnchor('https://www.google.com/maps/place/Bondi/@-33.8845,151.2621,14z/data=!3m1!8m2!3d-33.8914755!4d151.2766845'), { lat: -33.8914755, lng: 151.2766845 });
+  assert.equal(core.parseAnchor('London 51.5, -0.12'), null);
+});
+
+test('discover perf: 500 large listings stay fast (hints + shape misses)', () => {
+  const big = () => { const o = { id: 1, blocks: [] }; for (let i = 0; i < 400; i++) o.blocks.push({ k: i, v: { a: i, b: [i, i + 1] } }); return o; };
+  const t0 = performance.now();
+  for (let i = 0; i < 500; i++) core.toRow({ ...listing({ id: String(146600000 + i) }), extra: big() }, false);
+  const ms = performance.now() - t0;
+  assert.ok(ms < 1500, `500 big listings took ${Math.round(ms)}ms`);
+});
