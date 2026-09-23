@@ -884,6 +884,7 @@
     inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
     value: (a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b),
     distance: (a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || byAvail(a, b),
+    match: (a, b) => (b.score ?? -1) - (a.score ?? -1) || byAvail(a, b),
   };
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
 
@@ -926,6 +927,31 @@
   };
   const medianLabel = (r) => (r.vsMedian == null ? '' : r.vsMedian === 0 ? `at median for ${+r.beds || 'studio'}${+r.beds ? '-bed' : ''}`
     : `${Math.abs(r.vsMedian)}% ${r.vsMedian < 0 ? 'below' : 'above'} median ${+r.beds ? `${r.beds}-bed` : 'studio'}`);
+
+  // "Best match": mean of whichever signals the user has set up, each 0..1 (1 = best).
+  // Explainable on purpose: scoreWhy lists the parts. Needs 2+ signals to mean anything.
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const SCORE_AVAIL_DAYS = 30; // this many days away from "from" scores 0 on timing
+  const SCORE_KM = 15; // distance that scores 0 when no max km is set
+  const median = (v) => { const a = v.filter(isFinite).sort((x, y) => x - y); return a.length ? a[Math.floor((a.length - 1) / 2)] : null; };
+  const withScores = (rows, cfg) => {
+    const pMax = num(cfg.priceMax), kmMax = num(cfg.maxKm) || SCORE_KM;
+    const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
+    const upMed = median(rows.map((r) => r.upfront));
+    for (const r of rows) {
+      const parts = [];
+      if (isFinite(r.priceNum)) {
+        if (pMax) parts.push(['rent vs budget', clamp01(1 - r.priceNum / pMax + 0.5)]);
+        else if (r.vsMedian != null) parts.push(['rent vs median', clamp01(0.5 - r.vsMedian / 50)]);
+      }
+      if (from && r.avail) parts.push(['timing', clamp01(1 - Math.abs(r.avail - from) / (SCORE_AVAIL_DAYS * DAY_MS))]);
+      if (r.km != null) parts.push(['distance', clamp01(1 - r.km / kmMax)]);
+      if (upMed && isFinite(r.upfront)) parts.push(['move-in', clamp01(0.5 - (r.upfront - upMed) / (2 * upMed))]);
+      r.score = parts.length >= 2 ? Math.round((parts.reduce((t, [, v]) => t + v, 0) / parts.length) * 100) : null;
+      r.scoreWhy = r.score == null ? '' : parts.map(([k, v]) => `${k} ${Math.round(v * 100)}`).join(', ');
+    }
+    return rows;
+  };
 
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
   const dedupe = (rows) => {
@@ -989,7 +1015,7 @@
     for (const r of rows) r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
     const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
-    return dedupe(rows)
+    const kept = dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => cfg.showHidden || (!r.hidden && !r.agencyHidden))
       .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
@@ -1006,8 +1032,8 @@
       .filter((r) => !cfg.type || r.type === cfg.type)
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !kw || kw(r.text || ''))
-      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at)))
-      .sort(SORTS[cfg.sort] || SORTS.avail);
+      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at)));
+    return withScores(kept, cfg).sort(SORTS[cfg.sort] || SORTS.avail);
   }
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
@@ -1015,7 +1041,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
@@ -1113,7 +1139,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1239,6 +1265,7 @@
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-warn{color:#b45309;font-weight:600}
+  .rf-score{font-weight:700;color:var(--rf-fg);cursor:help;border-bottom:1px dotted var(--rf-soft)}
   .rf-agencies{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
   .rf-agencies[hidden]{display:none}
   .rf-agencies .rf-label{margin-right:4px}
@@ -1412,6 +1439,7 @@
             <option value="listed">Newest first</option>
             <option value="value">Best value vs median</option>
             <option value="distance">Nearest</option>
+            <option value="match">Best match</option>
           </select></label>
         </div>
         <div class="rf-actions">
@@ -1819,7 +1847,7 @@
             r.bond ? `bond ${r.bond}` : '',
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
-          ${kmLabel(r) ? `<div class="rf-meta">${esc(kmLabel(r))}</div>` : ''}
+          ${kmLabel(r) || r.score != null ? `<div class="rf-meta">${esc(kmLabel(r))}${r.score != null ? `${kmLabel(r) ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency,
             r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}

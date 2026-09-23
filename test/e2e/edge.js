@@ -277,6 +277,12 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(n > 0 && n < 18, `within 2 km: ${n}`);
     await page.waitForFunction(() => [...document.querySelectorAll('article > .rf-badge')].some((b) => / (k)?m$|\d m|km/.test(b.textContent)), null, { timeout: 3000 });
     console.log('distance:', n, 'within 2 km; nearest', first);
+    await page.fill('#rf-maxKm', ''); await page.dispatchEvent('#rf-maxKm', 'change');
+    await page.fill('#rf-priceMax', '1500'); await page.dispatchEvent('#rf-priceMax', 'change');
+    await page.selectOption('#rf-sort', 'match');
+    const scores = await page.$$eval('.rf-score', (e) => e.map((x) => +x.textContent.replace(/\D/g, '')));
+    assert.ok(scores.length > 3 && scores.every((v, i) => i === 0 || v <= scores[i - 1]), `best match sorted desc: ${scores.slice(0, 5)}`);
+    assert.match(await page.getAttribute('.rf-score', 'title'), /rent vs budget \d+/);
     await done(page); await ctx.close();
   }
 

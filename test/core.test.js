@@ -315,3 +315,17 @@ test('withMedians / medianLabel / staleOnly / value sort', () => {
   assert.deepEqual(ids({ staleOnly: true }), ['g']);
   assert.deepEqual(ids({ sort: 'value' }).slice(0, 2), ['g', 'a']);
 });
+
+test('withScores: needs 2+ signals, explains parts, sorts best match first', () => {
+  const now = new Date(2026, 8, 23);
+  const mk = (id, p, d, lat) => core.toRow(listing({ id, price: { display: `$${p} per week` }, availableDate: { display: d },
+    address: { display: { fullAddress: id }, location: { latitude: lat, longitude: 151.27 } } }), false);
+  const rows = [mk('cheapnear', 600, 'Available 12 Oct 2026', -33.892), mk('pricyfar', 950, 'Available 30 Nov 2026', -33.99), mk('mid', 750, 'Available 20 Oct 2026', -33.93)];
+  const cfg = { priceMax: '1000', from: '2026-10-10', anchor: '-33.8915, 151.2767', sort: 'match' };
+  const out = core.applyFilters(rows, cfg, now);
+  assert.deepEqual(out.map((r) => r.url.split('-').pop()), ['cheapnear', 'mid', 'pricyfar']);
+  assert.ok(out[0].score > out[2].score);
+  assert.match(out[0].scoreWhy, /rent vs budget \d+, timing \d+, distance \d+/);
+  const lone = core.withScores([mk('x', 700, 'Available now', -33.9)], {});
+  assert.equal(lone[0].score, null, 'one signal (move-in) is not enough');
+});
