@@ -25,7 +25,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
-- Sort by available date, price, price per bed, best value vs median, most beds, next inspection, newest first.
+- Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
@@ -39,11 +39,14 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
 - The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; filter by status and export it.
+- **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
-- Price changes show "was $X".
+- Price changes show "was $X" (hover for the full history). A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
+
+![Compare shortlisted listings](docs/screenshots/compare.jpg)
 
 **Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist. Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and previous price.
 

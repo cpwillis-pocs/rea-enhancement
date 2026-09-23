@@ -2,6 +2,17 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.6.0
+
+- Shortlist **Compare** table: up to 6 listings side by side (rent, $/bed, move-in, availability, beds/baths/cars, distance, next inspection, amenities, agency, status, note), best values highlighted; the drawer widens for it.
+- **Best match** score and sort: an explainable 0-100 from rent vs budget (or median), timing vs your "from" date, distance and move-in cost.
+- **Price history** (last 10 changes) in a tooltip and export; **relist detection**: a listing that reappears at the same address under a new id is tagged "relisted" with the old price, and stays hidden if you'd hidden it. Two live listings at one address are not treated as a relist.
+- Amenity detection tightened: "Pets allowed: No" and similar key/value text, "no balcony/pool/robes", shared/communal facilities, nearby or car pools, "furnished or unfurnished"; address and property type ignored.
+- Field discovery precision: skips agent/agency/school/nearby/history subtrees for coordinates and dates, agency names must come from objects, discovered inspections must have times, tiny numbers aren't dates; reuses the last good path and skips shapes already searched (about 5x faster on big listings).
+- Distance accepts Google Maps pins (`!3d…!4d…`), no-comma, degrees N/S/E/W, Unicode minus and lng-first input.
+- Hide agency: hidden-agency rows dim with "Show hidden" and offer "Unhide agency".
+- Remembered rows keep computed amenities.
+
 ## 2.5.0
 
 - Field discovery: when REA's known field names are missing, the listing is searched by shape (bounded) for inspections, listed date, coordinates, agency and features; `reaFilter.probe()` reports discovered paths.
