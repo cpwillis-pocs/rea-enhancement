@@ -202,6 +202,7 @@
   const recordText = (v) => (v ? `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined` : ''}` : '');
   const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'as', 'ast', 'ck']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
+  const PRUNE_EVERY = 20;
   const keep = (e) => e.s || e.h || e.n || e.as;
   // Inspection checklist answers: { label: 'y' | 'n' }, labels clipped, at most CHECK_MAX of them.
   const CHECK_MAX = 12;
@@ -243,10 +244,11 @@
   const hiddenOf = (e, was) => e?.h === 1 || (e?.h !== 0 && !!was?.h && !e?.s);
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
-    let data = null;
+    let data = null, raw = null, writes = 0, countMemo = null;
     const load = () => {
       if (data) return data;
-      try { data = JSON.parse(storage.getItem(MARKS_KEY)); } catch { data = null; }
+      countMemo = null;
+      try { raw = storage.getItem(MARKS_KEY); data = JSON.parse(raw); } catch { data = null; raw = null; }
       if (!isObj(data) || !isObj(data.m)) data = { c: now(), m: {} };
       // One bad entry (hand-edited, or a half-written sync) mustn't break every later write.
       for (const [id, e] of Object.entries(data.m)) if (!isObj(e)) delete data.m[id];
@@ -255,7 +257,14 @@
     };
     // Writes re-read storage first so another tab's changes aren't overwritten by this
     // tab's stale in-memory copy (last writer wins per call, not per page lifetime).
-    const fresh = () => { data = null; return load(); };
+    // Unchanged storage string (no other tab wrote) means the parsed copy is still current.
+    const fresh = () => {
+      let cur = null;
+      try { cur = storage.getItem(MARKS_KEY); } catch { /* blocked */ }
+      if (data && raw != null && cur === raw) return data;
+      data = null;
+      return load();
+    };
     const prune = () => {
       const { m } = data;
       for (const [id, e] of Object.entries(m)) if (!keep(e) && now() - (e.l || e.f || 0) > MARKS_TTL_MS) delete m[id];
@@ -266,10 +275,19 @@
           .slice(0, ids.length - MARKS_MAX).forEach((id) => delete m[id]);
       }
     };
-    const save = () => { try { prune(); storage.setItem(MARKS_KEY, JSON.stringify(data)); } catch { /* quota/blocked */ } };
+    // Pruning walks everything, so it runs every PRUNE_EVERY writes (or when over the cap).
+    const save = () => {
+      countMemo = null;
+      try {
+        if (writes++ % PRUNE_EVERY === 0 || Object.keys(data.m).length > MARKS_MAX) prune();
+        const out = JSON.stringify(data);
+        storage.setItem(MARKS_KEY, out);
+        raw = out;
+      } catch { raw = null; /* quota/blocked: re-read next time */ }
+    };
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     return {
-      invalidate() { data = null; },
+      invalidate() { data = null; raw = null; },
       // `full`: rows from a complete crawl of a search. Only then is a missing listing evidence of
       // a relist; one page (annotate, boot, re-check) says nothing about the rest.
       observe(rows, { full = false, features = true } = {}) {
@@ -483,9 +501,10 @@
       },
       counts() {
         const { m } = load();
+        if (countMemo) return countMemo;
         let starred = 0, hidden = 0, notes = 0;
         for (const e of Object.values(m)) { if (e.s) starred++; if (e.h) hidden++; if (e.n) notes++; }
-        return { starred, hidden, notes };
+        return (countMemo = { starred, hidden, notes });
       },
       // Hidden agencies live beside the per-listing marks: data.ag = { normalisedName: displayName }.
       toggleAgency(raw) {
@@ -1068,7 +1087,8 @@
       pos: /\b(?<!(?:shared|communal|common|rooftop) )(?:balcon(?:y|ies)|courtyard|terrace(?! house| home)|deck(?! chair)|private garden|backyard|outdoor (?:area|space))\b/ },
     { id: 'robes', label: 'Built-in robes', yes: 'BIRs', neg: /\bno (?:built[- ]in )?(?:robes?|wardrobes?|birs?)\b/,
       pos: /\bbuilt[- ]in (?:robes?|wardrobes?)\b|\bbirs?\b|\bwalk[- ]in (?:robe|wardrobe)\b/ },
-    { id: 'pool', label: 'Pool', yes: 'Pool', neg: /\bno (?:swimming |lap |plunge )?pool\b/,
+    // gate: every pool pattern contains the word, so the costly lookbehind is skipped when it's absent.
+    { id: 'pool', label: 'Pool', yes: 'Pool', gate: 'pool', neg: /\bno (?:swimming |lap |plunge )?pool\b/,
       pos: /\b(?<!(?:car|walk to [\w' ]{0,30}|near(?:by)? [\w' ]{0,20}|close to [\w' ]{0,30}) )(?:swimming |lap |plunge )?pool\b(?! tables?|side)/ },
     { id: 'study', label: 'Study', yes: 'Study', neg: /\bno (?:study|home office)\b/,
       pos: /\b(?<!\b(?:to|and|or|while you|students who) )(?:study(?: room| nook| area)?|home office)\b(?! (?:at|nearby|precinct|centre))/ },
@@ -1088,7 +1108,8 @@
   // address or property type ("North Terrace", type "Terrace" are not outdoor space).
   const amenitiesOf = (row) => {
     const text = `${(row.features || []).join(' | ')} | ${row.amenText ?? row.text ?? ''}`.toLowerCase();
-    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.neg.test(text) || a.kvNo.test(text) ? 'no' : a.pos.test(text) ? 'yes' : null]));
+    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.gate && !text.includes(a.gate) ? null
+      : a.neg.test(text) || a.kvNo.test(text) ? 'no' : a.pos.test(text) ? 'yes' : null]));
   };
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
@@ -1110,10 +1131,13 @@
   // bidding is prohibited", "fee: nil") is the good news, not a heads-up. Checked per clause.
   const WATCH_NEG = /\b(?:no|not|nil|zero|none|never|without|free|waived|prohibited|n\/a)\b|n't\b|\$0(?![.\d]*[1-9])|paid by (?:the )?(?:owner|landlord|lessor)|fee-free/;
   const WATCH_BEFORE = 22, WATCH_AFTER = 14;
+  for (const w of WATCHOUTS) w.reG = new RegExp(w.re.source, 'g'); // compiled once; lastIndex reset per use
   const watchOf = (text) => {
-    const clauses = String(text || '').toLowerCase().split(/(?<=[.!?;])\s+|\n+/);
-    return WATCHOUTS.filter((w) => clauses.some((c) => {
-      const re = new RegExp(w.re.source, 'g');
+    const lower = String(text || '').toLowerCase();
+    const clauses = lower.split(/(?<=[.!?;])\s+|\n+/);
+    return WATCHOUTS.filter((w) => w.re.test(lower) && clauses.some((c) => { // whole-text test first: most listings mention none
+      const re = w.reG;
+      re.lastIndex = 0;
       for (let m; (m = re.exec(c));) {
         if (!WATCH_NEG.test(c.slice(Math.max(0, m.index - WATCH_BEFORE), m.index + m[0].length + WATCH_AFTER))) return true;
         if (!m[0]) re.lastIndex++;

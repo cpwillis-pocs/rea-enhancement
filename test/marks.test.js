@@ -468,3 +468,17 @@ test('inspection checklist: cycle, summary, backup round-trip', () => {
   assert.deepEqual(core.checklistItems('a, b,, a\nc'), ['a', 'b', 'c']);
   assert.match(core.printHtml([{ ...r, url: 'https://www.realestate.com.au/p-1' }], new Date(), ['Natural light', 'Storage']), /☑ Natural light.*☐ Storage/);
 });
+
+test('marksStore: parsed copy reused until another tab writes; counts memo resets on writes', () => {
+  const m = mem();
+  const a = core.marksStore(m, () => 1e12), b = core.marksStore(m, () => 1e12);
+  a.toggle('146500061', 's', row('146500061'));
+  assert.equal(b.counts().starred, 1);
+  a.toggle('146500062', 's', row('146500062'));
+  b.invalidate(); // what the storage event does
+  assert.equal(b.counts().starred, 2);
+  b.toggle('146500061', 's'); // b's write sees a's latest (fresh() compares the stored string)
+  assert.equal(a.counts().starred, 2, 'a keeps its memo until told');
+  a.invalidate();
+  assert.equal(a.counts().starred, 1);
+});
