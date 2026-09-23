@@ -420,6 +420,33 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 20. Bulk: shortlist all shown / hide all shown with undo; shortlist bulk status + remove declined.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    const shown = await page.$$eval('.rf-item', (e) => e.length);
+    await page.selectOption('.rf-bulk', 'star');
+    assert.match(await status(page), new RegExp(`Shortlisted ${shown}`));
+    await page.click('[data-view=shortlist]');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown);
+    await page.selectOption('.rf-sl-bulk', 'status:declined');
+    assert.match(await status(page), /Marked \d+ as declined/);
+    await page.selectOption('.rf-sl-bulk', 'unstar-declined');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
+    await page.click('.rf-status .rf-undo');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown, 'undo brings them back');
+    await page.click('[data-view=results]');
+    await page.selectOption('.rf-bulk', 'hide');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
+    await page.click('.rf-status .rf-undo');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown);
+    console.log('bulk actions:', shown, 'rows, undo ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

@@ -245,3 +245,18 @@ test('marksStore: long agency names import and toggle by the clipped name', () =
   assert.equal(st.hiddenAgencies()[0].length, 80);
   assert.equal(st.toggleAgency(st.hiddenAgencies()[0]), false, 'unhide works with the shown name');
 });
+
+test('marksStore: bulk setMany/setStatusMany and dump/restore for undo', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const rows = ['146500101', '146500102', '146500103'].map((id) => row(id));
+  const before = st.dump();
+  assert.equal(st.setMany(rows, 's', true), 3);
+  assert.equal(st.setMany(rows, 's', true), 0, 'idempotent');
+  assert.equal(st.shortlist().length, 3);
+  st.setStatusMany([rows[0].id, rows[1].id], 'declined');
+  assert.equal(st.shortlist().filter((r) => r.appStatus === 'declined').length, 2);
+  assert.equal(st.setStatusMany(['x'], 'bogus'), 0);
+  st.restoreDump(before);
+  assert.equal(st.shortlist().length, 0, 'undo restores exactly');
+});

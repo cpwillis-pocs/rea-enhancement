@@ -165,6 +165,7 @@
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
+  const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const keep = (e) => e.s || e.h || e.n || e.as;
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
   const addressKey = (a) => {
@@ -352,6 +353,31 @@
         return !!d.ag[k];
       },
       hiddenAgencies: () => Object.values(load().ag || {}),
+      // Bulk: set s (shortlist) or h (hidden) explicitly on many rows in one write.
+      setMany(rows, k, on) {
+        const { m } = fresh();
+        let n = 0;
+        for (const r of rows) {
+          if (!r.id) continue;
+          const e = entry(m, r.id);
+          if (!!e[k] === on) continue;
+          e[k] = on ? 1 : 0;
+          if (k === 's') { if (on) { e.st = now(); e.d = summary(r); } else delete e.st; }
+          n++;
+        }
+        save();
+        return n;
+      },
+      setStatusMany(ids, status) {
+        if (!APP_STATUSES.includes(status)) return 0;
+        const { m } = fresh();
+        for (const id of ids) { const e = entry(m, id); if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } }
+        save();
+        return ids.length;
+      },
+      // Whole-store snapshot for one-step undo of bulk actions.
+      dump: () => JSON.stringify(load()),
+      restoreDump(json) { try { data = JSON.parse(json); save(); } catch { /* ignore */ } },
     };
   };
 
@@ -1319,6 +1345,8 @@
   .rf-btn[hidden]{display:none}
   .rf-btn.sec{background:var(--rf-sec);color:var(--rf-fg)}
   .rf-btn.sec:hover{background:var(--rf-sec-hover)}
+  .rf-bulk,.rf-sl-bulk{flex:0 0 auto;font:12px system-ui,sans-serif;padding:7px 6px;border:1px solid var(--rf-input);border-radius:6px;
+    background:var(--rf-bg);color:var(--rf-fg);width:auto!important}
   .rf-exports .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--rf-muted);margin-right:auto}
   .rf-status{padding:8px 16px;font-size:12px;color:var(--rf-muted);border-bottom:1px solid var(--rf-line);min-height:19px}
@@ -1483,6 +1511,10 @@
       </div>
       <div class="rf-sl-bar" hidden>
         <span class="rf-label">Shortlist, all searches</span>
+        <select class="rf-sl-bulk" aria-label="Bulk action on the shortlist shown">
+          <option value="">Bulk…</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="status:${v}">Mark shown: ${v}</option>`).join('')}
+          <option value="unstar-declined">Remove declined</option><option value="unstar">Remove all shown</option>
+        </select>
         <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
           <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
           <option value="-">Not started</option>
@@ -1553,6 +1585,9 @@
         <div class="rf-actions">
           <button class="rf-btn" id="rf-run">Search all pages</button>
           <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
+          <select class="rf-bulk" aria-label="Bulk action on the listings shown" disabled>
+            <option value="">Bulk…</option><option value="star">Shortlist all shown</option><option value="hide">Hide all shown</option>
+          </select>
         </div>
         <div class="rf-actions rf-exports">
           <span class="rf-label">Export</span>
@@ -1590,6 +1625,8 @@
       slCount: panel.querySelector('.rf-count'),
       slFile: panel.querySelector('.rf-sl-bar input[type=file]'),
       slFilter: panel.querySelector('.rf-sl-filter'),
+      bulk: panel.querySelector('.rf-bulk'),
+      slBulk: panel.querySelector('.rf-sl-bulk'),
       list: panel.querySelector('.rf-list'),
     };
 
@@ -1770,6 +1807,30 @@
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    // Bulk actions: one write, one re-render, one undo that restores the exact previous state.
+    const bulk = (sel, fn) => sel.addEventListener('change', () => {
+      const v = sel.value;
+      sel.value = '';
+      if (!v || !ui.rows?.length) return;
+      const before = marks.dump();
+      const msg = fn(v, ui.rows);
+      refreshMarks();
+      if (msg) offerUndo(msg, () => { marks.restoreDump(before); refreshMarks(); });
+    });
+    bulk(ui.bulk, (v, rows) => {
+      if (v === 'star') {
+        const n = marks.setMany(rows.slice(0, BULK_STAR_MAX), 's', true);
+        return `Shortlisted ${n}${rows.length > BULK_STAR_MAX ? ` (first ${BULK_STAR_MAX} shown)` : ''}.`;
+      }
+      if (v === 'hide') return `Hid ${marks.setMany(rows, 'h', true)} listings.`;
+      return '';
+    });
+    bulk(ui.slBulk, (v, rows) => {
+      if (v.startsWith('status:')) return `Marked ${marks.setStatusMany(rows.map((r) => r.id), v.slice(7))} as ${v.slice(7)}.`;
+      if (v === 'unstar-declined') return `Removed ${marks.setMany(rows.filter((r) => r.appStatus === 'declined'), 's', false)} declined.`;
+      if (v === 'unstar') return `Removed ${marks.setMany(rows, 's', false)} from the shortlist.`;
+      return '';
+    });
     ui.active.addEventListener('click', (e) => {
       const b = e.target.closest('[data-chip]');
       const chip = b && ui.activeChips?.[+b.dataset.chip];
@@ -1932,7 +1993,7 @@
     ui.status.appendChild(b);
   }
 
-  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; };
+  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; };
 
   const setStatus = (msg, isErr) => {
     ui.status.textContent = msg;
