@@ -157,12 +157,14 @@
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
+    in: cleanInspections(r.inspections),
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
   const keep = (e) => e.s || e.h || e.n || e.as;
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
+    inspections: d.in,
   });
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
@@ -257,7 +259,8 @@
             return {
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: '', ppb: perBed(priceNum, d.b),
-              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', inspections: [], listed: null,
+              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', listed: null,
+              inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
           });
       },
@@ -812,6 +815,44 @@
   const toCsv = (rows) => table(rows).map((cols) => cols.map((c) => (/[",\n\r]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\r\n');
 
 
+  // Upcoming inspections as an iCalendar file (RFC 5545) for any calendar app. REA gives a
+  // start time only, so each event is INSPECT_MINUTES long. '' when there are none.
+  const INSPECT_MINUTES = 15;
+  const icsText = (v) => String(v ?? '').replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\r?\n/g, '\\n');
+  const icsTime = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  // Lines over 75 octets are folded: CRLF + one space, per RFC 5545 3.1.
+  const icsFold = (line) => {
+    const out = [];
+    let cur = '', bytes = 0;
+    for (const ch of line) {
+      const b = new TextEncoder().encode(ch).length;
+      if (bytes + b > 75) { out.push(cur); cur = ' '; bytes = 1; }
+      cur += ch; bytes += b;
+    }
+    out.push(cur);
+    return out.join('\r\n');
+  };
+  const toIcs = (rows, now = Date.now()) => {
+    const events = [];
+    const seen = new Set();
+    for (const r of rows) {
+      for (const i of r.inspections || []) {
+        if (typeof i.at !== 'number' || i.at < now - INSPECT_GRACE_MS) continue;
+        const uid = `${r.id}-${i.at}@rea-enhancement`;
+        if (seen.has(uid)) continue;
+        seen.add(uid);
+        events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`,
+          `DURATION:PT${INSPECT_MINUTES}M`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
+          `LOCATION:${icsText(r.address)}`, r.url ? `URL:${r.url}` : '',
+          `DESCRIPTION:${icsText([r.price, r.available && `Available ${r.available}`, r.note].filter(Boolean).join(' | '))}`,
+          'END:VEVENT'].filter(Boolean));
+      }
+    }
+    if (!events.length) return '';
+    return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
+      .map(icsFold).join('\r\n') + '\r\n';
+  };
+
   // Heuristic drift detection: parsing "worked" but the fields we depend on are gone.
   function schemaWarnings(rows) {
     if (!rows.length) return [];
@@ -841,12 +882,18 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
 
   // ------------------------------------------------------------------- ui
+
+  function downloadIcs(rows) {
+    const ics = toIcs(rows);
+    if (!ics) return setStatus('No upcoming inspection times in these listings.', true);
+    download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
+  }
 
   function download(name, text, type) {
     const blob = new Blob([text], { type });
@@ -1050,6 +1097,7 @@
           <option value="-">Not started</option>
         </select>
         <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
+        <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
         <input type="file" accept="application/json,.json" hidden>
@@ -1105,6 +1153,7 @@
           <button class="rf-btn sec" data-export="csv" disabled>CSV</button>
           <button class="rf-btn sec" data-export="tsv" disabled>TSV</button>
           <button class="rf-btn sec" data-export="copy" disabled title="Copy as TSV - pastes into Sheets/Excel">Copy</button>
+          <button class="rf-btn sec" data-export="ics" disabled title="Upcoming inspections as a calendar file">Calendar</button>
         </div>
       </div>
       <div class="rf-status" role="status" aria-live="polite"></div>
@@ -1258,6 +1307,7 @@
         if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
+        else if (b.dataset.export === 'ics') downloadIcs(rows);
         else {
           const text = toTsv(rows);
           let ok = false;

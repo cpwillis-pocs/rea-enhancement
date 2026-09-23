@@ -209,6 +209,25 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 12. Calendar export from results and from the shortlist (inspections kept with the star).
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-exports [data-export=ics]')]);
+    const ics = fs.readFileSync(await dl.path(), 'utf8');
+    const n = (ics.match(/BEGIN:VEVENT/g) || []).length;
+    assert.ok(dl.suggestedFilename().endsWith('.ics') && n > 0, 'results calendar has events');
+    const withInsp = await page.$$eval('.rf-item', (els) => els.find((e) => /Inspect /.test(e.textContent))?.dataset.id);
+    await page.hover(`.rf-item[data-id="${withInsp}"]`); await page.click(`.rf-item[data-id="${withInsp}"] >> [data-act=s]`);
+    await page.click('[data-view=shortlist]');
+    const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('.rf-sl-bar [data-export=ics]')]);
+    const ics2 = fs.readFileSync(await dl2.path(), 'utf8');
+    assert.equal((ics2.match(/BEGIN:VEVENT/g) || []).length, 1, 'shortlist calendar = the one shortlisted inspection');
+    console.log('calendar export:', n, 'events from results, 1 from shortlist');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

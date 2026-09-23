@@ -284,3 +284,18 @@ test('moveIn: bond + 2 weeks, bond weeks, unknowns', () => {
   assert.deepEqual(ids({ upfrontMax: '5000' }), ['1001']);
   assert.deepEqual(ids({ upfrontMax: '4000' }), []);
 });
+
+test('toIcs: upcoming inspections, escaping, folding, dedupe', () => {
+  const now = Date.UTC(2026, 8, 23);
+  const at = Date.UTC(2026, 8, 26, 0, 30);
+  const r = { id: '146500001', address: '1/2 Hall St, Bondi; NSW', price: '$750 per week', url: 'https://www.realestate.com.au/property-x-146500001',
+    available: '12 Oct', note: 'pets?\nask', inspections: [{ at, label: 'Sat' }, { at: now - 5 * 36e5, label: 'past' }, { at: null, label: 'By appt' }] };
+  const ics = core.toIcs([r, r], now);
+  assert.ok(ics.startsWith('BEGIN:VCALENDAR\r\n'));
+  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 1, 'past/undated skipped, duplicate row deduped');
+  assert.match(ics, /DTSTART:20260926T003000Z/);
+  assert.ok(ics.includes('SUMMARY:Inspection: 1/2 Hall St\\, Bondi\\; NSW'), 'commas/semicolons escaped');
+  assert.match(ics.replace(/\r\n /g, ''), /pets\?\\nask/);
+  assert.ok(ics.split('\r\n').every((l) => Buffer.byteLength(l) <= 75), 'folded to 75 octets');
+  assert.equal(core.toIcs([{ id: 'x', inspections: [] }], now), '');
+});
