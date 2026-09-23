@@ -2,6 +2,14 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.13.0
+
+- **Hide if mentioned**: exclude listings whose text mentions a heads-up term (short lease, water charged, fees, higher offers, strata approval, lease-break terms); each shows as a removable chip.
+- The listing-page bar can be minimised to a star (remembered), so it never sits over REA's own buttons.
+- Faster filtering with a distance point set (distance is worked out once per point, not once per filter chip); per-listing rendering does less repeated work.
+- Fixed: Re-check could mark a search you started meanwhile as not busy.
+- Internals: shared helpers for background jobs, status labels, money and the page-data lookup; more unit tests.
+
 ## 2.12.0
 
 - **Heads-up tags** from the listing text: short lease, water usage charged, fees mentioned, invites higher offers, subject to strata approval, lease-break terms. Shown on listings, in Compare and in exports; "no application fee" isn't flagged.
