@@ -115,3 +115,15 @@ test('marksStore: two tabs do not clobber each other; null m recovers', () => {
   const st = core.marksStore(bad);
   assert.doesNotThrow(() => st.observe([row('146500004')]));
 });
+
+test('marksStore: "was $X" expires after 14 days', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  st.observe([row('146500020', '$700 per week')]);
+  const r = [row('146500020', '$650 per week')];
+  st.observe(r); st.decorate(r);
+  assert.equal(r[0].prevPrice, '$700 per week');
+  t += 15 * 864e5;
+  st.decorate(r);
+  assert.equal(r[0].prevPrice, '');
+});

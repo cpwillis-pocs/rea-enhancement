@@ -224,3 +224,10 @@ test('applyFilters: withinDays is relative to now and tightens "to"', () => {
   assert.deepEqual(ids({ withinDays: '84', to: '2026-10-01' }), ['a'], 'explicit earlier "to" wins');
   assert.deepEqual(ids({ withinDays: '' }), ['a', 'b', 'c', 'd']);
 });
+
+test('dedupe / windowEnd', () => {
+  const near = core.toRow(listing({ id: 'z' }), true), exact = core.toRow(listing({ id: 'z' }), false);
+  assert.deepEqual(core.dedupe([near, exact]).map((r) => r.surrounding), [false]);
+  assert.equal(core.windowEnd('14', new Date(2026, 8, 23)), '2026-10-07');
+  assert.equal(core.windowEnd('', new Date(2026, 8, 23)), '');
+});

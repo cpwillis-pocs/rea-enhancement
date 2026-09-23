@@ -47,6 +47,7 @@
   const ANNOTATE_MAX_WAIT_MS = 500;
   const KNOWN_MAX = 2000;
   const RENDER_CHUNK = 100;
+  const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
   const ROWS_VERSION = 5; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -55,6 +56,7 @@
   const MARKS_KEY = 'rea-avail-filter/marks/v1';
   const MARKS_MAX = 5000;
   const MARKS_TTL_MS = 90 * 864e5; // unstarred, unhidden listings forgotten after 90 days unseen
+  const PRICE_CHANGE_MS = 14 * 864e5; // "was $X" shown for two weeks after a change
   const NEW_MS = 48 * 36e5; // a listing REA dates within 48h counts as new even without a baseline
   const ROWS_TEXT_MAX = 600;
   const SNAP_KEY = 'rea-avail-filter/snapshots/v1';
@@ -157,7 +159,7 @@
           e.l = t;
           if (e.s) e.d = summary(r); // keep the shortlist's copy current
           if (isFinite(r.priceNum)) {
-            if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; }
+            if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; e.pt = t; }
             e.p = r.priceNum;
             e.ps = r.price;
           }
@@ -175,7 +177,7 @@
           r.firstSeen = e?.f ? new Date(e.f) : null;
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
-          r.prevPrice = e && e.pp != null && e.pp !== e.p ? e.pps || `$${e.pp}` : '';
+          r.prevPrice = e && e.pp != null && e.pp !== e.p && e.pt && t - e.pt < PRICE_CHANGE_MS ? e.pps || `$${e.pp}` : '';
           r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
         }
         return rows;
@@ -638,6 +640,21 @@
     return (text) => inc.every((w) => text.includes(w)) && !exc.some((w) => text.includes(w));
   };
 
+  // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
+  const dedupe = (rows) => {
+    const byUrl = new Map();
+    for (const r of rows) if (r.url && (!byUrl.has(r.url) || byUrl.get(r.url).surrounding && !r.surrounding)) byUrl.set(r.url, r);
+    return [...byUrl.values()];
+  };
+
+  // Last day a rolling "within N days" window allows, as yyyy-mm-dd (or '').
+  const windowEnd = (days, now = new Date()) => {
+    const n = num(days);
+    if (n == null) return '';
+    const w = new Date(now); w.setDate(w.getDate() + n);
+    return ymdLocal(w);
+  };
+
   // Undated listings ("Contact agent") can't satisfy a date bound, but are kept
   // (sorted last) when no bound is set so an empty filter never hides data.
   // Numeric minimums treat unknown values as failing; maximums likewise.
@@ -657,10 +674,7 @@
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
     const sameDay = (ms) => { const d = new Date(ms); return d.getFullYear() === insDay.getFullYear() && d.getMonth() === insDay.getMonth() && d.getDate() === insDay.getDate(); };
-    // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
-    const byUrl = new Map();
-    for (const r of rows) if (r.url && (!byUrl.has(r.url) || byUrl.get(r.url).surrounding && !r.surrounding)) byUrl.set(r.url, r);
-    return [...byUrl.values()]
+    return dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => cfg.showHidden || !r.hidden)
       .filter((r) => cfg.showGone || !r.gone)
@@ -743,7 +757,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG,
     };
     return;
   }
@@ -1229,6 +1243,11 @@
       render([]);
       return setStatus('"Available from" is after "Available to".', true);
     }
+    const wEnd = windowEnd(cfg.withinDays);
+    if (cfg.from && wEnd && cfg.from > wEnd) {
+      render([]);
+      return setStatus(`"Available from" is after the "within" window (ends ${wEnd}).`, true);
+    }
     const priceMin = +cfg.priceMin, priceMax = +cfg.priceMax;
     if (cfg.priceMin !== '' && cfg.priceMax !== '' && priceMin > priceMax) {
       render([]);
@@ -1237,7 +1256,7 @@
     const rows = applyFilters(pool(), cfg);
     render(rows);
     let nNew = 0, nMoved = 0, nHidden = 0;
-    for (const r of cache) { nNew += r.isNew || r.sinceLast ? 1 : 0; nMoved += r.prevPrice ? 1 : 0; nHidden += r.hidden ? 1 : 0; }
+    for (const r of dedupe(cache)) { nNew += r.isNew || r.sinceLast ? 1 : 0; nMoved += r.prevPrice ? 1 : 0; nHidden += r.hidden ? 1 : 0; }
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
     const extra = [nNew && `${nNew} new${since}`, gone.length && `${gone.length} no longer listed`, nMoved && `${nMoved} price changed`,
       !cfg.showHidden && nHidden && `${nHidden} hidden`].filter(Boolean).join(' · ');
@@ -1414,7 +1433,7 @@
     const p = fetchResults(url, opts).catch((e) => { if (pageMemo.get(url)?.p === p) pageMemo.delete(url); throw e; });
     pageMemo.delete(url); // re-insert so Map order stays oldest-first for eviction
     pageMemo.set(url, { at: Date.now(), p, signal: opts?.signal });
-    if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
+    if (pageMemo.size > PAGE_MEMO_MAX) pageMemo.delete(pageMemo.keys().next().value);
     return p;
   };
   let knownVer = 0;
@@ -1450,7 +1469,7 @@
   let matchMemo = { sig: null, set: null };
   const matchSet = () => {
     if (!cfg.dimCards || !filtersActive()) return null;
-    const sig = knownVer + JSON.stringify(cfg);
+    const sig = knownVer + new Date().toDateString() + JSON.stringify(cfg); // day: rolling window moves at midnight
     if (matchMemo.sig !== sig) matchMemo = { sig, set: new Set(applyFilters([...known.values()], cfg).map((r) => r.id)) };
     return matchMemo.set;
   };
