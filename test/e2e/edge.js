@@ -293,20 +293,20 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const page = await open(ctx);
     await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
     const total = await page.$$eval('.rf-item', (e) => e.length);
-    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=ag]');
+    await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
     assert.match(await status(page), /Hidden all listings from/);
     const after = await page.$$eval('.rf-item', (e) => e.length);
     assert.equal(after, total - 6, 'one of three agencies hidden');
     await page.click('.rf-status .rf-undo');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
-    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=ag]');
+    await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
     await page.click('#rf-more summary');
     assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), false);
     await page.click('[data-unhide-ag]');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
     assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), true);
     // With "Show hidden" on, an agency-hidden row is dimmed and offers "Unhide agency".
-    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=ag]');
+    await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
     await page.check('#rf-showHidden');
     const hid = await page.$('.rf-item.rf-hidden [data-act=ag]');
     assert.equal(await hid.textContent(), 'Unhide agency');
@@ -597,7 +597,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await waitStatus(page, /summary copied/);
     assert.match(await page.evaluate(() => navigator.clipboard.readText()), /per week - .*\nAvailable|https:\/\/www\.realestate/);
     const total = await page.$$eval('.rf-item', (e) => e.length);
-    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=sb]');
+    await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=sb]');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0, 'every fixture is in Bondi');
     await page.click('.rf-status .rf-undo');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);

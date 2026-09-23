@@ -1607,11 +1607,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     border:1px solid var(--rf-input);border-radius:6px;font:12px/1.4 system-ui,sans-serif;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-item{position:relative}
   .rf-item.rf-hidden .rf-card{opacity:.45}
-  .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
-  .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-starred .rf-acts,.rf-hidden .rf-acts{opacity:1}
-  .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n],[data-act=ag],[data-act=sb],[data-act=copy]){display:none}
+  /* In the flow under each listing (not overlaid): always visible, so keyboard, touch and new users find them. */
+  .rf-acts{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:-4px 9px 8px 124px}
+  .rf-acts-more{position:relative}
+  .rf-acts-more summary{list-style:none;cursor:pointer;border:1px solid var(--rf-line);border-radius:6px;padding:2px 8px;font:600 12px system-ui,sans-serif;color:var(--rf-muted)}
+  .rf-acts-more summary::-webkit-details-marker{display:none}
+  .rf-acts-more>div{position:absolute;right:0;top:calc(100% + 4px);z-index:3;display:grid;gap:4px;padding:6px;background:var(--rf-bg);
+    border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);white-space:nowrap}
   .rf-cmp{display:inline-flex;align-items:center;gap:3px;font:600 11px system-ui,sans-serif;background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;padding:2px 6px}
-  @media (hover:none){.rf-acts{opacity:1}} /* after the opacity:0 rule so it wins */
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
@@ -2524,13 +2527,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         `<option value="${v}"${v === r.appStatus ? ' selected' : ''}>${v ? v[0].toUpperCase() + v.slice(1) : 'Not started'}</option>`).join('')}</select></label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
-        <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
-        <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
+        <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
         <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+        <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="copy" title="Copy a text summary of this listing" aria-label="Copy summary">Copy</button>
-        ${r.suburb && ui.view !== 'shortlist' ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
         ${ui.view === 'shortlist' ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
-        ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
+        ${(r.suburb && ui.view !== 'shortlist') || r.agency ? `<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
+          ${r.suburb && ui.view !== 'shortlist' ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
+          ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
+        </div></details>` : ''}
       </div>
       </div>`).join('');
   }
