@@ -1894,6 +1894,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-planner li.rf-clash .rf-meta,.rf-planner li.rf-tight .rf-meta{color:#b45309;font-weight:600}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .rf-nowatch .rf-label{flex:1 1 100%}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
     font:500 12px system-ui,sans-serif;cursor:pointer}
   .rf-chip[data-state=yes]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
