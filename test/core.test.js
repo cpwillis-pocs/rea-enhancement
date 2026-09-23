@@ -429,3 +429,26 @@ test('activeFilters ignores whitespace-only text; summary/print show ? for blank
   assert.match(core.summaryText(r), /2 bed, \? bath, \? car/);
   assert.match(core.printHtml([r]), /2 bed · \? bath · \? car/);
 });
+
+test('marketStats: per-bed quantiles, week buckets, studio and 5+ groups', () => {
+  const now = new Date(2026, 8, 23, 10);
+  const mk = (i, beds, price, availDays) => ({ id: String(i), url: `u${i}`, beds, priceNum: price, ppb: beds ? price / beds : null,
+    avail: availDays == null ? null : new Date(2026, 8, 23 + availDays) });
+  const rows = [
+    ...[500, 520, 540, 560, 580].map((p, i) => mk(i, 2, p, i === 0 ? -3 : i)), // now, +1..+4 days
+    mk(10, 0, 400, 8), mk(11, 6, 1500, 70), mk(12, 1, NaN, null), mk(12, 1, NaN, null),
+  ];
+  const m = core.marketStats(rows, now);
+  assert.equal(m.n, 8, 'deduped by url');
+  const two = m.byBeds.find((g) => g.beds === 2);
+  assert.deepEqual([two.n, two.p25, two.median, two.p75, two.min, two.max, two.ppb], [5, 520, 540, 560, 500, 580, 270]);
+  assert.deepEqual(m.byBeds.map((g) => g.beds), [0, 1, 2, 5], '6 beds grouped as 5+');
+  assert.equal(m.byBeds[0].median, null, 'too few for a median');
+  const w = m.byWeek;
+  assert.equal(w[0].label, 'Now'); assert.equal(w[0].n, 1);
+  assert.equal(w[1].n, 4); assert.equal(w[1].from, '2026-09-24'); assert.equal(w[1].to, '2026-09-30');
+  assert.equal(w[2].n, 1, 'day 8 is week 2');
+  assert.equal(w.at(-2).n, 1, 'day 70 is later');
+  assert.equal(w.at(-1).n, 1, 'unknown');
+  assert.equal(m.median, 540);
+});

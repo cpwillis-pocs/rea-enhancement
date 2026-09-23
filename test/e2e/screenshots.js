@@ -65,6 +65,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
   } });
   await shot('badges', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
   await shot('drawer', { act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
+  await shot('market', { act: async (page) => { await search(page); await page.click('.rf-market-btn'); await page.waitForSelector('.rf-market table'); } });
   await shot('filters', { act: async (page) => {
     await search(page);
     await page.click('#rf-more summary');

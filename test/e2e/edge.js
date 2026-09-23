@@ -599,6 +599,28 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24b. Market view: rent per bed count and availability by week; clicking a week filters to it.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('.rf-market-btn');
+    await page.waitForSelector('.rf-market table');
+    assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'true');
+    assert.ok((await page.$$('.rf-market tbody tr')).length >= 2, 'bed groups');
+    const bars = await page.$$eval('.rf-bars button[data-week]', (b) => b.map((x) => [x.dataset.week, +x.querySelector('.rf-bar-n').textContent]));
+    assert.ok(bars.length >= 1, 'clickable weeks');
+    const [wk, n] = bars.find(([w]) => w !== '0') || bars[0];
+    await page.click(`.rf-bars button[data-week="${wk}"]`);
+    await page.waitForSelector('.rf-item');
+    assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'false');
+    const shown = await page.$$eval('.rf-item', (e) => e.length);
+    assert.equal(shown, n, 'week filter shows exactly that bucket');
+    assert.ok(await page.inputValue('#rf-from') || await page.inputValue('#rf-to'), 'dates set');
+    console.log('market view: ok,', bars.length, 'weeks;', n, 'in week', wk);
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

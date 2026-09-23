@@ -1198,6 +1198,51 @@
     return activeFilters(cfg).map((chip) => ({ ...chip, removes: filterRows(rows, without(cfg, chip), now).length - base }));
   };
 
+  // Market view: rent spread per bed count and when listings become available, over the
+  // listings currently shown. Quantiles interpolate; groups under MEDIAN_MIN show counts only.
+  const MARKET_WEEKS = 8;
+  const quantile = (sorted, q) => {
+    if (!sorted.length) return null;
+    const i = (sorted.length - 1) * q, lo = Math.floor(i);
+    return Math.round(sorted[lo] + (sorted[Math.min(lo + 1, sorted.length - 1)] - sorted[lo]) * (i - lo));
+  };
+  const marketStats = (rows, now = new Date()) => {
+    const uniq = dedupe(rows);
+    const beds = new Map();
+    for (const r of uniq) {
+      if (r.beds === '' || r.beds == null) continue;
+      const k = Math.min(+r.beds || 0, 5);
+      if (!beds.has(k)) beds.set(k, { beds: k, n: 0, rents: [], ppb: [] });
+      const g = beds.get(k);
+      g.n++;
+      if (Number.isFinite(r.priceNum)) g.rents.push(r.priceNum);
+      if (Number.isFinite(r.ppb)) g.ppb.push(r.ppb);
+    }
+    const byBeds = [...beds.values()].sort((a, b) => a.beds - b.beds).map(({ beds: b, n, rents, ppb }) => {
+      rents.sort((x, y) => x - y); ppb.sort((x, y) => x - y);
+      const enough = rents.length >= MEDIAN_MIN;
+      return { beds: b, n, priced: rents.length, min: rents[0] ?? null, max: rents[rents.length - 1] ?? null,
+        p25: enough ? quantile(rents, 0.25) : null, median: enough ? quantile(rents, 0.5) : null, p75: enough ? quantile(rents, 0.75) : null,
+        ppb: ppb.length >= MEDIAN_MIN ? quantile(ppb, 0.5) : null };
+    });
+    const today = startOfDay(now);
+    const weeks = [{ label: 'Now', from: null, n: 0 }];
+    for (let w = 0; w < MARKET_WEEKS; w++) {
+      const from = new Date(today); from.setDate(from.getDate() + 1 + w * 7);
+      weeks.push({ from: ymdLocal(from), to: ymdLocal(new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6)), n: 0 });
+    }
+    const later = { label: 'Later', n: 0 }, unknown = { label: 'Unknown', n: 0 };
+    for (const r of uniq) {
+      if (!(r.avail instanceof Date) || isNaN(r.avail)) { unknown.n++; continue; }
+      const days = Math.round((startOfDay(r.avail) - today) / 864e5);
+      if (days <= 0) weeks[0].n++;
+      else if (days <= MARKET_WEEKS * 7) weeks[Math.ceil(days / 7)].n++;
+      else later.n++;
+    }
+    const all = uniq.map((r) => r.priceNum).filter(Number.isFinite).sort((a, b) => a - b);
+    return { n: uniq.length, median: all.length >= MEDIAN_MIN ? quantile(all, 0.5) : null, byBeds, byWeek: [...weeks, later, unknown] };
+  };
+
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
   const dedupe = (rows) => {
     const byUrl = new Map();
@@ -1527,7 +1572,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, marketStats, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1606,7 +1651,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-help dd{margin:0;color:var(--rf-muted)}
   .rf-item:focus{outline:2px solid var(--rf-accent-fg);outline-offset:-2px;border-radius:8px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
-  .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;gap:10px;max-height:60vh;overflow-y:auto}
+  .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;grid-template-columns:minmax(0,1fr);gap:10px;overflow-x:hidden;max-height:60vh;overflow-y:auto}
   .rf-dates{display:grid;grid-template-columns:1fr 1fr .8fr;gap:10px}
   .rf-controls label{display:grid;gap:4px;font-size:11px;font-weight:600;text-transform:uppercase;
     letter-spacing:.04em;color:var(--rf-muted)}
@@ -1623,7 +1668,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-controls .rf-check{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;text-transform:none;
     letter-spacing:0;color:var(--rf-fg)}
   .rf-check input{margin:0;accent-color:var(--rf-accent)}
-  .rf-actions{display:flex;gap:8px;align-items:center}
+  .rf-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .rf-controls>.rf-actions:not(.rf-exports){position:sticky;bottom:-12px;background:var(--rf-bg);padding:6px 0;z-index:1}
   .rf-btn{flex:1;padding:9px 12px;border:0;border-radius:6px;background:var(--rf-accent);color:#fff;
     font:600 13px system-ui,sans-serif;cursor:pointer}
@@ -1708,6 +1753,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  .rf-market{padding:8px 12px;font-size:12px;min-width:0}
+  .rf-market-t{overflow-x:auto;max-width:100%}
+  .rf-market table{border-collapse:collapse;width:100%;margin:6px 0 12px}
+  .rf-market caption{text-align:left;font-weight:600;padding:4px 0}
+  .rf-market th,.rf-market td{border-bottom:1px solid var(--rf-line);padding:5px 4px;text-align:right}
+  .rf-market td{white-space:nowrap}
+  .rf-market th:first-child{text-align:left}
+  .rf-market h3{font-size:12px;margin:8px 0 4px}
+  .rf-bars{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+  .rf-bars button,.rf-bars div{all:unset;box-sizing:border-box;display:grid;grid-template-columns:64px 1fr 28px;align-items:center;gap:8px;width:100%;padding:2px 4px;border-radius:4px}
+  .rf-bars button{cursor:pointer}
+  .rf-bars button:hover,.rf-bars button:focus-visible{background:var(--rf-line);outline:2px solid var(--rf-accent);outline-offset:-2px}
+  .rf-bar{display:block;height:12px;min-width:2px;background:var(--rf-accent);border-radius:3px}
+  .rf-bar-n{text-align:right;font-variant-numeric:tabular-nums}
   .rf-plan-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:600;margin-bottom:6px}
   .rf-plan-head .rf-btn{flex:0 0 auto;margin-left:auto;padding:5px 10px;font-size:12px}
   .rf-planner ol{list-style:none;margin:0;padding:0}
@@ -1916,6 +1975,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <select class="rf-bulk" aria-label="Bulk action on the listings shown" disabled>
             <option value="">Bulk…</option><option value="star">Shortlist all shown</option><option value="hide">Hide all shown</option>
           </select>
+          <button class="rf-btn sec rf-market-btn" aria-pressed="false" disabled title="Rent spread per bed count and when the listings shown become available">Market</button>
         </div>
         <div class="rf-actions rf-exports">
           <span class="rf-label">Export</span>
@@ -1962,6 +2022,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       bulk: panel.querySelector('.rf-bulk'),
       preset: panel.querySelector('.rf-preset'),
       slBulk: panel.querySelector('.rf-sl-bulk'),
+      market: panel.querySelector('.rf-market-btn'),
       list: panel.querySelector('.rf-list'),
     };
 
@@ -2207,6 +2268,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (v === 'unstar-declined') return `Removed ${marks.setMany(rows.filter((r) => r.appStatus === 'declined'), 's', false)} declined.`;
       if (v === 'unstar') return `Removed ${marks.setMany(rows, 's', false)} from the shortlist.`;
       return '';
+    });
+    ui.market.addEventListener('click', () => {
+      ui.marketOn = !ui.marketOn;
+      ui.market.setAttribute('aria-pressed', String(ui.marketOn));
+      showResults();
+    });
+    ui.list.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-week]');
+      if (!b || !ui.rows) return;
+      const w = marketStats(ui.rows).byWeek[+b.dataset.week];
+      const later = new Date(); later.setDate(later.getDate() + 1 + MARKET_WEEKS * 7);
+      const range = w.label === 'Now' ? { from: '', to: ymdLocal(new Date()) } : w.label === 'Later' ? { from: ymdLocal(later), to: '' } : { from: w.from, to: w.to };
+      const next = { ...cfg, ...range, withinDays: '' };
+      for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
+      ui.marketOn = false;
+      ui.market.setAttribute('aria-pressed', 'false');
+      onChange({ type: 'change' });
     });
     ui.active.addEventListener('click', (e) => {
       const b = e.target.closest('[data-chip]');
@@ -2466,7 +2544,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.status.appendChild(b);
   }
 
-  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; };
+  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; };
 
   const setStatus = (msg, isErr) => {
     ui.status.textContent = msg;
@@ -2508,7 +2586,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    ui.list.innerHTML = itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
+    ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     ui.list.scrollTop = 0;
   }
 
@@ -2523,6 +2601,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>
         ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
       </li>`).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance.</div></div>`;
+  }
+
+  function marketHtml(m) {
+    const $ = (v) => (v == null ? '–' : `$${v.toLocaleString('en-AU')}`);
+    const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
+    const top = Math.max(1, ...m.byWeek.map((w) => w.n));
+    const weekLabel = (w) => w.label || shortDate(w.from);
+    return `<div class="rf-market"><div class="rf-plan-head">${m.n} listing${m.n === 1 ? '' : 's'} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
+      <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
+      <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
+        <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
+      <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
+        const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
+        const inner = `<span class="rf-bar-l">${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;
+        return `<li>${data && w.n ? `<button type="button"${data} title="Show listings available ${w.from ? `${esc(shortDate(w.from))} to ${esc(shortDate(w.to))}` : esc(w.label.toLowerCase())}">${inner}</button>` : `<div>${inner}</div>`}</li>`;
+      }).join('')}</ul>
+      <div class="rf-meta">Over the listings your filters show. Medians need ${MEDIAN_MIN}+ priced listings. Click a week to filter to it.</div></div>`;
   }
 
   // Side-by-side comparison: one column per listing, best value per row highlighted.
