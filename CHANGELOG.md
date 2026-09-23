@@ -2,6 +2,17 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.9.1
+
+- Fixed: filter chip counts could overwrite Best match scores; bulk Undo restored every listing's marks rather than only the ones it touched.
+- Fixed: Enter on a focused button opened the listing; Esc anywhere on the page closed the drawer.
+- Presets: names that look like menu commands ("-3-bed", "+save") work; a saved property type survives page load; a search's preset applies once per visit (reloads keep your edits) and leaving for another search puts your previous filters back.
+- Drift canary: corrupt stored data no longer breaks a search, and one broken search doesn't lower a field's usual rate.
+- Share: an unanswered share offer stays reachable if you navigate away; a cut-off share link says so.
+- Planner: inspections are grouped and shown in the listing's state time zone; two times at one listing aren't a clash. Bulk actions on the shortlist act on the planned day's or compared listings.
+- Card Star/Hide buttons swallow release events too, so REA's card link never fires.
+- Blank baths/cars print as "?"; a keyword of only spaces isn't a filter.
+
 ## 2.9.0
 
 - Listing actions now sit in a row under each listing (always visible, keyboard and touch friendly): Shortlist, Hide, Note, Copy; Hide suburb / Hide agency behind "⋯".
