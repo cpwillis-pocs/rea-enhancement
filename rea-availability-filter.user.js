@@ -132,7 +132,9 @@
   // Per-listing memory in localStorage, keyed by listing id: s=shortlisted (st=when),
   // h=hidden, n=note, d=summary kept for shortlisted listings so the shortlist works
   // across searches, f=first seen, l=last seen, p/ps=last weekly price and its display,
-  // pp/pps=previous, pt=when it changed, as/ast=application status and when it was set.
+  // pp/pps=previous, pt=when it changed, ph=[[at, display]] price history (newest last),
+  // as/ast=application status and when it was set, rl=id this listing relists.
+  // data.ad maps addressKey -> latest listing id there (relist detection); data.ag = hidden agencies.
   const NOTE_MAX = 500;
   const ADVANCE_WEEKS = 2; // rent usually paid in advance at signing
   const BOND_CAP_WEEKS = 4; // typical state cap on bond for standard rents; above it is flagged, not filtered
@@ -161,6 +163,13 @@
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
   const keep = (e) => e.s || e.h || e.n || e.as;
+  // Address identity for relist detection: needs a street number, ignores case/punctuation.
+  const addressKey = (a) => {
+    const k = String(a || '').toLowerCase().replace(/[^a-z0-9/]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return /\d/.test(k) && k.length > 6 ? k : '';
+  };
+  const PRICE_HISTORY_MAX = 10;
+  const RELIST_GAP_MS = HOUR_MS; // old listing unseen at least this long before a same-address one counts as a relist
   const agencyKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
@@ -181,6 +190,7 @@
     const prune = () => {
       const { m } = data;
       for (const [id, e] of Object.entries(m)) if (!keep(e) && now() - (e.l || e.f || 0) > MARKS_TTL_MS) delete m[id];
+      if (data.ad) for (const [k, id] of Object.entries(data.ad)) if (!m[id]) delete data.ad[k];
       const ids = Object.keys(m);
       if (ids.length > MARKS_MAX) {
         ids.filter((id) => !keep(m[id])).sort((a, b) => (m[a].l || 0) - (m[b].l || 0))
@@ -194,6 +204,7 @@
       observe(rows) {
         const { m } = fresh();
         const t = now();
+        const batch = new Set(rows.map((r) => r.id));
         for (const r of rows) {
           if (!r.id) continue;
           const e = m[r.id] || (m[r.id] = { f: t });
@@ -201,8 +212,20 @@
           if (e.s) e.d = summary(r); // keep the shortlist's copy current
           if (isFinite(r.priceNum)) {
             if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; e.pt = t; }
+            if (e.p !== r.priceNum) e.ph = [...(Array.isArray(e.ph) ? e.ph : []), [t, clip(r.price, 80)]].slice(-PRICE_HISTORY_MAX);
             e.p = r.priceNum;
             e.ps = r.price;
+          }
+          // Same address under a new id = relisted: remember which listing it replaces.
+          const ak = addressKey(r.address);
+          if (ak) {
+            const d = data;
+            d.ad = d.ad && typeof d.ad === 'object' ? d.ad : {};
+            const prev = d.ad[ak];
+            // Only a relist if the old listing has stopped appearing: two live listings at one
+            // address (units listed without a unit number) are different places.
+            if (prev && prev !== r.id && m[prev] && !e.rl && !batch.has(prev) && t - (m[prev].l || 0) > RELIST_GAP_MS) e.rl = prev;
+            d.ad[ak] = r.id;
           }
         }
         save();
@@ -212,8 +235,11 @@
         const t = now();
         for (const r of rows) {
           const e = m[r.id];
+          const was = e?.rl ? m[e.rl] : null; // the listing this one relists, if any
           r.starred = !!e?.s;
-          r.hidden = !!e?.h;
+          r.hidden = !!e?.h || !!(was?.h && !e?.s); // ruled out before: stays out when relisted
+          r.relisted = was ? { price: was.ps || '', hidden: !!was.h } : null;
+          r.priceHistory = Array.isArray(e?.ph) ? e.ph : [];
           r.note = e?.n || '';
           r.appStatus = e?.as || '';
           r.agencyHidden = !!(r.agency && load().ag?.[agencyKey(r.agency)]);
@@ -979,18 +1005,20 @@
       .sort(SORTS[cfg.sort] || SORTS.avail);
   }
 
+  const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
   const ppbLabel = (r) => (+r.beds > 1 && isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['appStatus', 'application'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
-    const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : r[k];
+    const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ')
+      : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -1080,7 +1108,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1724,8 +1752,8 @@
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.gone ? '<span class="rf-tag rf-gone">no longer listed</span>' : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
-          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}">was ${esc(r.prevPrice)}</span>` : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.gone ? '<span class="rf-tag rf-gone">no longer listed</span>' : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
             r.beds !== '' ? `${r.beds} bed` : '',

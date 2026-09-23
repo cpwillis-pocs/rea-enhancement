@@ -183,3 +183,44 @@ test('floorplanOnly requires a known floorplan', () => {
   const rows = [Object.assign(row('146500050'), { floorplan: true }), Object.assign(row('146500051'), { floorplan: false }), row('146500052')];
   assert.deepEqual(core.applyFilters(rows, { floorplanOnly: true }).map((r) => r.id), ['146500050']);
 });
+
+test('marksStore: price history capped, relist detection carries hidden', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const R = (id, price, address = '5/12 Hall St, Bondi NSW 2026') => Object.assign(row(id, price), { address });
+  for (let i = 0; i < 13; i++) { t += 1000; st.observe([R('146500060', `$${600 + i} per week`)]); }
+  const cur = [R('146500060', '$612 per week')];
+  st.decorate(cur);
+  assert.equal(cur[0].priceHistory.length, 10);
+  assert.equal(cur[0].priceHistory.at(-1)[1], '$612 per week');
+  st.toggle('146500060', 'h');
+  // A different unit at the same address listed alongside it is NOT a relist.
+  const sibling = [R('146500097', '$650 per week'), R('146500060', '$612 per week')];
+  st.observe(sibling); st.decorate(sibling);
+  assert.equal(sibling[0].relisted, null, 'concurrent same-address listing is not a relist');
+  t += 2 * 36e5; // the old listing stops appearing
+
+  const relist = [R('146500099', '$590 per week', '5/12 hall st bondi nsw 2026')];
+  // (address map now points at 146500097, the sibling, which was also last seen >1h ago)
+  st.observe(relist); st.decorate(relist);
+  assert.ok(relist[0].relisted, 'relist detected once the old listing is gone');
+  const other = [R('146500098', '$590 per week', 'Unit, Bondi')];
+  st.observe(other); st.decorate(other);
+  assert.equal(other[0].relisted, null, 'no street number: no match');
+  assert.equal(core.addressKey('5/12 Hall St.'), '5/12 hall st');
+});
+
+test('marksStore: a genuine relist inherits "hidden" and shows the old price', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const R = (id, price) => Object.assign(row(id, price), { address: '7/3 Beach Rd, Bondi NSW 2026' });
+  st.observe([R('146500070', '$700 per week')]);
+  st.toggle('146500070', 'h');
+  t += 3 * 36e5;
+  const r = [R('146500071', '$680 per week')];
+  st.observe(r); st.decorate(r);
+  assert.deepEqual(r[0].relisted, { price: '$700 per week', hidden: true });
+  assert.equal(r[0].hidden, true);
+  st.toggle('146500071', 's'); st.decorate(r);
+  assert.equal(r[0].hidden, false, 'starring the relist overrides the inherited hide');
+});
