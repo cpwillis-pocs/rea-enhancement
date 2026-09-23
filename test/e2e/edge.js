@@ -618,6 +618,20 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 28. Enter on a focused button presses it (no listing tab); Esc outside the drawer isn't ours.
+  { const ctx = await browser.newContext(); const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const id = await page.$eval('.rf-item', (e) => e.dataset.id);
+    let popups = 0; ctx.on('page', () => popups++);
+    await page.focus(`.rf-item[data-id="${id}"] [data-act=s]`);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction((i) => document.querySelector(`.rf-item[data-id="${i}"] [data-act=s]`)?.getAttribute('aria-pressed') === 'true', id, { timeout: 2000 });
+    assert.equal(popups, 0, 'no listing tab opened');
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false, "Esc outside the drawer is REA's");
+    console.log('enter on buttons + esc scope: ok'); await done(page); await ctx.close(); }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

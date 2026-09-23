@@ -2002,7 +2002,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         case 'h': act('h'); return true;
         case 'n': act('n'); return true;
         case 'c': act('copy'); return true;
-        case 'o': case 'Enter': if (!cur) return false; cur.querySelector('.rf-card')?.click(); return true;
+        // Enter opens only when the item itself is focused; on a button it presses the button.
+        case 'o': case 'Enter': if (!cur || (e.key === 'Enter' && document.activeElement !== cur)) return false; cur.querySelector('.rf-card')?.click(); return true;
         default: return false;
       }
     };
@@ -2014,7 +2015,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         return;
       }
       if (panel.hidden) return;
-      if (e.key === 'Escape') {
+      // Esc is ours only when focus is in the drawer (or it's full-screen): REA's own viewers use it too.
+      if (e.key === 'Escape' && !e.defaultPrevented && (panel.contains(document.activeElement) || narrow.matches)) {
         if (!help.hidden) { toggleHelp(); return; }
         setOpen(false); launch.focus(); return;
       }
