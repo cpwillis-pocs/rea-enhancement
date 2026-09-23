@@ -2575,7 +2575,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.plan.value = ui.planDay || '';
     ui.plan.hidden = !days.length;
     const slots = ui.planDay ? planDay(rows, ui.planDay) : null;
-    const cmp = ui.compare && !slots ? (ui.cmpSel?.size ? rows.filter((r) => ui.cmpSel.has(r.id)) : rows).slice(0, COMPARE_MAX) : null;
+    const picked = ui.cmpSel?.size ? rows.filter((r) => ui.cmpSel.has(r.id)) : [];
+    // A selection hidden by the status filter falls back to the first listings shown.
+    const cmp = ui.compare && !slots ? (picked.length ? picked : rows).slice(0, COMPARE_MAX) : null;
+    ui.cmpPicked = picked.length > 0;
     // Bulk actions act on what's on screen: the planned day's or compared listings when those views are up.
     ui.bulkRows = slots ? [...new Set(slots.map((x) => x.r))] : cmp || null;
     ui.list.innerHTML = !rows.length ? '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>'
@@ -2753,7 +2756,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
     }).join('');
     return `<div class="rf-compare"><table><thead><tr><td></td>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
-      (ui.rows.length > rows.length ? `<div class="rf-empty">Comparing ${ui.cmpSel?.size ? 'your selection' : `the first ${rows.length}`}; tick "Compare" on listings to choose.</div>` : '');
+      (ui.rows.length > rows.length ? `<div class="rf-empty">Comparing ${ui.cmpPicked ? 'your selection' : `the first ${rows.length}`}; tick "Compare" on listings to choose.</div>` : '');
   }
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
