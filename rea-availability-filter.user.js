@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.0.0
+// @version      2.1.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis/rea-enhancement
@@ -49,6 +49,11 @@
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROWS_TTL_MS = 10 * 60 * 1000;
   const ROWS_KEEP = 2; // searches kept in sessionStorage
+  const MARKS_KEY = 'rea-avail-filter/marks/v1';
+  const MARKS_MAX = 5000;
+  const MARKS_TTL_MS = 90 * 864e5; // unstarred, unhidden listings forgotten after 90 days unseen
+  const NEW_MS = 48 * 36e5; // "New" tag lasts 48h from first sighting
+  const BASELINE_MS = 5 * 6e4; // listings seen in the first 5 min of use are the baseline, not "new"
   const ROWS_TEXT_MAX = 600;
 
   // ---------------------------------------------------------------- config
@@ -103,6 +108,70 @@
       }
     },
   });
+
+  // Per-listing memory in localStorage, keyed by listing id: s=shortlisted, h=hidden,
+  // f=first seen, l=last seen, p/ps=last weekly price and its display, pp/pps=previous.
+  const marksStore = (storage, now = () => Date.now()) => {
+    let data = null;
+    const load = () => {
+      if (data) return data;
+      try { data = JSON.parse(storage.getItem(MARKS_KEY)); } catch { data = null; }
+      if (!data || typeof data !== 'object' || typeof data.m !== 'object') data = { c: now(), m: {} };
+      return data;
+    };
+    const prune = () => {
+      const { m } = data;
+      for (const [id, e] of Object.entries(m)) if (!e.s && !e.h && now() - (e.l || e.f || 0) > MARKS_TTL_MS) delete m[id];
+      const ids = Object.keys(m);
+      if (ids.length > MARKS_MAX) {
+        ids.filter((id) => !m[id].s && !m[id].h).sort((a, b) => (m[a].l || 0) - (m[b].l || 0))
+          .slice(0, ids.length - MARKS_MAX).forEach((id) => delete m[id]);
+      }
+    };
+    const save = () => { try { prune(); storage.setItem(MARKS_KEY, JSON.stringify(data)); } catch { /* quota/blocked */ } };
+    return {
+      observe(rows) {
+        const { m } = load();
+        const t = now();
+        for (const r of rows) {
+          if (!r.id) continue;
+          const e = m[r.id] || (m[r.id] = { f: t });
+          e.l = t;
+          if (isFinite(r.priceNum)) {
+            if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; }
+            e.p = r.priceNum;
+            e.ps = r.price;
+          }
+        }
+        save();
+      },
+      decorate(rows) {
+        const { m, c } = load();
+        const t = now();
+        for (const r of rows) {
+          const e = m[r.id];
+          r.starred = !!e?.s;
+          r.hidden = !!e?.h;
+          r.isNew = !!e && e.f - c > BASELINE_MS && t - e.f < NEW_MS;
+          r.prevPrice = e && e.pp != null && e.pp !== e.p ? e.pps || `$${e.pp}` : '';
+          r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
+        }
+        return rows;
+      },
+      toggle(id, k) {
+        const { m } = load();
+        const e = m[id] || (m[id] = { f: now(), l: now() });
+        e[k] = e[k] ? 0 : 1;
+        save();
+        return !!e[k];
+      },
+      counts() {
+        const { m } = load();
+        const v = Object.values(m);
+        return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length };
+      },
+    };
+  };
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -346,7 +415,7 @@
     from: '', to: '', exactOnly: false,
     priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
-    annotate: true, dimCards: true,
+    annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
   };
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -391,6 +460,8 @@
     for (const r of rows) if (r.url && (!byUrl.has(r.url) || byUrl.get(r.url).surrounding && !r.surrounding)) byUrl.set(r.url, r);
     return [...byUrl.values()]
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
+      .filter((r) => cfg.showHidden || !r.hidden)
+      .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
       .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
@@ -405,7 +476,8 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['headline', 'headline'], ['url', 'url'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'],
+    ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
@@ -467,7 +539,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, DEFAULT_CFG,
     };
     return;
   }
@@ -537,6 +609,17 @@
   .rf-meta{color:var(--rf-soft);font-size:12px;margin-top:3px}
   .rf-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--rf-tag);
     color:var(--rf-muted);font-size:10px;font-weight:600;text-transform:uppercase;vertical-align:1px}
+  .rf-item{position:relative}
+  .rf-item.rf-hidden .rf-card{opacity:.45}
+  .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
+  .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-acts button[aria-pressed=true]{opacity:1}
+  .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
+    font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
+  .rf-acts button[data-act=s][aria-pressed=true]{color:#e6a700}
+  .rf-tag.rf-new{background:#0a6;color:#fff}
+  .rf-was{font-weight:600;font-size:11px;padding:1px 5px;border-radius:4px}
+  .rf-was.down{color:#0a6;background:rgba(0,170,102,.12)}
+  .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
@@ -546,6 +629,10 @@
   .rf-badge span{padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;white-space:nowrap}
   .rf-badge .rf-b-now{background:#0a6}
   .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
+  .rf-badge .rf-b-star{background:#e6a700;color:#111}
+  .rf-badge .rf-b-new{background:#2563eb}
+  .rf-badge .rf-b-down{background:#0a6}
+  .rf-badge .rf-b-up{background:#c60}
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)} }
   `;
 
@@ -571,6 +658,7 @@
   const bootAt = Date.now();
   // sessionStorage access itself throws when the browser blocks site data.
   const store = (() => { try { return rowStore(window.sessionStorage); } catch { return { get: () => null, set: () => {} }; } })();
+  const marks = (() => { try { return marksStore(window.localStorage); } catch { return marksStore({ getItem: () => null, setItem: () => {} }); } })();
   let rawSample = boot?.results?.exact?.items?.find((i) => i.listing)?.listing ?? null;
 
   function build() {
@@ -613,6 +701,8 @@
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
+          <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only</label>
+          <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings</label>
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show availability on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
         </details>
@@ -664,7 +754,7 @@
     ui.type = panel.querySelector('#rf-type');
     ui.annotateBox = panel.querySelector('#rf-annotate');
     ui.more = panel.querySelector('#rf-more');
-    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn']
+    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn', 'onlyStarred', 'showHidden']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
     const setOpen = (open) => { panel.hidden = !open; launch.setAttribute('aria-expanded', String(open)); };
@@ -697,6 +787,16 @@
       if (el.type === 'text' || el.type === 'number') el.addEventListener('input', onChange);
     }
 
+    // Shortlist / hide: one delegated handler; re-render keeps scroll position.
+    ui.list.addEventListener('click', (e) => {
+      const b = e.target.closest('.rf-acts button');
+      if (!b) return;
+      const id = b.closest('.rf-item')?.dataset.id;
+      if (!id) return;
+      marks.toggle(id, b.dataset.act);
+      refreshMarks();
+    });
+
     ui.run.addEventListener('click', () => run());
     ui.refresh.addEventListener('click', () => run(true));
     for (const b of ui.exports) {
@@ -723,6 +823,16 @@
     }
   }
 
+  function refreshMarks() {
+    if (cache) marks.decorate(cache);
+    marks.decorate([...known.values()]);
+    knownVer++;
+    const top = ui.list.scrollTop;
+    if (cache) showResults();
+    ui.list.scrollTop = top;
+    scheduleAnnotate();
+  }
+
   const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; };
 
   const setStatus = (msg, isErr) => {
@@ -742,7 +852,12 @@
     }
     const rows = applyFilters(cache, cfg);
     render(rows);
-    setStatus(`${rows.length} of ${cache.length} listings match.` +
+    const extra = [
+      cache.filter((r) => r.isNew).length && `${cache.filter((r) => r.isNew).length} new`,
+      cache.filter((r) => r.prevPrice).length && `${cache.filter((r) => r.prevPrice).length} price changed`,
+      !cfg.showHidden && cache.filter((r) => r.hidden).length && `${cache.filter((r) => r.hidden).length} hidden`,
+    ].filter(Boolean).join(' · ');
+    setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : ''));
     const warn = schemaWarnings(cache);
@@ -757,11 +872,12 @@
       return;
     }
     ui.list.innerHTML = rows.map((r) => `
+      <div class="rf-item${r.hidden ? ' rf-hidden' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
-          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.isNew ? '<span class="rf-tag rf-new">new</span>' : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${r.priceDelta < 0 ? 'down' : 'up'}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
             r.beds !== '' ? `${r.beds} bed` : '',
@@ -775,7 +891,12 @@
             r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
-      </a>`).join('');
+      </a>
+      <div class="rf-acts">
+        <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
+        <button data-act="h" aria-pressed="${r.hidden}" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+      </div>
+      </div>`).join('');
     ui.list.scrollTop = 0;
   }
 
@@ -869,6 +990,8 @@
   let knownVer = 0;
   // Insertion-ordered; re-learning an id moves it to the end, oldest evicted past KNOWN_MAX.
   const learn = (rows) => {
+    marks.observe(rows);
+    marks.decorate(rows);
     for (const r of rows) if (r.id) { known.delete(r.id); known.set(r.id, r); }
     for (const k of known.keys()) { if (known.size <= KNOWN_MAX) break; known.delete(k); }
     knownVer++;
@@ -882,11 +1005,14 @@
       : '<span class="rf-b-none">No date</span>';
     const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
     const ppb = +r.beds > 1 && isFinite(r.ppb) ? `<span>$${r.ppb}/bed</span>` : '';
-    return avail + insp + ppb;
+    const star = r.starred ? '<span class="rf-b-star">★ Shortlisted</span>' : '';
+    const fresh = r.isNew ? '<span class="rf-b-new">New</span>' : '';
+    const moved = r.prevPrice ? `<span class="rf-b-${r.priceDelta < 0 ? 'down' : 'up'}">Was ${esc(r.prevPrice)}</span>` : '';
+    return star + fresh + avail + moved + insp + ppb;
   };
 
   const filtersActive = () => ['from', 'to', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
-    .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly;
+    .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly || cfg.onlyStarred;
 
   // Match set only changes with cfg or known rows; mutation bursts reuse it.
   let matchMemo = { sig: null, set: null };
@@ -941,7 +1067,7 @@
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
       if (badge.dataset.rfHtml !== html) { badge.innerHTML = html; badge.dataset.rfHtml = html; }
-      const m = matches ? (matches.has(id) ? '1' : '0') : '';
+      const m = r.hidden && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
       if ((card.dataset.rfMatch || '') !== m) { if (m) card.dataset.rfMatch = m; else delete card.dataset.rfMatch; }
     }
   }
@@ -1017,6 +1143,7 @@
   window.reaFilter = {
     version: (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev',
     rows: () => cache,
+    marks: () => marks.counts(),
     filtered: () => (cache ? applyFilters(cache, cfg) : null),
     cfg: () => ({ ...cfg }),
     probe: () => {

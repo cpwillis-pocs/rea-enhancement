@@ -135,6 +135,29 @@ const html = (n) => {
   await page.fill('#rf-to', '');
   await page.dispatchEvent('#rf-to', 'change');
 
+  // Shortlist + hide from the drawer; persisted and reflected on REA cards.
+  const firstId = await page.$eval('.rf-item', (el) => el.dataset.id);
+  await page.hover('.rf-item');
+  await page.click('.rf-item >> [data-act=s]');
+  assert.equal(await page.$eval(`.rf-item[data-id="${firstId}"] [data-act=s]`, (b) => b.getAttribute('aria-pressed')), 'true');
+  const secondId = await page.$eval('.rf-item:nth-child(2)', (el) => el.dataset.id);
+  await page.hover('.rf-item:nth-child(2)');
+  await page.click('.rf-item:nth-child(2) >> [data-act=h]');
+  assert.equal(await page.$(`.rf-item[data-id="${secondId}"]`), null, 'hidden listing removed');
+  assert.match(await page.textContent('.rf-status'), /1 hidden/);
+  await page.check('#rf-onlyStarred');
+  assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
+  await page.uncheck('#rf-onlyStarred');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m);
+  assert.equal(stored[firstId].s, 1);
+  assert.equal(stored[secondId].h, 1);
+  // Unhide via "Show hidden listings".
+  await page.check('#rf-showHidden');
+  await page.hover(`.rf-item[data-id="${secondId}"]`);
+  await page.click(`.rf-item[data-id="${secondId}"] >> [data-act=h]`);
+  await page.uncheck('#rf-showHidden');
+  assert.ok(await page.$(`.rf-item[data-id="${secondId}"]`), 'unhidden listing back');
+
   await page.click('.rf-clear');
   assert.equal(await page.inputValue('#rf-from'), '');
   assert.equal(await page.$$eval('.rf-card', (els) => els.length), PAGES * 2 + 1);
