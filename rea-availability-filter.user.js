@@ -1379,10 +1379,22 @@
   // short for the straight-line distance flagged. A rough guide, not a route planner.
   const PLAN_MIN_PER_KM = 2; // ~30 km/h door to door in traffic
   const PLAN_MIN_GAP = 10; // minutes between inspections below which it's "tight" regardless of distance
+  // Inspection times are the listing's local time: group and show them in its state's zone
+  // (from the address), so a Perth listing planned from Sydney lands on the right day.
+  const STATE_TZ = { NSW: 'Australia/Sydney', ACT: 'Australia/Sydney', VIC: 'Australia/Melbourne', TAS: 'Australia/Hobart',
+    QLD: 'Australia/Brisbane', SA: 'Australia/Adelaide', WA: 'Australia/Perth', NT: 'Australia/Darwin' };
+  const tzOf = (r) => STATE_TZ[String(r.state || (String(r.address || '').match(/\b(NSW|ACT|VIC|TAS|QLD|SA|WA|NT)\b(?!.*\b(NSW|ACT|VIC|TAS|QLD|SA|WA|NT)\b)/) || [])[1] || '').toUpperCase()] || null;
+  const dayFmts = new Map();
+  const ymdIn = (ms, tz) => {
+    if (!tz) return ymdLocal(new Date(ms));
+    let f = dayFmts.get(tz);
+    if (!f) dayFmts.set(tz, (f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })));
+    return f.format(ms);
+  };
   const inspectDays = (rows) => {
     const days = new Map();
     for (const r of rows) for (const i of r.inspections || []) if (typeof i.at === 'number') {
-      const k = ymdLocal(new Date(i.at));
+      const k = ymdIn(i.at, tzOf(r));
       days.set(k, (days.get(k) || 0) + 1);
     }
     return [...days].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, n]) => ({ day, n }));
@@ -1390,14 +1402,17 @@
   const planDay = (rows, day) => {
     const slots = [];
     for (const r of rows) for (const i of r.inspections || []) {
-      if (typeof i.at === 'number' && ymdLocal(new Date(i.at)) === day) slots.push({ r, at: i.at, end: i.at + INSPECT_MINUTES * 60e3, label: i.label });
+      const tz = tzOf(r);
+      if (typeof i.at === 'number' && ymdIn(i.at, tz) === day) slots.push({ r, tz, at: i.at, end: i.at + INSPECT_MINUTES * 60e3, label: i.label });
     }
     slots.sort((a, b) => a.at - b.at);
     for (let k = 1; k < slots.length; k++) {
       const prev = slots[k - 1], cur = slots[k];
       cur.gapMin = Math.round((cur.at - prev.end) / 60e3);
       cur.km = prev.r.lat != null && cur.r.lat != null ? Math.round(haversineKm(prev.r, cur.r) * 10) / 10 : null;
-      cur.flag = cur.at < prev.end ? 'clash' : cur.gapMin < Math.max(PLAN_MIN_GAP, (cur.km ?? 0) * PLAN_MIN_PER_KM) ? 'tight' : '';
+      // Two sessions at one listing are alternatives, not a clash.
+      cur.same = prev.r.id === cur.r.id;
+      cur.flag = cur.same ? '' : cur.at < prev.end ? 'clash' : cur.gapMin < Math.max(PLAN_MIN_GAP, (cur.km ?? 0) * PLAN_MIN_PER_KM) ? 'tight' : '';
     }
     return slots;
   };
@@ -1510,7 +1525,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2248,7 +2263,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.list.addEventListener('click', (e) => {
       if (!e.target.closest('[data-plan-ics]') || !ui.planDay) return;
       const day = ui.planDay;
-      const rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdLocal(new Date(i.at)) === day) }));
+      const rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day) }));
       downloadIcs(rows);
     });
     ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
@@ -2491,13 +2506,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   function planHtml(slots, day) {
-    const t = (ms) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
+    const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const t = (ms, tz) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}), ...(tz && tz !== here ? { timeZoneName: 'short' } : {}) })
+      .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
     const clashes = slots.filter((x) => x.flag).length;
     return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${slots.length} inspection${slots.length === 1 ? '' : 's'}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
       <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
-      <ol>${slots.map((x) => `<li class="${x.flag ? `rf-${x.flag}` : ''}"><span class="rf-plan-t">${t(x.at)}</span>
+      <ol>${slots.map((x) => `<li class="${x.flag ? `rf-${x.flag}` : ''}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
         <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>
-        ${x.gapMin != null ? `<div class="rf-meta">${x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
+        ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
       </li>`).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance.</div></div>`;
   }
 

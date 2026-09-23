@@ -381,6 +381,20 @@ test('planDay / inspectDays: order, clash, tight by distance, ok', () => {
   assert.equal(plan[1].flag, 'clash', '10:10 starts before 10:00 + 15 min ends');
   assert.equal(plan[2].flag, '', '11:00 after 10:25, ~6.6 km: 35 min gap is fine');
   assert.equal(plan[3].flag, 'tight', '45 min gap but ~39 km away');
+  const twice = core.planDay([{ ...R('x', d(10, 0), -33.9), inspections: [{ at: d(10, 0) }, { at: d(10, 5) }] }], '2026-09-26');
+  assert.equal(twice[1].flag, '', 'two sessions at one listing are not a clash');
+  assert.ok(twice[1].same);
+});
+
+test('planDay / inspectDays: group by the listing state\'s time zone', () => {
+  assert.equal(core.tzOf({ address: '1 Hay St, Perth WA 6000' }), 'Australia/Perth');
+  assert.equal(core.tzOf({ address: '2 Wattle St, Wa Wa NSW 2000' }), 'Australia/Sydney', 'last state token wins');
+  assert.equal(core.tzOf({ address: 'Somewhere' }), null);
+  // 23:30 in Perth on the 26th is 01:30 on the 27th in Sydney.
+  const at = Date.parse('2026-09-26T15:30:00Z');
+  const rows = [{ id: 'p', address: '1 Hay St, Perth WA 6000', inspections: [{ at }] }, { id: 's', address: '1 George St, Sydney NSW 2000', inspections: [{ at }] }];
+  assert.deepEqual(core.inspectDays(rows).map((x) => x.day), ['2026-09-26', '2026-09-27']);
+  assert.deepEqual(core.planDay(rows, '2026-09-26').map((x) => [x.r.id, x.tz]), [['p', 'Australia/Perth']]);
 });
 
 test('parseListingPage: nested JSON, id match, gone on 404/redirect, unknown otherwise', () => {
