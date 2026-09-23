@@ -38,6 +38,9 @@
   const RETRY_BASE_MS = 1000;
   const RETRY_AFTER_MAX_S = 60;
   const FETCH_TIMEOUT_MS = 20000;
+  const ANNOTATE_DEBOUNCE_MS = 120;
+  const ANNOTATE_MAX_WAIT_MS = 500;
+  const KNOWN_MAX = 2000;
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
   const ROWS_VERSION = 4; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -843,7 +846,12 @@
     return p;
   };
   let knownVer = 0;
-  const learn = (rows) => { for (const r of rows) if (r.id) known.set(r.id, r); knownVer++; };
+  // Insertion-ordered; re-learning an id moves it to the end, oldest evicted past KNOWN_MAX.
+  const learn = (rows) => {
+    for (const r of rows) if (r.id) { known.delete(r.id); known.set(r.id, r); }
+    for (const k of known.keys()) { if (known.size <= KNOWN_MAX) break; known.delete(k); }
+    knownVer++;
+  };
   const rowsOf = rowsFrom;
 
   const badgeHtml = (r) => {
@@ -868,15 +876,34 @@
     return matchMemo.set;
   };
 
-  function annotate() {
-    const matches = matchSet();
-    const seen = new Set();
-    for (const a of document.querySelectorAll('a[href]')) {
+  // Card -> listing id. Prefer /property- links: an agent/agency link earlier in the
+  // card can also end in a long number.
+  function cardsOnPage() {
+    const cards = new Map();
+    for (const a of document.querySelectorAll('article a[href]')) {
       if (a.closest('#rf-panel')) continue;
-      const id = listingId(a.getAttribute('href'));
-      const card = id && a.closest('article');
-      if (!card || seen.has(card)) continue;
-      seen.add(card);
+      const href = a.getAttribute('href');
+      const id = listingId(href);
+      if (!id) continue;
+      const card = a.closest('article');
+      const prop = /\/property-/.test(href);
+      const prev = cards.get(card);
+      if (!prev || (prop && !prev.prop) || (!prev.known && known.has(id))) cards.set(card, { id, prop, known: known.has(id) });
+    }
+    return cards;
+  }
+
+  function annotate() {
+    if (!isSearchPage(location.href)) return;
+    const matches = matchSet();
+    const cards = cardsOnPage();
+    // Read phase: computed style for newly seen cards, before any writes (avoids layout thrash).
+    const statics = new Set();
+    for (const [card, { id }] of cards) {
+      if (cfg.annotate && known.has(id) && card.dataset.rfId !== id && getComputedStyle(card).position === 'static') statics.add(card);
+    }
+    // Write phase.
+    for (const [card, { id }] of cards) {
       const r = known.get(id);
       let badge = card.querySelector(':scope > .rf-badge');
       if (!cfg.annotate || !r) {
@@ -887,18 +914,28 @@
       if (card.dataset.rfId !== id) {
         card.dataset.rfId = id;
         // Anchor the badge without overriding a position REA already set (eg virtualised lists).
-        if (getComputedStyle(card).position === 'static') card.dataset.rfPos = '';
+        if (statics.has(card)) card.dataset.rfPos = '';
       }
       const html = badgeHtml(r);
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
-      if (badge.innerHTML !== html) badge.innerHTML = html;
+      // Compare against what we wrote, not innerHTML (browser re-serialises entities).
+      if (badge.dataset.rfHtml !== html) { badge.innerHTML = html; badge.dataset.rfHtml = html; }
       const m = matches ? (matches.has(id) ? '1' : '0') : '';
       if ((card.dataset.rfMatch || '') !== m) { if (m) card.dataset.rfMatch = m; else delete card.dataset.rfMatch; }
     }
   }
 
-  let annotateTimer;
-  const scheduleAnnotate = () => { clearTimeout(annotateTimer); annotateTimer = setTimeout(annotate, 120); };
+  // Debounced, but with a max wait: a page that mutates constantly (carousels, ad
+  // rotators) would otherwise reset the timer forever and badges would never appear.
+  let annotateTimer = null, firstPending = 0;
+  const scheduleAnnotate = () => {
+    const now = Date.now();
+    if (!firstPending) firstPending = now;
+    clearTimeout(annotateTimer);
+    const fire = () => { firstPending = 0; annotateTimer = null; annotate(); };
+    if (now - firstPending >= ANNOTATE_MAX_WAIT_MS) return fire();
+    annotateTimer = setTimeout(fire, ANNOTATE_DEBOUNCE_MS);
+  };
 
   // Make sure the page currently on screen has rows: session cache, boot doc, or one fetch.
   async function ensureVisiblePage() {
@@ -913,10 +950,13 @@
 
   function watchCards() {
     new MutationObserver((muts) => {
+      if (!isSearchPage(location.href)) return;
       // Ignore mutations confined to our own badges/panel.
-      if (muts.every((m) => m.target.closest?.('.rf-badge, #rf-panel') || [...m.addedNodes].every((n) => n.classList?.contains('rf-badge')) && m.removedNodes.length === 0)) return;
+      const ours = (m) => m.type === 'childList' && (m.target.closest?.('.rf-badge, #rf-panel') ||
+        m.removedNodes.length === 0 && m.addedNodes.length > 0 && [...m.addedNodes].every((n) => n.classList?.contains('rf-badge')));
+      if (muts.every(ours)) return;
       scheduleAnnotate();
-    }).observe(document.body, { childList: true, subtree: true });
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
   }
 
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.

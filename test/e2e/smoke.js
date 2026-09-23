@@ -77,6 +77,31 @@ const html = (n) => {
   await page.evaluate(() => { const a = document.querySelector('article'); a.outerHTML = a.outerHTML.replace(/<div class="rf-badge".*?<\/div>(?=<\/article>)/s, ''); });
   await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge').length === 2, null, { timeout: 5000 });
 
+  // A page that mutates every 50ms (carousel/ad) must not starve annotation.
+  await page.evaluate(() => {
+    window.__tick = setInterval(() => { const d = document.createElement('i'); document.body.appendChild(d); d.remove(); }, 50);
+    document.querySelector('article > .rf-badge')?.remove();
+  });
+  await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge').length === 2, null, { timeout: 3000 });
+
+  // Agent link (long trailing number) before the listing link doesn't hide the badge.
+  await page.evaluate(() => {
+    const a = document.querySelector('article');
+    a.insertAdjacentHTML('afterbegin', '<a href="/agent/jane-smith-1234567">agent</a>');
+  });
+  await page.waitForTimeout(700);
+  assert.equal(await page.$$eval('article > .rf-badge', (els) => els.length), 2, 'agent link ignored');
+
+  // React reusing the <article> and swapping only href: badge follows the new listing.
+  const badgeBefore = await page.$eval('article > .rf-badge', (b) => b.textContent);
+  await page.evaluate(() => {
+    const [first, second] = document.querySelectorAll('article');
+    const other = second.querySelector('a[href*="/property-"]').getAttribute('href');
+    first.querySelectorAll('a[href*="/property-"]').forEach((l) => l.setAttribute('href', other));
+  });
+  await page.waitForFunction((b) => document.querySelector('article > .rf-badge').textContent !== b, badgeBefore, { timeout: 3000 });
+  await page.evaluate(() => clearInterval(window.__tick));
+
   await page.click('#rf-launch');
   await page.click('#rf-run');
   await page.waitForFunction(() => /listings match/.test(document.querySelector('.rf-status').textContent), null, { timeout: 15000 });
