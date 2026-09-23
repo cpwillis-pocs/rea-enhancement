@@ -276,3 +276,15 @@ test('presetStore: save, bind to a search (one per search), apply data, import v
   assert.equal(other.importData([{ name: 'x', cfg: { keyword: null, bedsMin: '1' }, key: 'https://evil/' }, { name: '' }, 5]), 1);
   assert.deepEqual([other.get('x').cfg, other.get('x').key], [{ bedsMin: '1' }, null]);
 });
+
+test('marksStore: hidden suburbs are separate from agencies; summaryText', () => {
+  const st = core.marksStore(mem(), () => 1e12);
+  const rows = [Object.assign(row('146500200'), { suburb: 'Bondi', agency: 'A' }), Object.assign(row('146500201'), { suburb: 'Manly', agency: 'A' })];
+  st.toggleSuburb('Bondi'); st.decorate(rows);
+  assert.deepEqual([rows[0].suburbHidden, rows[0].agencyHidden], [true, false]);
+  assert.deepEqual(core.applyFilters(rows, {}).map((r) => r.id), ['146500201']);
+  const b = core.marksStore(mem(), () => 1e12); b.importJson(st.exportJson());
+  assert.deepEqual(b.hiddenSuburbs(), ['Bondi']);
+  const t = core.summaryText({ ...rows[1], price: '$700 per week', address: '1 A St', available: '12 Oct', beds: 2, baths: 1, cars: 1, upfront: 4200, inspections: [{ label: 'Sat 10am' }], url: 'https://x' });
+  assert.equal(t, '$700 per week - 1 A St\nAvailable 12 Oct · 2 bed, 1 bath, 1 car · move-in $4,200\nInspections: Sat 10am\nhttps://x');
+});

@@ -249,6 +249,7 @@
           r.note = e?.n || '';
           r.appStatus = e?.as || '';
           r.agencyHidden = !!(r.agency && load().ag?.[agencyKey(r.agency)]);
+          r.suburbHidden = !!(r.suburb && load().sb?.[agencyKey(r.suburb)]);
           r.firstSeen = e?.f ? new Date(e.f) : null;
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
@@ -314,7 +315,7 @@
         for (const [id, e] of Object.entries(m)) {
           if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, d: e.s ? e.d : undefined };
         }
-        return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {} };
+        return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
       exportJson() { return JSON.stringify(this.exportData(), null, 1); },
       // Merges a backup: imported choices win per listing. Untrusted input: ids and
@@ -334,6 +335,11 @@
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           n++;
+        }
+        if (src.sb && typeof src.sb === 'object') {
+          const d = load();
+          d.sb = d.sb && typeof d.sb === 'object' ? d.sb : {};
+          for (const raw of Object.values(src.sb)) { const name = clip(raw, 60); if (agencyKey(name)) d.sb[agencyKey(name)] = name; }
         }
         if (src.ag && typeof src.ag === 'object') {
           const d = load();
@@ -363,6 +369,16 @@
         return !!d.ag[k];
       },
       hiddenAgencies: () => Object.values(load().ag || {}),
+      toggleSuburb(raw) {
+        const name = clip(raw, 60), k = agencyKey(name);
+        if (!k) return false;
+        const d = fresh();
+        d.sb = d.sb && typeof d.sb === 'object' ? d.sb : {};
+        if (d.sb[k]) delete d.sb[k]; else d.sb[k] = name;
+        save();
+        return !!d.sb[k];
+      },
+      hiddenSuburbs: () => Object.values(load().sb || {}),
       // Bulk: set s (shortlist) or h (hidden) explicitly on many rows in one write.
       setMany(rows, k, on) {
         const { m } = fresh();
@@ -1225,7 +1241,7 @@
     const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
     const kept = dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
-      .filter((r) => cfg.showHidden || (!r.hidden && !r.agencyHidden))
+      .filter((r) => cfg.showHidden || (!r.hidden && !r.agencyHidden && !r.suburbHidden))
       .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
@@ -1358,6 +1374,15 @@
     return slots;
   };
 
+  // One listing as plain text for a message.
+  const summaryText = (r) => [
+    `${r.price || 'Price on request'} - ${r.address}`,
+    [r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${r.beds ?? '?'} bed, ${r.baths ?? '?'} bath, ${r.cars ?? '?'} car` : '',
+      Number.isFinite(r.upfront) ? `move-in $${r.upfront.toLocaleString('en-AU')}` : ''].filter(Boolean).join(' · '),
+    r.inspections?.length ? `Inspections: ${r.inspections.map((i) => i.label).join('; ')}` : '',
+    r.url,
+  ].filter(Boolean).join('\n');
+
   // Printable shortlist: a standalone HTML document (all text escaped), light theme forced.
   const printHtml = (rows, now = new Date()) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Rental shortlist ${ymdLocal(now)}</title><style>
@@ -1447,7 +1472,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1584,7 +1609,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-item.rf-hidden .rf-card{opacity:.45}
   .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
   .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-starred .rf-acts,.rf-hidden .rf-acts{opacity:1}
-  .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n],[data-act=ag]){display:none}
+  .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n],[data-act=ag],[data-act=sb],[data-act=copy]){display:none}
+  .rf-cmp{display:inline-flex;align-items:center;gap:3px;font:600 11px system-ui,sans-serif;background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;padding:2px 6px}
   @media (hover:none){.rf-acts{opacity:1}} /* after the opacity:0 rule so it wins */
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
@@ -1796,7 +1822,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-floorplanOnly">Has a floorplan</label>
-          <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies</span><span class="rf-ag-list"></span></div>
+          <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies / suburbs</span><span class="rf-ag-list"></span></div>
         </details>
         <details class="rf-more rf-settings">
           <summary>Settings</summary>
@@ -1839,7 +1865,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <div class="rf-help" hidden>
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-        <dt>n</dt><dd>note</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
+        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
         <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
       </div>
       <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
@@ -1939,6 +1965,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         case 's': act('s'); return true;
         case 'h': act('h'); return true;
         case 'n': act('n'); return true;
+        case 'c': act('copy'); return true;
         case 'o': case 'Enter': if (!cur) return false; cur.querySelector('.rf-card')?.click(); return true;
         default: return false;
       }
@@ -2024,6 +2051,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const id = b.closest('.rf-item')?.dataset.id;
       if (!id) return;
       if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
+      if (b.dataset.act === 'copy') {
+        const r = rowById(id) || ui.rows?.find((x) => x.id === id);
+        if (r) copyText(summaryText(r)).then((ok) => setStatus(ok ? 'Listing summary copied.' : 'Clipboard blocked.', !ok));
+        return;
+      }
+      if (b.dataset.act === 'sb') {
+        const r = rowById(id);
+        if (!r?.suburb) return;
+        const on = marks.toggleSuburb(r.suburb);
+        refreshMarks();
+        ui.list.focus();
+        return offerUndo(on ? `Hidden all listings in ${r.suburb}.` : `Showing ${r.suburb} again.`, () => { marks.toggleSuburb(r.suburb); refreshMarks(); });
+      }
       if (b.dataset.act === 'ag') {
         const r = rowById(id);
         if (!r?.agency) return;
@@ -2043,6 +2083,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     });
     ui.list.tabIndex = -1;
     ui.list.addEventListener('change', (e) => {
+      const cmp = e.target.closest('input[data-cmp]');
+      if (cmp) {
+        ui.cmpSel = ui.cmpSel || new Set();
+        if (cmp.checked) ui.cmpSel.add(cmp.dataset.cmp); else ui.cmpSel.delete(cmp.dataset.cmp);
+        return;
+      }
       const sel = e.target.closest('select[data-app]');
       if (!sel) return;
       const id = sel.closest('.rf-item').dataset.id;
@@ -2108,6 +2154,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     panel.querySelector('.rf-agencies').addEventListener('click', (e) => {
       const b = e.target.closest('[data-unhide-ag]');
       if (b) { marks.toggleAgency(b.dataset.unhideAg); refreshMarks(); }
+      const sb = e.target.closest('[data-unhide-sb]');
+      if (sb) { marks.toggleSuburb(sb.dataset.unhideSb); refreshMarks(); }
     });
     ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
       const data = marks.exportData();
@@ -2280,7 +2328,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.plan.hidden = !days.length;
     ui.list.innerHTML = !rows.length ? '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>'
       : ui.planDay ? planHtml(planDay(rows, ui.planDay), ui.planDay)
-      : ui.compare ? compareHtml(rows.slice(0, COMPARE_MAX))
+      : ui.compare ? compareHtml((ui.cmpSel?.size ? rows.filter((r) => ui.cmpSel.has(r.id)) : rows).slice(0, COMPARE_MAX))
       : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
@@ -2288,10 +2336,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   const updateCounts = () => {
     if (ui.launch) setLaunchCount(ui.launchN ?? null);
     const ags = marks.hiddenAgencies();
+    const sbs = marks.hiddenSuburbs();
     const box = ui.panel.querySelector('.rf-agencies');
-    box.hidden = !ags.length;
+    box.hidden = !ags.length && !sbs.length;
     box.querySelector('.rf-ag-list').innerHTML = ags.map((a) =>
-      `<button type="button" class="rf-chip" data-unhide-ag="${esc(a)}" aria-label="Show ${esc(a)} again">${esc(a)} ×</button>`).join('');
+      `<button type="button" class="rf-chip" data-unhide-ag="${esc(a)}" aria-label="Show ${esc(a)} again">${esc(a)} ×</button>`).join('') +
+      sbs.map((a) => `<button type="button" class="rf-chip" data-unhide-sb="${esc(a)}" aria-label="Show suburb ${esc(a)} again">${esc(a)} (suburb) ×</button>`).join('');
     const c = marks.counts();
     ui.slCount.textContent = `(${c.starred})`;
     for (const el of ui.panel.querySelectorAll('[data-count]')) el.textContent = `(${c[el.dataset.count]})`;
@@ -2430,7 +2480,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
     }).join('');
     return `<div class="rf-compare"><table><thead><tr><td></td>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
-      (ui.rows.length > rows.length ? `<div class="rf-empty">Comparing the first ${rows.length}; filter by status to pick others.</div>` : '');
+      (ui.rows.length > rows.length ? `<div class="rf-empty">Comparing ${ui.cmpSel?.size ? 'your selection' : `the first ${rows.length}`}; tick "Compare" on listings to choose.</div>` : '');
   }
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
@@ -2443,7 +2493,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   function itemsHtml(rows) {
     return rows.map((r) => `
-      <div tabindex="-1" class="rf-item${r.gone || r.hidden || r.agencyHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
+      <div tabindex="-1" class="rf-item${r.gone || r.hidden || r.agencyHidden || r.suburbHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
@@ -2477,6 +2527,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
         <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+        <button data-act="copy" title="Copy a text summary of this listing" aria-label="Copy summary">Copy</button>
+        ${r.suburb && ui.view !== 'shortlist' ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
+        ${ui.view === 'shortlist' ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
       </div>
       </div>`).join('');
@@ -2724,7 +2777,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
       if (badge.dataset.rfHtml !== html) { badge.innerHTML = html; badge.dataset.rfHtml = html; }
-      const m = (r.hidden || r.agencyHidden) && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
+      const m = (r.hidden || r.agencyHidden || r.suburbHidden) && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
       if ((card.dataset.rfMatch || '') !== m) { if (m) card.dataset.rfMatch = m; else delete card.dataset.rfMatch; }
     }
   }

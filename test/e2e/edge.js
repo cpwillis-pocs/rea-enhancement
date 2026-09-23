@@ -588,6 +588,30 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 27. Copy summary (button + 'c'), hide suburb with undo, compare only ticked listings.
+  {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=copy]');
+    await waitStatus(page, /summary copied/);
+    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /per week - .*\nAvailable|https:\/\/www\.realestate/);
+    const total = await page.$$eval('.rf-item', (e) => e.length);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=sb]');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0, 'every fixture is in Bondi');
+    await page.click('.rf-status .rf-undo');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 3).map((x) => x.dataset.id));
+    for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    await page.hover(`.rf-item[data-id="${ids[2]}"]`); await page.check(`input[data-cmp="${ids[2]}"]`);
+    await page.hover(`.rf-item[data-id="${ids[0]}"]`); await page.check(`input[data-cmp="${ids[0]}"]`);
+    await page.click('[data-sl=compare]');
+    assert.equal(await page.$$eval('.rf-compare thead th', (e) => e.length), 2, 'only ticked listings compared');
+    console.log('copy / hide suburb / compare selection: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
