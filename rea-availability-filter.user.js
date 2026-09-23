@@ -29,6 +29,8 @@
   const MAX_PAGES = 20;
   const RETRIES = 3;
   const RETRY_BASE_MS = 1000;
+  const ROWS_PREFIX = 'rea-avail-filter/rows/';
+  const ROWS_TTL_MS = 10 * 60 * 1000;
 
   // ---------------------------------------------------------------- config
 
@@ -38,6 +40,42 @@
   const saveCfg = (cfg) => {
     try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch { /* private mode */ }
   };
+
+  // Per-search row cache in sessionStorage (tab-scoped, survives reloads/back-nav).
+  // JSON loses Date and Infinity, so both are restored on read.
+  const rowStore = (storage, now = () => Date.now()) => ({
+    get(key) {
+      try {
+        const v = JSON.parse(storage.getItem(ROWS_PREFIX + key));
+        if (!v || now() - v.at > ROWS_TTL_MS) return null;
+        for (const r of v.rows) {
+          r.avail = r.avail == null ? null : new Date(r.avail);
+          r.priceNum = r.priceNum ?? Infinity;
+        }
+        return v;
+      } catch { return null; }
+    },
+    set(key, rows, truncated) {
+      const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ at: now(), truncated, rows }));
+      try {
+        for (let i = storage.length - 1; i >= 0; i--) {
+          const k = storage.key(i);
+          if (k?.startsWith(ROWS_PREFIX) && k !== ROWS_PREFIX + key) {
+            try { if (now() - JSON.parse(storage.getItem(k)).at > ROWS_TTL_MS) storage.removeItem(k); } catch { storage.removeItem(k); }
+          }
+        }
+        put();
+      } catch {
+        try { // quota: drop every other cached search and retry once
+          for (let i = storage.length - 1; i >= 0; i--) {
+            const k = storage.key(i);
+            if (k?.startsWith(ROWS_PREFIX)) storage.removeItem(k);
+          }
+          put();
+        } catch { /* unavailable */ }
+      }
+    },
+  });
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -225,7 +263,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
-      fetchResults, fetchAllPages, applyFilters, toTsv, esc, safeUrl,
+      fetchResults, fetchAllPages, applyFilters, toTsv, esc, safeUrl, rowStore,
     };
     return;
   }
@@ -257,6 +295,7 @@
     font:600 13px system-ui,sans-serif;cursor:pointer}
   .rf-btn:hover{background:#0a6}
   .rf-btn[disabled]{opacity:.5;cursor:default}
+  .rf-btn[hidden]{display:none}
   .rf-btn.sec{background:#f1f1f4;color:#111}
   .rf-btn.sec:hover{background:#e6e6ea}
   .rf-status{padding:8px 16px;font-size:12px;color:#555;border-bottom:1px solid #e4e4e7;min-height:19px}
@@ -286,15 +325,14 @@
   // navigation it is stale, which the key/page match in fetchAllPages guards against.
   const boot = (() => {
     try {
-      let ex = window.ArgonautExchange;
-      if (!ex) {
-        const tag = [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
-        if (tag) return { key: searchKey(location.href), page: pageNum(location.href), results: extractResults(tag.textContent + '</script>') };
-        return null;
-      }
-      return { key: searchKey(location.href), page: pageNum(location.href), results: parseExchange(ex) };
+      const key = searchKey(location.href), page = pageNum(location.href);
+      if (window.ArgonautExchange) return { key, page, results: parseExchange(window.ArgonautExchange) };
+      const tag = [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+      return tag ? { key, page, results: extractResults(tag.textContent + '</script>') } : null;
     } catch { return null; }
   })();
+
+  const store = rowStore(window.sessionStorage);
 
   function build() {
     const style = document.createElement('style');
@@ -321,6 +359,7 @@
         <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
         <div class="rf-actions">
           <button class="rf-btn" id="rf-run">Search all pages</button>
+          <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
           <button class="rf-btn sec" id="rf-export" disabled>Export TSV</button>
         </div>
       </div>
@@ -335,6 +374,7 @@
       to: panel.querySelector('#rf-to'),
       exact: panel.querySelector('#rf-exact'),
       run: panel.querySelector('#rf-run'),
+      refresh: panel.querySelector('#rf-refresh'),
       exportBtn: panel.querySelector('#rf-export'),
       status: panel.querySelector('.rf-status'),
       list: panel.querySelector('.rf-list'),
@@ -356,7 +396,8 @@
     ui.to.addEventListener('change', onChange);
     ui.exact.addEventListener('change', onChange);
 
-    ui.run.addEventListener('click', run);
+    ui.run.addEventListener('click', () => run());
+    ui.refresh.addEventListener('click', () => run(true));
     ui.exportBtn.addEventListener('click', () => {
       if (cache) downloadTsv(applyFilters(cache, cfg));
     });
@@ -367,11 +408,12 @@
     ui.status.classList.toggle('err', !!isErr);
   };
 
-  function showResults() {
+  function showResults(note = '') {
     const rows = applyFilters(cache, cfg);
     render(rows);
     setStatus(`${rows.length} of ${cache.length} listings match.` +
-      (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : ''));
+      (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
+      (note ? ` ${note}` : ''));
   }
 
   function render(rows) {
@@ -398,25 +440,43 @@
     ui.list.scrollTop = 0;
   }
 
-  async function run() {
+  const ago = (ms) => (ms < 60e3 ? 'just now' : `${Math.round(ms / 60e3)} min ago`);
+
+  function adopt(key, rows, trunc, note) {
+    cache = rows;
+    truncated = trunc;
+    cacheKey = key;
+    ui.refresh.hidden = false;
+    showResults(note);
+  }
+
+  // Restore rows for the current search from the session cache, if fresh. Returns hit.
+  function restore() {
+    const key = searchKey(location.href);
+    const hit = store.get(key);
+    if (hit) adopt(key, hit.rows, hit.truncated, `Cached ${ago(Date.now() - hit.at)}.`);
+    return !!hit;
+  }
+
+  async function run(force = false) {
+    if (!force && restore()) return;
     const id = ++runId;
     const base = location.href;
-    ui.run.disabled = true;
+    const key = searchKey(base);
+    ui.run.disabled = ui.refresh.disabled = true;
     ui.exportBtn.disabled = true;
     try {
       const res = await fetchAllPages(base, (m) => { if (id === runId) setStatus(m); }, { seed: boot });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
-      cache = res.rows;
-      truncated = res.truncated;
-      cacheKey = searchKey(base);
-      showResults();
+      store.set(key, res.rows, res.truncated);
+      adopt(key, res.rows, res.truncated);
     } catch (err) {
       if (id !== runId) return;
       cache = null;
       setStatus(err.message, true);
       ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
     } finally {
-      if (id === runId) ui.run.disabled = false;
+      if (id === runId) ui.run.disabled = ui.refresh.disabled = false;
     }
   }
 
@@ -433,18 +493,21 @@
       const key = searchKey(location.href);
       if (key === lastKey) return; // same search, different page/view
       lastKey = key;
-      const inFlight = ui.run.disabled;
-      if (!cacheKey && !inFlight) return;
       if (cacheKey === key) return;
+      const hadState = cacheKey || ui.run.disabled;
       runId++;
       cache = null;
       cacheKey = null;
-      ui.run.disabled = false;
+      ui.run.disabled = ui.refresh.disabled = false;
+      ui.refresh.hidden = true;
       ui.exportBtn.disabled = true;
+      if (restore() || !hadState) return;
+      ui.list.innerHTML = '<div class="rf-empty">Search changed.</div>';
       setStatus('Search changed - run again to refresh.');
     });
   }
 
   build();
   watchNavigation();
+  restore();
 })();
