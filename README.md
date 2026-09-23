@@ -21,7 +21,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 **Filter and sort across every page**
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
 - Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type, photo required, inspection on a given day, listed over 3 weeks ago.
-- Keywords over headline, description and address: `pool -studio "north facing"`.
+- Keywords over headline, description, address and features: `pool -studio "north facing"`.
+- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
+- **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
+- **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
 - Sort by available date, price, price per bed, best value vs median, most beds, next inspection, newest first.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").

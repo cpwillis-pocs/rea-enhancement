@@ -2,6 +2,14 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.5.0
+
+- Field discovery: when REA's known field names are missing, the listing is searched by shape (bounded) for inspections, listed date, coordinates, agency and features; `reaFilter.probe()` reports discovered paths.
+- Amenity chips (require / exclude): pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool. Detected from REA feature lists and the description, with negations ("no pets") handled; unknowns never count as "has it". "Pets OK" badge on REA cards.
+- Distance from a point you paste (coordinates or a Google Maps link; no lookup service): km on listings and badges, max-km filter, "Nearest" sort.
+- Hide every listing from an agency (undo, and unhide from More filters); photo count and "Has a floorplan" filter.
+- Export adds amenities, km, agency, photos, floorplan.
+
 ## 2.4.0
 
 - Move-in cost (bond + 2 weeks) per listing, bond-over-4-weeks flag, max move-in filter.
