@@ -80,4 +80,15 @@ test('healthStore: learns usual fill rates, flags a sudden drop, ignores small s
   assert.deepEqual(drops.map((d) => d.field), ['inspections']);
   assert.ok(drops[0].usual > 0.5);
   assert.equal(core.fillRates([]).price, 0);
+  assert.deepEqual(st.record(mk(40, 0)).map((d) => d.field), ['inspections'], 'a drop does not lower the baseline');
+});
+
+test('healthStore: corrupt stored data starts fresh instead of throwing', () => {
+  for (const bad of ['{"ema":null}', '{"ema":[1]}', '{"ema":{"price":"x"},"n":"y"}', '[]', 'nope']) {
+    const m = memStorage(); m.setItem('rea-avail-filter/health/v1', bad);
+    const st = core.healthStore(m);
+    const rows = Array.from({ length: 30 }, () => ({ priceNum: 500 }));
+    assert.deepEqual(st.record(rows), [], bad);
+    assert.equal(st.usual().n, 1, bad);
+  }
 });

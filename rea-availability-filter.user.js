@@ -1443,15 +1443,25 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   };
   const fillRates = (rows) => Object.fromEntries(Object.entries(HEALTH_FIELDS).map(([k, f]) => [k, rows.length ? rows.filter(f).length / rows.length : 0]));
   const healthStore = (storage) => {
-    const load = () => { try { const d = JSON.parse(storage.getItem(HEALTH_KEY)); if (d && typeof d.ema === 'object') return d; } catch { /* corrupt */ } return { ema: {}, n: 0 }; };
+    const load = () => {
+      try {
+        const d = JSON.parse(storage.getItem(HEALTH_KEY));
+        if (d && d.ema && typeof d.ema === 'object' && !Array.isArray(d.ema)) {
+          const ema = Object.fromEntries(Object.entries(d.ema).filter(([, v]) => Number.isFinite(v)));
+          return { ema, n: Number.isFinite(d.n) ? d.n : 0 };
+        }
+      } catch { /* corrupt */ }
+      return { ema: {}, n: 0 };
+    };
     return {
-      // Returns fields that dropped: [{ field, now, usual }]. Updates the average afterwards.
+      // Returns fields that dropped: [{ field, now, usual }]. Updates the average afterwards,
+      // except for a dropped field: one broken search shouldn't teach it that absence is usual.
       record(rows) {
         if (rows.length < HEALTH_MIN_ROWS) return [];
         const d = load(), rates = fillRates(rows), drops = [];
         for (const [k, v] of Object.entries(rates)) {
           const usual = d.ema[k];
-          if (d.n >= 2 && usual >= 0.3 && v < usual * 0.3) drops.push({ field: k, now: v, usual });
+          if (d.n >= 2 && usual >= 0.3 && v < usual * 0.3) { drops.push({ field: k, now: v, usual }); continue; }
           d.ema[k] = usual == null ? v : usual * (1 - HEALTH_ALPHA) + v * HEALTH_ALPHA;
         }
         d.n++;
@@ -2705,7 +2715,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
       if (res.sample) rawSample = res.sample;
-      const drops = health.record(res.rows);
+      let drops = [];
+      try { drops = health.record(res.rows); } catch (e) { logError(`health: ${e.message}`); }
       if (drops.length) queueMicrotask(() => setStatus(`REA may have changed its data: ${drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`).join('; ')}. Run reaFilter.selfcheck() in the console and report it.`, true));
       store.set(key, res.rows, res.truncated);
       adopt(key, res.rows, res.truncated, '', cfg.remember ? snaps.save(key, res.rows, res.truncated) : null, true);
