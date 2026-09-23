@@ -134,6 +134,42 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(a); await done(b); await ctx.close();
   }
 
+  // 7. Emptying the list via marks must not resurrect stale rows (render([]) keeps ui.rows in sync).
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
+    await page.click('#rf-more summary'); await page.check('#rf-onlyStarred');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 1);
+    await page.click('.rf-item >> [data-act=s]'); // unstar the only one
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0, 'no stale rows under the empty message');
+    assert.match(await page.textContent('.rf-list'), /Nothing matches/);
+    console.log('empty after unstar: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 8. Corrupt saved settings and drifted item shapes don't stop the script.
+  {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ keyword: null, sort: 5, from: 7 })));
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    assert.equal(await page.evaluate(() => typeof window.reaFilter.probe), 'function');
+    console.log('corrupt settings tolerated: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 9. Touch screens: action buttons visible without hover.
+  {
+    const ctx = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    assert.equal(await page.$eval('.rf-acts', (a) => getComputedStyle(a).opacity), '1');
+    console.log('touch actions visible: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

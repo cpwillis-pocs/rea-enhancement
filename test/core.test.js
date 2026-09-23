@@ -237,3 +237,17 @@ test('parseExchange: cache without rentSearch throws a clear error', () => {
   assert.throws(() => core.parseExchange(ex), /No rentSearch results/);
   assert.throws(() => core.parseExchange({}), /Listing cache missing/);
 });
+
+test('sanitizeCfg: keeps only known keys of the right type', () => {
+  assert.deepEqual(core.sanitizeCfg({ keyword: null, from: '2026-10-01', annotate: 'yes', bogus: 1 }), { from: '2026-10-01' });
+  assert.deepEqual(core.sanitizeCfg('abc'), {});
+  assert.deepEqual(core.sanitizeCfg(null), {});
+  assert.doesNotThrow(() => core.applyFilters([], { ...core.DEFAULT_CFG, ...core.sanitizeCfg({ keyword: null }) }));
+});
+
+test('itemsOf / sampleOf / rowsFrom tolerate non-array items', () => {
+  assert.deepEqual(core.itemsOf({ items: { 0: 'x' } }), []);
+  assert.equal(core.sampleOf({ exact: { items: 'nope' } }), null);
+  assert.deepEqual(core.rowsFrom({ exact: { items: 5 }, surrounding: { items: null } }), []);
+  assert.equal(core.sampleOf({ exact: { items: [{}, { listing: { id: 1 } }] } }).id, 1);
+});

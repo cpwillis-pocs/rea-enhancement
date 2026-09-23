@@ -66,7 +66,7 @@
   // ---------------------------------------------------------------- config
 
   const loadCfg = () => {
-    try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; } catch { return {}; }
+    try { return sanitizeCfg(JSON.parse(localStorage.getItem(CFG_KEY))); } catch { return {}; }
   };
   const saveCfg = (cfg) => {
     try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch { /* private mode */ }
@@ -310,11 +310,16 @@
       }
       return false;
     };
+    const newSince = (ids, baseIds) => {
+      if (!baseIds) return new Set();
+      const base = new Set(baseIds);
+      return new Set((ids || []).filter((id) => !base.has(id)));
+    };
     const view = (e) => ({
       at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated,
       rows: (e.rows || []).map(fatRow).filter((r) => r.url),
       gone: (e.gone || []).map(fatRow).filter((r) => r.url).map((r) => Object.assign(r, { gone: true })),
-      newIds: new Set(e.baseIds ? (e.ids || []).filter((id) => !new Set(e.baseIds).has(id)) : []),
+      newIds: newSince(e.ids, e.baseIds),
     });
     return {
       get(key) {
@@ -336,7 +341,8 @@
           gone = (prev.gone || []).filter((r) => !cur.has(String(r.id)));
           if (baseIds) { // rows that were in the baseline and have since dropped out this visit
             const seen = new Set(gone.map((r) => String(r.id)));
-            for (const r of prev.rows || []) if (!cur.has(String(r.id)) && baseIds.includes(String(r.id)) && !seen.has(String(r.id))) gone.push(r);
+            const base = new Set(baseIds);
+            for (const r of prev.rows || []) if (!cur.has(String(r.id)) && base.has(String(r.id)) && !seen.has(String(r.id))) gone.push(r);
           }
         }
         d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, 200) };
@@ -498,9 +504,12 @@
 
   // One malformed listing must not sink a page: rows that throw are dropped.
   const safeRow = (listing, surrounding) => { try { return toRow(listing, surrounding); } catch { return null; } };
+  // REA drift guard: `items` that isn't an array reads as empty rather than throwing.
+  const itemsOf = (block) => (Array.isArray(block?.items) ? block.items : []);
+  const sampleOf = (results) => itemsOf(results?.exact).find((i) => i?.listing)?.listing ?? null;
   const rowsFrom = (results) => [
-    ...(results?.exact?.items || []).map((i) => i?.listing && safeRow(i.listing, false)),
-    ...(results?.surrounding?.items || []).map((i) => i?.listing && safeRow(i.listing, true)),
+    ...itemsOf(results?.exact).map((i) => i?.listing && safeRow(i.listing, false)),
+    ...itemsOf(results?.surrounding).map((i) => i?.listing && safeRow(i.listing, true)),
   ].filter(Boolean);
 
   const toRow = (listing, surrounding) => {
@@ -542,8 +551,9 @@
 
   const sleep = (ms, signal) => new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason); }, { once: true });
+    const onAbort = () => { clearTimeout(t); reject(signal.reason); };
+    const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
   // Per-request timeout combined with the caller's cancel signal (AbortSignal.any: Chrome 116+).
   const withTimeout = (signal, ms) => {
@@ -596,7 +606,7 @@
       total = results.pagination?.maxPageNumberAvailable || 1;
       max = Math.min(total, MAX_PAGES);
       rows.push(...rowsFrom(results));
-      sample ??= results.exact?.items?.find((i) => i.listing)?.listing ?? null;
+      sample ??= sampleOf(results);
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
       if (page <= max && !seeded && !nextSeeded) await wait(jitter(PAGE_DELAY_MS), signal);
@@ -613,6 +623,12 @@
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
     remember: true, newOnly: false, showGone: false,
   };
+
+  // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
+  // keyword: null) falls back to the default instead of throwing on every render.
+  const sanitizeCfg = (c) => (c && typeof c === 'object'
+    ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k]).map((k) => [k, c[k]]))
+    : {});
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -757,7 +773,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG, sanitizeCfg, itemsOf, sampleOf,
     };
     return;
   }
@@ -790,7 +806,6 @@
   .rf-n{font-weight:400;color:var(--rf-soft)}
   .rf-undo{margin-left:8px;border:0;background:none;padding:0;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);
     text-decoration:underline;cursor:pointer}
-  @media (hover:none){.rf-acts{opacity:1}}
   .rf-clear[hidden]{display:none}
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
@@ -850,6 +865,7 @@
   .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
   .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-starred .rf-acts,.rf-hidden .rf-acts{opacity:1}
   .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n]){display:none}
+  @media (hover:none){.rf-acts{opacity:1}} /* after the opacity:0 rule so it wins */
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
@@ -905,7 +921,7 @@
   let baseAt = null; // when the baseline ("last visit") was taken
   const pool = () => (cfg.showGone && gone.length ? cache.concat(gone) : cache);
   const marks = (() => { try { return marksStore(window.localStorage); } catch { return marksStore({ getItem: () => null, setItem: () => {} }); } })();
-  let rawSample = boot?.results?.exact?.items?.find((i) => i.listing)?.listing ?? null;
+  let rawSample = sampleOf(boot?.results);
 
   function build() {
     const style = document.createElement('style');
@@ -1149,6 +1165,7 @@
         }
       });
     }
+    ui.ready = true; // last: init steps only run against a fully wired drawer
   }
 
   const rowById = (id) => known.get(id) || cache?.find((r) => r.id === id) || null;
@@ -1268,13 +1285,13 @@
   }
 
   function render(rows) {
+    ui.rows = rows; // first: renderMore()/refreshMarks() read it even when the list is empty
     setExport(rows.length === 0);
     ui.launch.textContent = `Availability filter (${rows.length})`;
     if (!rows.length) {
       ui.list.innerHTML = '<div class="rf-empty">Nothing matches those filters.</div>';
       return;
     }
-    ui.rows = rows;
     ui.list.innerHTML = itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     ui.list.scrollTop = 0;
   }
@@ -1289,7 +1306,7 @@
 
   function itemsHtml(rows) {
     return rows.map((r) => `
-      <div class="rf-item${r.gone ? ' rf-hidden' : ''}${r.hidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
+      <div class="rf-item${r.gone || r.hidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
@@ -1463,7 +1480,7 @@
   };
 
   const filtersActive = () => ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
-    .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly || cfg.onlyStarred;
+    .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly || cfg.onlyStarred || cfg.newOnly;
 
   // Match set only changes with cfg or known rows; mutation bursts reuse it.
   let matchMemo = { sig: null, set: null };
@@ -1598,7 +1615,7 @@
     rows: () => cache,
     marks: () => marks.counts(),
     shortlist: () => marks.shortlist(),
-    filtered: () => (cache ? applyFilters(cache, cfg) : null),
+    filtered: () => (cache ? applyFilters(pool(), cfg) : null), // same rows as the drawer
     cfg: () => ({ ...cfg }),
     probe: () => {
       if (!rawSample) return 'No listing seen yet - load a results page or run a search.';
@@ -1613,7 +1630,7 @@
   // Each step isolated: a failure in one (eg REA drift) must not take the others down.
   const step = (name, fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn(`[reaFilter] ${name}:`, e)); } catch (e) { console.warn(`[reaFilter] ${name}:`, e); } };
   step('build', build);
-  if (ui) {
+  if (ui?.ready) { // only wire the rest if build() completed
     step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });
     step('boot', () => { if (boot) learn(rowsOf(boot.results)); });
     step('navigation', watchNavigation);
