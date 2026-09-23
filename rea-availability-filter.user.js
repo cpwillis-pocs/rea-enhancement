@@ -385,8 +385,9 @@
       },
       counts() {
         const { m } = load();
-        const v = Object.values(m);
-        return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length, notes: v.filter((e) => e.n).length };
+        let starred = 0, hidden = 0, notes = 0;
+        for (const e of Object.values(m)) { if (e.s) starred++; if (e.h) hidden++; if (e.n) notes++; }
+        return { starred, hidden, notes };
       },
       // Hidden agencies live beside the per-listing marks: data.ag = { normalisedName: displayName }.
       toggleAgency(raw) {
@@ -744,7 +745,7 @@
   }
 
   function extractResults(html) {
-    const m = html.match(/window\.ArgonautExchange=(\{.*?\});?<\/script>/s);
+    const m = html.match(EXCHANGE_RE);
     if (!m) throw new Error('Hydration blob missing - probably a bot-check interstitial. Reload the page and retry.');
     return parseExchange(JSON.parse(m[1]));
   }
@@ -777,10 +778,11 @@
     return null;
   }
   // -> { status: 'ok', listing } | { status: 'gone' } | { status: 'unknown' }
+  const EXCHANGE_RE = /window\.ArgonautExchange=(\{.*?\});?<\/script>/s;
   function parseListingPage(html, id, { status = 200, redirectedTo = '' } = {}) {
     if (status === 404 || status === 410) return { status: 'gone' };
     if (redirectedTo && !/\/property-/.test(new URL(redirectedTo).pathname)) return { status: 'gone' }; // bounced to a search
-    const m = html.match(/window\.ArgonautExchange=(\{.*?\});?<\/script>/s);
+    const m = html.match(EXCHANGE_RE);
     if (!m) return { status: 'unknown' };
     try {
       const listing = findListing(unpackJson(JSON.parse(m[1])), id);
@@ -872,18 +874,19 @@
     return undefined;
   };
 
+  const startOf = (it) => toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt);
   const inspectionList = (src) => (Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : null);
 
   function extractInspections(listing, now = new Date()) {
     let src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
     // A discovered list must look like times, not eg "Book an inspection" options.
     if (!inspectionList(src)) src = find('inspections', listing, /inspection|openhome|open_home/i,
-      (v) => !!inspectionList(v)?.some((it) => toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt)));
+      (v) => !!inspectionList(v)?.some((it) => startOf(it)));
     const list = inspectionList(src) || [];
     const cutoff = now.getTime() - INSPECT_GRACE_MS;
     return list
       .map((it) => {
-        const at = toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt);
+        const at = startOf(it);
         const label = str(it?.display?.shortLabel) || str(it?.display?.longLabel) || str(it?.display) || str(it?.label) || (at ? fmtWhen(at) : '');
         return { at: at ? at.getTime() : null, label };
       })
@@ -912,7 +915,7 @@
 
   // Agency name: listingCompany/agency objects, else any *agency*/*company* object with a name.
   const nameOf = (o) => str(o?.name) || str(o?.displayName) || str(o?.brandName) || (typeof o === 'string' ? o : '');
-  const extractAgency = (listing) => clipText(
+  const extractAgency = (listing) => clip(
     nameOf(listing.listingCompany) || nameOf(listing.agency) || nameOf(listing.agencies?.[0]) ||
     // Objects only: a string under an "agency*" key is usually an id, type, colour or URL.
     nameOf(find('agency', listing, /agenc|listingcompany|company|brand/i, (v) => v && typeof v === 'object' && !!nameOf(v), NO_SKIP)), 80);
@@ -995,6 +998,8 @@
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
 
+  const kmFrom = (anchor, r) => (anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null);
+
   // Distance from a user-chosen point. Accepts "-33.87, 151.21" or a Google Maps URL/text
   // containing "@-33.87,151.21" (no geocoding: nothing leaves the browser).
   const parseAnchor = (v) => {
@@ -1074,7 +1079,6 @@
 
   // Coercers for fields REA might reshape: anything unexpected becomes ''.
   const str = (v) => (typeof v === 'string' ? v : typeof v?.display === 'string' ? v.display : '');
-  const clipText = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
   const scalar = (v) => (typeof v === 'number' || typeof v === 'string' ? v : '');
 
   const sleep = (ms, signal) => new Promise((resolve, reject) => {
@@ -1258,6 +1262,8 @@
   // that one chip removed, so the UI can show how many listings each filter is removing.
   const shortDate = (ymd) => new Date(ymd + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
   const money = (v) => `$${(+v).toLocaleString('en-AU')}`;
+  const statusLabel = (v) => (v ? v[0].toUpperCase() + v.slice(1) : 'Not started');
+  const statusOptions = (cur) => APP_STATUSES.map((v) => `<option value="${v}"${v === cur ? ' selected' : ''}>${statusLabel(v)}</option>`).join('');
   const CHIP_LABELS = {
     from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
@@ -1406,7 +1412,8 @@
     const noWatch = watchIds(cfg.noWatch);
     // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
-    for (const r of rows) r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
+    // Memoised per anchor: removedBy() re-filters once per chip with the same point.
+    for (const r of rows) if (r._kmFor !== cfg.anchor) { r.km = kmFrom(anchor, r); r._kmFor = cfg.anchor; }
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
     const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
     const kept = dedupe(rows)
@@ -1575,7 +1582,7 @@
   const summaryText = (r) => [
     `${r.price || 'Price on request'} - ${r.address}`,
     [r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${orQ(r.beds)} bed, ${orQ(r.baths)} bath, ${orQ(r.cars)} car` : '',
-      Number.isFinite(r.upfront) ? `move-in $${r.upfront.toLocaleString('en-AU')}` : ''].filter(Boolean).join(' · '),
+      Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · '),
     r.inspections?.length ? `Inspections: ${r.inspections.map((i) => i.label).join('; ')}` : '',
     r.url,
   ].filter(Boolean).join('\n');
@@ -1594,7 +1601,7 @@ h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
 ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` : '<div></div>'}<div>
 <div class="p">${esc(r.price)}</div><div class="a">${esc(r.address)}</div>
 <div class="m">${esc([r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${orQ(r.beds)} bed · ${orQ(r.baths)} bath · ${orQ(r.cars)} car` : '',
-  Number.isFinite(r.upfront) ? `move-in $${r.upfront.toLocaleString('en-AU')}` : ''].filter(Boolean).join(' · '))}</div>
+  Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}
 ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
@@ -1950,6 +1957,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   let runId = 0; // bumped on navigation so an in-flight run can't write stale rows
   let ui = null;
 
+  const exchangeScript = () => [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+
   // The document we were loaded with already holds one page of results; after SPA
   // navigation it is stale, which the key/page match in fetchAllPages guards against.
   const boot = (() => {
@@ -1957,7 +1966,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     try {
       const key = searchKey(location.href), page = pageNum(location.href);
       if (window.ArgonautExchange) return { key, page, results: parseExchange(window.ArgonautExchange) };
-      const tag = [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+      const tag = exchangeScript();
       return tag ? { key, page, results: extractResults(tag.textContent + '</script>') } : null;
     } catch { return null; }
   })();
@@ -2015,7 +2024,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         <select class="rf-plan" aria-label="Plan an inspection day"></select>
         <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
         <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
-          <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+          <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
           <option value="-">Not started</option>
         </select>
         <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
@@ -2600,14 +2609,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
   const RECHECK_MAX = 30;
+  // User-started background jobs (re-check, check all) share the search's abort/busy slot.
+  const startJob = (btn) => { runCtrl?.abort(); const c = runCtrl = new AbortController(); setBusy(true); btn.setAttribute('aria-disabled', 'true'); return c; };
+  const endJob = (c, btn) => { if (runCtrl === c) { runCtrl = null; setBusy(false); } btn.removeAttribute('aria-disabled'); }; // a search that took over owns busy now
+
   async function recheckShortlist(btn) {
     if (busy) return;
     const rows = shortlistRows().slice(0, RECHECK_MAX);
     if (!rows.length) return setStatus('Nothing on the shortlist to re-check.', true);
-    runCtrl?.abort();
-    const ctrl = runCtrl = new AbortController();
-    setBusy(true);
-    btn.setAttribute('aria-disabled', 'true');
+    const ctrl = startJob(btn);
     const tally = { ok: 0, gone: 0, unknown: 0 };
     try {
       for (const [i, r] of rows.entries()) {
@@ -2631,9 +2641,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     } catch {
       setStatus('Re-check stopped.');
     } finally {
-      setBusy(false);
-      btn.removeAttribute('aria-disabled');
-      if (runCtrl === ctrl) runCtrl = null;
+      endJob(ctrl, btn);
     }
   }
 
@@ -2654,17 +2662,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     if (busy) return;
     const keys = Object.entries(snaps.exportData()).sort(([, a], [, b]) => b.at - a.at).map(([k]) => k);
     if (!keys.length) return;
-    runCtrl?.abort();
-    const ctrl = runCtrl = new AbortController();
-    ui.savedCtrl = ctrl;
+    const ctrl = ui.savedCtrl = startJob(btn);
     pageMemo.clear(); // "new since" must mean now, not the pages cached a few minutes ago
-    setBusy(true);
-    btn.setAttribute('aria-disabled', 'true');
     const out = [];
     try {
       for (const [i, key] of keys.entries()) {
         const label = searchLabel(key);
-        const before = new Set((snaps.get(key)?.rows || []).map((r) => r.id));
+        const before = new Set(snaps.exportData()[key]?.ids || []);
         const res = await fetchAllPages(key, (m) => setStatus(`Checking ${label} (${i + 1} of ${keys.length}): ${m}`), {
           signal: ctrl.signal, getPage: (url) => getPage(url, { signal: ctrl.signal }),
         });
@@ -2684,8 +2688,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       // Aborted by navigation or opting out: whoever aborted has already said why.
       if (!ctrl.signal.aborted && err?.name !== 'AbortError') { setStatus(`Check failed: ${err.message}`, true); logError(`saved: ${err.message}`); }
     } finally {
-      if (runCtrl === ctrl) { runCtrl = null; setBusy(false); } // a search that took over owns busy now
-      btn.removeAttribute('aria-disabled');
+      endJob(ctrl, btn);
       if (ui.savedCtrl === ctrl) ui.savedCtrl = null;
       renderSaved();
     }
@@ -2695,7 +2698,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const rows = shortlistRows();
     // Distance for the shortlist too (applyFilters isn't run over it).
     const anchor = parseAnchor(cfg.anchor);
-    for (const r of rows) r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
+    for (const r of rows) r.km = kmFrom(anchor, r);
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
@@ -2843,7 +2846,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   function marketHtml(m) {
-    const $ = (v) => (v == null ? '–' : `$${v.toLocaleString('en-AU')}`);
+    const $ = (v) => (v == null ? '–' : money(v));
     const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
     const top = Math.max(1, ...m.byWeek.map((w) => w.n));
     const weekLabel = (w) => w.label || shortDate(w.from);
@@ -2863,7 +2866,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   const COMPARE_ROWS = [
     ['Rent', (r) => r.price, (r) => r.priceNum, 'min'],
     ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
-    ['Move-in', (r) => (Number.isFinite(r.upfront) ? `$${r.upfront.toLocaleString('en-AU')}` : ''), (r) => r.upfront, 'min'],
+    ['Move-in', (r) => (Number.isFinite(r.upfront) ? money(r.upfront) : ''), (r) => r.upfront, 'min'],
     ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
     ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
     ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
@@ -2872,7 +2875,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
     ['Agency', (r) => r.agency || '', null],
-    ['Status', (r) => (r.appStatus ? r.appStatus[0].toUpperCase() + r.appStatus.slice(1) : 'Not started'), null],
+    ['Status', (r) => statusLabel(r.appStatus), null],
     ['Note', (r) => r.note || '', null],
   ];
   function compareHtml(rows) {
@@ -2922,7 +2925,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           ${watchTags(r).length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${watchTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
           ${incomePct(r, cfg.income) != null ? `<div class="rf-meta${incomePct(r, cfg.income) > RENT_STRESS_PCT ? ' rf-warn-t' : ''}">${incomePct(r, cfg.income)}% of income</div>` : ''}
-          ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
+          ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
           ${r.inspections?.length || r.listed || r.lastSeen ? `<div class="rf-meta">${esc([
             r.lastSeen && ui.view === 'shortlist' ? `seen ${ago(Date.now() - r.lastSeen)}` : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
@@ -2930,8 +2933,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>
-      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${APP_STATUSES.map((v) =>
-        `<option value="${v}"${v === r.appStatus ? ' selected' : ''}>${v ? v[0].toUpperCase() + v.slice(1) : 'Not started'}</option>`).join('')}</select></label>` : ''}
+      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select></label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
         <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
@@ -3144,7 +3146,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
     const ppb = ppbLabel(r) ? `<span>${ppbLabel(r)}</span>` : '';
     // Shortlisted cards show where you're up to (applied, inspected...) and your note on hover.
-    const star = r.starred ? `<span class="rf-b-star"${r.note ? ` title="${esc(r.note)}"` : ''}>★ ${r.appStatus ? esc(r.appStatus[0].toUpperCase() + r.appStatus.slice(1)) : 'Shortlisted'}${r.note ? ' ✎' : ''}</span>` : '';
+    const star = r.starred ? `<span class="rf-b-star"${r.note ? ` title="${esc(r.note)}"` : ''}>★ ${r.appStatus ? esc(statusLabel(r.appStatus)) : 'Shortlisted'}${r.note ? ' ✎' : ''}</span>` : '';
     const fresh = isFresh(r) ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${priceDir(r)}">Was ${esc(r.prevPrice)}</span>` : '';
     const availMoved = r.prevAvail ? `<span title="Availability date changed">Avail was ${esc(r.prevAvail)}</span>` : '';
@@ -3160,7 +3162,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     if (known.has(id)) return known.get(id);
     let ex = window.ArgonautExchange;
     if (!isObj(ex)) {
-      const tag = [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+      const tag = exchangeScript();
       ex = tag ? parseListingPage(tag.outerHTML, id).listing ?? null : null;
       if (ex) return safeRow(ex, false);
     }
@@ -3197,7 +3199,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     bar.classList.toggle('rf-lbar-min', small);
     bar.innerHTML = small ? `<button type="button" data-l="s" aria-pressed="${r.starred}" aria-label="${r.starred ? 'Shortlisted' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>
       <button type="button" data-l="min" aria-expanded="false" aria-label="Show listing tools">⋯</button>` : `<button type="button" data-l="s" aria-pressed="${r.starred}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
-      ${r.starred ? `<select data-l="as" aria-label="Application status">${APP_STATUSES.map((v) => `<option value="${v}"${v === r.appStatus ? ' selected' : ''}>${v ? v[0].toUpperCase() + v.slice(1) : 'Not started'}</option>`).join('')}</select>` : ''}
+      ${r.starred ? `<select data-l="as" aria-label="Application status">${statusOptions(r.appStatus)}</select>` : ''}
       <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
       <button type="button" data-l="h" aria-pressed="${r.hidden}">${r.hidden ? 'Unhide' : 'Hide'}</button>
       <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">–</button>
@@ -3303,7 +3305,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         // Anchor the badge without overriding a position REA already set (eg virtualised lists).
         if (statics.has(card)) card.dataset.rfPos = '';
       }
-      r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
+      r.km = kmFrom(anchor, r);
       const html = badgeHtml(r) + cardActsHtml(r);
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
