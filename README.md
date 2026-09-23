@@ -45,7 +45,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
-- The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; filter by status and export it.
+- The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; search it, filter by status and export it.
 - **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
 - **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, exportable to your calendar.
 - **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
@@ -73,7 +73,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Polite to REA**: pages are fetched one at a time with a jittered ~600ms gap. 429/5xx responses back off exponentially (honouring `Retry-After`, capped at 60s) and requests time out after 20s. The page you're already on is reused rather than refetched, and results are cached per tab for 10 minutes. **Refresh** forces a refetch.
 - **SPA-aware**: changing the search cancels an in-flight crawl. Paging within a search keeps the cache.
 - **Non-invasive**: REA's DOM is only touched append-only (one badge per result card plus `data-rf-*` attributes), so React re-renders can't break it or be broken by it.
-- **Storage**: settings, shortlist, notes and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted, hidden or noted). Remembered results for your last three searches are in `localStorage` too; this tab's working results are in `sessionStorage`. Clear site data to reset.
+- **Storage**: settings, shortlist, notes and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted, hidden or noted). Remembered results for your last three searches are in `localStorage` too; this tab's working results are in `sessionStorage`. Settings shows how much is stored, and **Delete all my data** removes only this script's keys.
 
 ## When REA changes something
 

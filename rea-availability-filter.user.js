@@ -2091,7 +2091,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <div class="rf-help" hidden>
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
+        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
         <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
       </div>
       <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
