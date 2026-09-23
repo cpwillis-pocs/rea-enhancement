@@ -72,3 +72,17 @@ test('watchOf: heads-up terms, negations not flagged', () => {
   assert.deepEqual(w('Sunny 2 bed with 12 month lease'), []);
   assert.deepEqual(core.watchTags({ watch: 'short,fee' }), ['Short lease', 'Fee mentioned']);
 });
+
+test('watchOf: negations next to a mention are not heads-ups; broader phrasing caught', () => {
+  const cases = [
+    ['12 month lease', ''], ['strata approval received', ''], ['application fee free', ''], ['6-12 month lease', 'short'],
+    ['6mth lease', 'short'], ['Lease term: 6 months', 'short'], ['no short term leases', ''], ['short term lease not available', ''],
+    ['no break lease fees', ''], ['break-fee applies', 'break'], ['Breaking the lease incurs costs', 'break'],
+    ['Water usage is not charged', ''], ['water usage paid by owner', ''], ['Water usage charges apply', 'water'],
+    ['Tenant pays water usage', 'water'], ['water usage ($3.20 per kl) is charged', 'water'],
+    ['application fee: free', ''], ['application fee of $0', ''], ['holding fee: nil', ''], ['no  application fee', ''],
+    ['no application or holding fees', ''], ['Rent bidding is prohibited.', ''], ['we do not accept offers above the advertised rent', ''],
+    ['Offers above asking considered', 'bid'], ['Pets subject to strata committee approval', 'strata'], ['Sorry no pets. 6 month lease available.', 'short'],
+  ];
+  for (const [text, want] of cases) assert.equal(core.watchOf(text).join(','), want, text);
+});

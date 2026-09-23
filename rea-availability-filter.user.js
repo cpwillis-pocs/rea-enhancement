@@ -487,6 +487,7 @@
     r.headline = clip(o?.headline, 160);
     r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
     r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
+    if (typeof o?.watch !== 'string') r.watch = watchOf([r.headline, r.text, ...(Array.isArray(o?.features) ? o.features : [])].join(' ')).join(','); // saved before heads-up existed
     // Stored next-inspection time and text go stale as sessions pass: derive them again.
     if (Array.isArray(o?.inspections)) {
       const nx = r.inspections.find((i) => i.at != null);
@@ -987,14 +988,28 @@
   // Heads-up: terms in the listing text worth asking the agent about. Plain text matches, so a
   // tag means "mentioned", never a verdict ("no application fee" is not flagged).
   const WATCHOUTS = [
-    { id: 'short', label: 'Short lease', re: /\b(?:3|6|three|six)[- ]?months?\s+(?:lease|tenancy)|\bshort[- ]term (?:lease|rental|tenancy)/ },
-    { id: 'water', label: 'Water usage charged', re: /water (?:usage|consumption)[^.]{0,30}?\b(?:charged|payable|paid by|extra|additional|on top)/ },
-    { id: 'fee', label: 'Fee mentioned', re: /(?<!\bno\s)(?<!\bfree\s)\b(?:application|holding|admin(?:istration)?|reservation) fees?\b(?!\s*(?:free|waived))/ },
-    { id: 'bid', label: 'Invites higher offers', re: /\b(?:offers?|bids?) (?:above|over|in excess of)|\brent bidding|\bhighest offer|\bbest offer/ },
-    { id: 'strata', label: 'Subject to strata approval', re: /subject to (?:strata|body corporate|owners? corporation) approval/ },
-    { id: 'break', label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)? fee|\blease[- ]break (?:fee|cost|clause)/ },
+    { id: 'short', label: 'Short lease', re: /\b(?:3|6|three|six)\s*(?:months?|mths?)\b[^.;]{0,20}?\b(?:lease|tenancy|term)\b|\b(?:3|6)\s*(?:-|to|or)\s*12\s*months?|\bshort[- ]term (?:lease|rental|tenancy|stay)|\blease term:?\s*(?:3|6)\s*months?/ },
+    { id: 'water', label: 'Water usage charged', re: /\bwater (?:usage|consumption)\b[^;]{0,50}?\b(?:charged|charges apply|payable|paid by (?:the )?tenants?|billed|invoiced|extra|additional|on top|at (?:the )?tenants?'?s? (?:cost|expense))|\btenants? (?:pays?|to pay|responsible for) (?:all |the )?water/ },
+    { id: 'fee', label: 'Fee mentioned', re: /\b(?:application|holding|admin(?:istration)?|reservation) fees?\b/ },
+    { id: 'bid', label: 'Invites higher offers', re: /\b(?:offers?|bids?) (?:above|over|in excess of)\b|\bhighest offer|\bbest offer/ },
+    { id: 'strata', label: 'Subject to strata approval', re: /\bsubject to (?:strata|body corporate|owners? corporation)\b[^.;]{0,25}?\bapproval/ },
+    { id: 'break', label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)?[- ]fees?\b|\blease[- ]break (?:fee|cost|clause)|\bbreaking (?:the|your) lease (?:incurs|costs|will)/ },
   ];
-  const watchOf = (text) => WATCHOUTS.filter((w) => w.re.test(String(text || '').toLowerCase())).map((w) => w.id);
+  // A mention right next to a negation ("no application fee", "water usage not charged", "rent
+  // bidding is prohibited", "fee: nil") is the good news, not a heads-up. Checked per clause.
+  const WATCH_NEG = /\b(?:no|not|nil|zero|none|never|without|free|waived|prohibited|n\/a)\b|n't\b|\$0(?![.\d]*[1-9])|paid by (?:the )?(?:owner|landlord|lessor)|fee-free/;
+  const WATCH_BEFORE = 22, WATCH_AFTER = 14;
+  const watchOf = (text) => {
+    const clauses = String(text || '').toLowerCase().split(/(?<=[.!?;])\s+|\n+/);
+    return WATCHOUTS.filter((w) => clauses.some((c) => {
+      const re = new RegExp(w.re.source, 'g');
+      for (let m; (m = re.exec(c));) {
+        if (!WATCH_NEG.test(c.slice(Math.max(0, m.index - WATCH_BEFORE), m.index + m[0].length + WATCH_AFTER))) return true;
+        if (!m[0]) re.lastIndex++;
+      }
+      return false;
+    })).map((w) => w.id);
+  };
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
 
@@ -1272,11 +1287,13 @@
     exactOnly: () => 'No nearby suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only',
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
+  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'maxKm', 'withinDays'];
   const activeFilters = (cfg) => {
     const out = [];
     for (const k of FILTER_KEYS) {
       const v = cfg[k];
       if (!v || v === DEFAULT_CFG[k] || (typeof v === 'string' && !v.trim())) continue;
+      if (NUM_KEYS.includes(k) && num(v) == null) continue; // a stray non-number is ignored by the filter too
       if (k === 'amenities') {
         for (const [id, st] of Object.entries(parseAmenCfg(v))) {
           const a = AMENITIES.find((x) => x.id === id);
@@ -1413,7 +1430,7 @@
     // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
     // Memoised per anchor: removedBy() re-filters once per chip with the same point.
-    for (const r of rows) if (r._kmFor !== cfg.anchor) { r.km = kmFrom(anchor, r); r._kmFor = cfg.anchor; }
+    for (const r of rows) { const k = `${cfg.anchor}|${r.lat}|${r.lng}`; if (r._kmFor !== k) { r.km = kmFrom(anchor, r); r._kmFor = k; } }
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
     const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
     const kept = dedupe(rows)
@@ -2524,6 +2541,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
       storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${n} remembered search${n === 1 ? '' : 'es'}).`;
     };
+    ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
     panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
     panel.querySelector('[data-forget]').addEventListener('click', () => {
       if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
@@ -2765,6 +2783,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   function refreshMarks() {
+    ui.paintStorage?.();
     if (cache) marks.decorate(cache);
     marks.decorate([...known.values()]);
     knownVer++;

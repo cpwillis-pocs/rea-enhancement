@@ -179,3 +179,11 @@ test('toolKeys/toolBytes/fmtBytes: only this tool\'s keys', () => {
   assert.equal(core.toolBytes(m), 2 * ('rea-avail-filter/v1abc'.length + 'rea-avail-filter/marks/v1{}'.length));
   assert.deepEqual([core.fmtBytes(10), core.fmtBytes(2048), core.fmtBytes(3 * 1024 * 1024)], ['10 B', '2 KB', '3.0 MB']);
 });
+
+test('snapshots saved before heads-up tags get them on load; bad numeric cfg makes no chip', () => {
+  const m = memStorage();
+  const k = 'https://www.realestate.com.au/rent/in-z/list-1';
+  m.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: 1, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/p-146500001', text: 'sunny unit. water usage charged to tenant.' }] } } }));
+  assert.equal(core.snapshotStore(m).get(k).rows[0].watch, 'water');
+  assert.deepEqual(core.activeFilters({ ...core.DEFAULT_CFG, priceMin: 'abc' }), []);
+});
