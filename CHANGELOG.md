@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.15.1
+
+- Remembered searches take about 20% less browser storage; the per-tab cache no longer stores values it rebuilds anyway.
+
 ## 2.15.0
 
 - **Other places**: add up to 3 named points ("Work: -33.87, 151.21", or a Google Maps link) under More filters. Each listing shows the straight-line km to each; new sort **Nearest to all places** (shortest longest trip); Best match's distance uses the furthest place; Compare adds a Places row.
