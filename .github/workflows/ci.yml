@@ -29,7 +29,8 @@ jobs:
   # Installs auto-update from main via @updateURL, and Tampermonkey only installs a
   # higher @version, so a script change without a bump would never reach users.
   version-bump:
-    if: github.event_name == 'pull_request'
+    # PRs compare against their base; direct pushes to main against the previous tip.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,7 +38,7 @@ jobs:
           fetch-depth: 0
       - name: Require @version bump when the userscript changes
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           f=rea-availability-filter.user.js
           if git diff --quiet "$BASE" HEAD -- "$f"; then echo "script unchanged"; exit 0; fi
