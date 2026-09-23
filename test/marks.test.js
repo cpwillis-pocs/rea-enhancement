@@ -260,3 +260,19 @@ test('marksStore: bulk setMany/setStatusMany and dump/restore for undo', () => {
   st.restoreDump(before);
   assert.equal(st.shortlist().length, 0, 'undo restores exactly');
 });
+
+test('presetStore: save, bind to a search (one per search), apply data, import validation', () => {
+  const st = core.presetStore(mem());
+  const KEY = 'https://www.realestate.com.au/rent/in-bondi/list-1';
+  assert.equal(st.save('', {}), null);
+  st.save('2-bed budget', { ...core.DEFAULT_CFG, bedsMin: '2', priceMax: '800', annotate: false });
+  st.save('Bondi', { ...core.DEFAULT_CFG, amenities: 'pets:yes' }, KEY);
+  st.save('Bondi v2', { ...core.DEFAULT_CFG, bedsMin: '3' }, KEY);
+  assert.deepEqual(st.list().map((p) => p.name), ['Bondi v2', '2-bed budget'], 'one bound preset per search');
+  assert.equal(st.forSearch(KEY).name, 'Bondi v2');
+  assert.equal(st.get('2-bed budget').cfg.bedsMin, '2');
+  assert.equal('annotate' in st.get('2-bed budget').cfg, false, 'display prefs not stored');
+  const other = core.presetStore(mem());
+  assert.equal(other.importData([{ name: 'x', cfg: { keyword: null, bedsMin: '1' }, key: 'https://evil/' }, { name: '' }, 5]), 1);
+  assert.deepEqual([other.get('x').cfg, other.get('x').key], [{ bedsMin: '1' }, null]);
+});

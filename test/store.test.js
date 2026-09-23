@@ -63,3 +63,10 @@ test('rowStore: keeps at most two searches, truncates text', () => {
   assert.ok(st.get('b') && st.get('c'));
   assert.equal(st.get('c').rows[0].text.length, 600);
 });
+
+test('rowStore: all "unknown" numbers (upfront, bondNum too) come back as Infinity', () => {
+  const st = core.rowStore(memStorage(), () => 1e12);
+  st.set('k', [core.toRow(listing({ bond: {}, price: { display: 'POA' } }), false)], false);
+  const r = st.get('k').rows[0];
+  for (const k of ['priceNum', 'ppb', 'upfront', 'bondNum']) assert.equal(r[k], Infinity, k);
+});

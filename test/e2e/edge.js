@@ -447,6 +447,33 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 21. Presets: save, apply, bind to a search (auto-applies on SPA navigation back), delete.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'Bondi pets' : '3-bed'));
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    await page.selectOption('.rf-preset', '+save');
+    assert.match(await status(page), /Saved preset "3-bed"/);
+    await page.click('.rf-clear');
+    await page.selectOption('.rf-preset', '3-bed');
+    assert.equal(await page.inputValue('#rf-bedsMin'), '3', 'preset applied');
+    await page.click('.rf-clear');
+    await page.click('[data-amen=pets]');
+    await page.selectOption('.rf-preset', '+bind');
+    await page.click('.rf-clear');
+    await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
+    await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
+    await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 3000 });
+    assert.match(await page.textContent('.rf-preset option'), /Preset: Bondi pets/);
+    await page.selectOption('.rf-preset', '-3-bed');
+    assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('3-bed'));
+    console.log('presets: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

@@ -52,6 +52,7 @@
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
   const ROWS_VERSION = 7; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
+  const ROW_INFINITE = ['priceNum', 'ppb', 'upfront', 'bondNum']; // "unknown" numbers held as Infinity
   const ROWS_TTL_MS = 10 * 60 * 1000;
   const ROWS_KEEP = 2; // searches kept in sessionStorage
   const MARKS_KEY = 'rea-avail-filter/marks/v1';
@@ -95,8 +96,7 @@
         if (!v || v.v !== ROWS_VERSION || now() - v.at > ROWS_TTL_MS) return null;
         for (const r of v.rows) {
           for (const k of ROW_DATES) r[k] = r[k] == null ? null : new Date(r[k]);
-          r.priceNum = r.priceNum ?? Infinity;
-          r.ppb = r.ppb ?? Infinity;
+          for (const k of ROW_INFINITE) r[k] = r[k] ?? Infinity; // JSON stores Infinity as null
         }
         return v;
       } catch { return null; }
@@ -215,7 +215,7 @@
           const e = m[r.id] || (m[r.id] = { f: t });
           e.l = t;
           if (e.s) e.d = summary(r); // keep the shortlist's copy current
-          if (isFinite(r.priceNum)) {
+          if (Number.isFinite(r.priceNum)) {
             if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; e.pt = t; }
             if (e.p !== r.priceNum) e.ph = [...(Array.isArray(e.ph) ? e.ph : []), [t, clip(r.price, 80)]].slice(-PRICE_HISTORY_MAX);
             e.p = r.priceNum;
@@ -506,6 +506,50 @@
           n++;
         }
         persist(d);
+        return n;
+      },
+    };
+  };
+
+  // Named filter presets; a preset with `key` auto-applies on that search.
+  const PRESETS_KEY = 'rea-avail-filter/presets/v1';
+  const PRESETS_MAX = 30;
+  const presetStore = (storage) => {
+    const load = () => {
+      try { const d = JSON.parse(storage.getItem(PRESETS_KEY)); if (Array.isArray(d?.list)) return d; } catch { /* corrupt */ }
+      return { v: 1, list: [] };
+    };
+    const save = (d) => { try { storage.setItem(PRESETS_KEY, JSON.stringify(d)); } catch { /* quota/blocked */ } };
+    const pick = (cfg) => Object.fromEntries([...FILTER_KEYS, 'anchor', 'sort'].filter((k) => k in cfg).map((k) => [k, cfg[k]]));
+    return {
+      list: () => load().list,
+      save(name, cfg, key = null) {
+        const n = clip(String(name || '').trim(), 60);
+        if (!n) return null;
+        const d = load();
+        d.list = d.list.filter((p) => p.name !== n && !(key && p.key === key)); // one bound preset per search
+        d.list.unshift({ name: n, cfg: sanitizeCfg(pick(cfg)), key: key && isSearchKey(key) ? key : null });
+        d.list = d.list.slice(0, PRESETS_MAX);
+        save(d);
+        return n;
+      },
+      remove(name) { const d = load(); d.list = d.list.filter((p) => p.name !== name); save(d); },
+      get: (name) => load().list.find((p) => p.name === name) || null,
+      forSearch: (key) => load().list.find((p) => p.key === key) || null,
+      exportData: () => load().list,
+      importData(list) {
+        if (!Array.isArray(list)) return 0;
+        const d = load();
+        let n = 0;
+        for (const p of list.slice(0, PRESETS_MAX)) {
+          const name = clip(String(p?.name || '').trim(), 60);
+          if (!name || !p.cfg || typeof p.cfg !== 'object') continue;
+          d.list = d.list.filter((x) => x.name !== name);
+          d.list.push({ name, cfg: sanitizeCfg(pick(p.cfg)), key: isSearchKey(p.key) ? p.key : null });
+          n++;
+        }
+        d.list = d.list.slice(0, PRESETS_MAX);
+        save(d);
         return n;
       },
     };
@@ -986,7 +1030,7 @@
   const withMedians = (rows) => {
     const groups = new Map();
     for (const r of dedupe(rows)) {
-      if (r.surrounding || !isFinite(r.priceNum) || r.beds === '') continue;
+      if (r.surrounding || !Number.isFinite(r.priceNum) || r.beds === '') continue;
       const k = +r.beds;
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r.priceNum);
@@ -1000,7 +1044,7 @@
     for (const r of rows) {
       const m = r.beds === '' ? undefined : med.get(+r.beds);
       r.median = m ?? null;
-      r.vsMedian = m && isFinite(r.priceNum) ? Math.round(((r.priceNum - m) / m) * 100) : null;
+      r.vsMedian = m && Number.isFinite(r.priceNum) ? Math.round(((r.priceNum - m) / m) * 100) : null;
     }
     return rows;
   };
@@ -1019,13 +1063,13 @@
     const upMed = median(rows.map((r) => r.upfront));
     for (const r of rows) {
       const parts = [];
-      if (isFinite(r.priceNum)) {
+      if (Number.isFinite(r.priceNum)) {
         if (pMax) parts.push(['rent vs budget', clamp01(1 - r.priceNum / pMax + 0.5)]);
         else if (r.vsMedian != null) parts.push(['rent vs median', clamp01(0.5 - r.vsMedian / 50)]);
       }
       if (from && r.avail) parts.push(['timing', clamp01(1 - Math.abs(r.avail - from) / (SCORE_AVAIL_DAYS * DAY_MS))]);
       if (r.km != null) parts.push(['distance', clamp01(1 - r.km / kmMax)]);
-      if (upMed && isFinite(r.upfront)) parts.push(['move-in', clamp01(0.5 - (r.upfront - upMed) / (2 * upMed))]);
+      if (upMed && Number.isFinite(r.upfront)) parts.push(['move-in', clamp01(0.5 - (r.upfront - upMed) / (2 * upMed))]);
       r.score = parts.length >= 2 ? Math.round((parts.reduce((t, [, v]) => t + v, 0) / parts.length) * 100) : null;
       r.scoreWhy = r.score == null ? '' : parts.map(([k, v]) => `${k} ${Math.round(v * 100)}`).join(', ');
     }
@@ -1142,7 +1186,7 @@
       .filter((r) => amenReq.every(([id, st]) => (st === 'yes' ? r.amen?.[id] === 'yes' : r.amen?.[id] !== 'yes')))
       .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
-      .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
+      .filter((r) => (pMin == null || (Number.isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
       .filter((r) => upMax == null || (r.upfront ?? Infinity) <= upMax) // unknown bond fails a move-in cap
       .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
       .filter((r) => !cfg.type || r.type === cfg.type)
@@ -1153,7 +1197,7 @@
   }
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
-  const ppbLabel = (r) => (+r.beds > 1 && isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
+  const ppbLabel = (r) => (+r.beds > 1 && Number.isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
@@ -1255,7 +1299,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1409,6 +1453,7 @@
   .rf-active[hidden]{display:none}
   .rf-achip{font-size:11px;padding:3px 8px}
   .rf-achip span{color:var(--rf-soft);font-weight:400}
+  .rf-preset{font:12px system-ui,sans-serif;padding:6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:100%}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
@@ -1480,6 +1525,7 @@
   let baseAt = null; // when the baseline ("last visit") was taken
   const pool = () => (cfg.showGone && gone.length ? cache.concat(gone) : cache);
   const marks = marksStore(storageOr('localStorage'));
+  const presets = presetStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
 
   function build() {
@@ -1568,6 +1614,9 @@
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
         </details>
+        <div class="rf-row rf-presets">
+          <select class="rf-preset" aria-label="Filter presets"></select>
+        </div>
         <div class="rf-row">
           <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
           <label class="rf-sort">Sort<select id="rf-sort">
@@ -1626,6 +1675,7 @@
       slFile: panel.querySelector('.rf-sl-bar input[type=file]'),
       slFilter: panel.querySelector('.rf-sl-filter'),
       bulk: panel.querySelector('.rf-bulk'),
+      preset: panel.querySelector('.rf-preset'),
       slBulk: panel.querySelector('.rf-sl-bulk'),
       list: panel.querySelector('.rf-list'),
     };
@@ -1807,6 +1857,20 @@
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    ui.preset.addEventListener('change', () => {
+      const v = ui.preset.value;
+      ui.preset.value = '';
+      if (v === '+save' || v === '+bind') {
+        const key = v === '+bind' ? currentKey() : null;
+        const name = window.prompt(key ? 'Preset name (auto-applies on this search):' : 'Preset name:', '');
+        const saved = name && presets.save(name, cfg, key);
+        if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
+      } else if (v.startsWith('-')) {
+        presets.remove(v.slice(1));
+        setStatus(`Deleted preset "${v.slice(1)}".`);
+      } else if (v) applyPreset(presets.get(v));
+      fillPresets();
+    });
     // Bulk actions: one write, one re-render, one undo that restores the exact previous state.
     const bulk = (sel, fn) => sel.addEventListener('change', () => {
       const v = sel.value;
@@ -1846,6 +1910,7 @@
     });
     ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
       const data = marks.exportData();
+      data.presets = presets.exportData();
       if (cfg.remember) data.snapshots = snaps.exportData();
       download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
     });
@@ -1866,6 +1931,8 @@
         try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
         const n = marks.importJson(data);
         const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
+        presets.importData(data.presets);
+        fillPresets();
         refreshMarks();
         setStatus(`Restored ${n} listing${n === 1 ? '' : 's'}${k ? ` and ${k} saved search${k === 1 ? '' : 'es'}` : ''} from backup.`);
       } catch (err) { setStatus(err.message, true); }
@@ -2040,8 +2107,8 @@
   // Side-by-side comparison: one column per listing, best value per row highlighted.
   const COMPARE_ROWS = [
     ['Rent', (r) => r.price, (r) => r.priceNum, 'min'],
-    ['Per bed', (r) => ppbLabel(r) || (isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
-    ['Move-in', (r) => (isFinite(r.upfront) ? `$${r.upfront.toLocaleString('en-AU')}` : ''), (r) => r.upfront, 'min'],
+    ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
+    ['Move-in', (r) => (Number.isFinite(r.upfront) ? `$${r.upfront.toLocaleString('en-AU')}` : ''), (r) => r.upfront, 'min'],
     ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
     ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
     ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
@@ -2096,7 +2163,7 @@
             r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
-          ${isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
+          ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
           ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
             r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',
@@ -2113,6 +2180,25 @@
         ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
       </div>
       </div>`).join('');
+  }
+
+  function fillPresets() {
+    const list = presets.list();
+    const bound = presets.forSearch(currentKey());
+    ui.preset.innerHTML = `<option value="">${bound ? `Preset: ${esc(bound.name)}` : 'Presets…'}</option>` +
+      list.map((p) => `<option value="${esc(p.name)}">Apply: ${esc(p.name)}${p.key ? (p.key === currentKey() ? ' (this search)' : ' (another search)') : ''}</option>`).join('') +
+      '<option value="+save">Save current filters…</option><option value="+bind">Save for this search…</option>' +
+      list.map((p) => `<option value="-${esc(p.name)}">Delete: ${esc(p.name)}</option>`).join('');
+  }
+
+  // Apply a preset's filters through the normal field path (so everything stays in sync).
+  function applyPreset(p) {
+    if (!p) return;
+    const next = { ...cfg, ...Object.fromEntries(FILTER_KEYS.map((k) => [k, DEFAULT_CFG[k]])), ...p.cfg };
+    for (const [k, el] of ui.fields) if (next[k] !== cfg[k]) (el.type === 'checkbox' ? (el.checked = !!next[k]) : (el.value = next[k] ?? ''));
+    ui.paintAmen();
+    ui.fields[0][1].dispatchEvent(new Event('change'));
+    setStatus(`Applied preset "${p.name}".`);
   }
 
   function fillTypes(rows) {
@@ -2390,6 +2476,9 @@
       setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
+      fillPresets();
+      const bound = key && presets.forSearch(key);
+      if (bound) setTimeout(() => applyPreset(bound), 0); // after the old search's state is cleared below
       lastKey = key;
       if (cacheKey && cacheKey === key) return;
       const hadState = cacheKey || busy;
@@ -2440,6 +2529,7 @@
       // Another tab changed the shortlist/hidden/notes: pick it up here.
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }
     }));
+    step('presets', () => { fillPresets(); const b = presets.forSearch(currentKey()); if (b) applyPreset(b); });
     step('restore', restore);
     step('annotate', ensureVisiblePage);
   }
