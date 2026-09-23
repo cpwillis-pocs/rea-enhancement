@@ -259,6 +259,27 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 14. Distance: paste coordinates, see km, cap it, sort nearest; bad input explained.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-anchor', 'Somewhere'); await page.dispatchEvent('#rf-anchor', 'change');
+    assert.match(await status(page), /coordinates in Australia/);
+    await page.fill('#rf-anchor', 'https://www.google.com/maps/@-33.8915,151.2767,15z'); await page.dispatchEvent('#rf-anchor', 'change');
+    assert.match(await page.textContent('.rf-list'), /(m|km) away/);
+    await page.selectOption('#rf-sort', 'distance');
+    const first = await page.textContent('.rf-item .rf-meta:has-text("away")');
+    assert.match(first, /^0 m away|^\d+ m away/, `nearest first: ${first}`);
+    await page.fill('#rf-maxKm', '2'); await page.dispatchEvent('#rf-maxKm', 'change');
+    const n = await page.$$eval('.rf-item', (e) => e.length);
+    assert.ok(n > 0 && n < 18, `within 2 km: ${n}`);
+    await page.waitForFunction(() => [...document.querySelectorAll('article > .rf-badge')].some((b) => / (k)?m$|\d m|km/.test(b.textContent)), null, { timeout: 3000 });
+    console.log('distance:', n, 'within 2 km; nearest', first);
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

@@ -46,3 +46,20 @@ test('toRow carries new fields; probe reports discovered paths', () => {
   const p = core.probe(listing({ openHomeTimes: [{ startTime: '2026-09-26T00:00:00Z' }] }));
   assert.equal(p['discovered inspections'], 'openHomeTimes');
 });
+
+test('distance: anchor parsing, haversine, filter, sort, validation', () => {
+  assert.deepEqual(core.parseAnchor('-33.8688, 151.2093'), { lat: -33.8688, lng: 151.2093 });
+  assert.deepEqual(core.parseAnchor('https://www.google.com/maps/@-37.8136,144.9631,15z'), { lat: -37.8136, lng: 144.9631 });
+  assert.equal(core.parseAnchor('London 51.5, -0.12'), null);
+  assert.equal(core.parseAnchor('nope'), null);
+  const km = core.haversineKm({ lat: -33.8688, lng: 151.2093 }, { lat: -33.8915, lng: 151.2767 }); // CBD -> Bondi
+  assert.ok(km > 6 && km < 7.5, `CBD->Bondi ${km}`);
+  const L = (id, lat, lng) => core.toRow(listing({ id, address: { display: { fullAddress: id }, location: lat == null ? undefined : { latitude: lat, longitude: lng } } }), false);
+  const rows = [L('far', -33.95, 151.0), L('near', -33.89, 151.27), L('none', null, null)];
+  const ids = (cfg) => core.applyFilters(rows, cfg).map((r) => r.url.split('-').pop());
+  const anchor = '-33.8915, 151.2767';
+  assert.deepEqual(ids({ anchor, sort: 'distance' }), ['near', 'far', 'none']);
+  assert.deepEqual(ids({ anchor, maxKm: '5' }), ['near']);
+  assert.equal(rows[1].km < 1, true);
+  assert.match(core.cfgError({ ...core.DEFAULT_CFG, anchor: 'somewhere' }), /coordinates in Australia/);
+});
