@@ -422,3 +422,10 @@ test('removedBy only counts: shown rows keep their Match scores', () => {
   core.removedBy(rows, cfg, now);
   assert.deepEqual(shown.map((r) => r.score), scores);
 });
+
+test('activeFilters ignores whitespace-only text; summary/print show ? for blank specs', () => {
+  assert.deepEqual(core.activeFilters({ ...core.DEFAULT_CFG, keyword: '   ' }), []);
+  const r = { id: '1', url: 'https://www.realestate.com.au/p-1', address: 'A', price: '$1', beds: 2, baths: '', cars: null };
+  assert.match(core.summaryText(r), /2 bed, \? bath, \? car/);
+  assert.match(core.printHtml([r]), /2 bed · \? bath · \? car/);
+});

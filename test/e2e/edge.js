@@ -590,6 +590,9 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     if (n > 1) assert.ok(await page.$('.rf-planner li.rf-clash'), 'same-time fixtures clash');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-plan-ics]')]);
     assert.equal((fs.readFileSync(await dl.path(), 'utf8').match(/BEGIN:VEVENT/g) || []).length, n);
+    const planned = await page.$$eval('.rf-planner li a', (a) => new Set(a.map((x) => x.href)).size);
+    await page.selectOption('.rf-sl-bulk', 'status:applied');
+    assert.match(await status(page), new RegExp(`Marked ${planned} as applied`), 'bulk acts on the planned day only');
     await page.selectOption('.rf-plan', '');
     assert.ok(await page.$$eval('.rf-item', (e) => e.length) === 4);
     console.log('planner:', days.length, 'days;', n, 'on', days[0]);

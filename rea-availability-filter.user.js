@@ -1177,7 +1177,7 @@
     const out = [];
     for (const k of FILTER_KEYS) {
       const v = cfg[k];
-      if (!v || v === DEFAULT_CFG[k]) continue;
+      if (!v || v === DEFAULT_CFG[k] || (typeof v === 'string' && !v.trim())) continue;
       if (k === 'amenities') {
         for (const [id, st] of Object.entries(parseAmenCfg(v))) {
           const a = AMENITIES.find((x) => x.id === id);
@@ -1417,10 +1417,12 @@
     return slots;
   };
 
+  const orQ = (v) => (v === '' || v == null ? '?' : v);
+
   // One listing as plain text for a message.
   const summaryText = (r) => [
     `${r.price || 'Price on request'} - ${r.address}`,
-    [r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${r.beds ?? '?'} bed, ${r.baths ?? '?'} bath, ${r.cars ?? '?'} car` : '',
+    [r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${orQ(r.beds)} bed, ${orQ(r.baths)} bath, ${orQ(r.cars)} car` : '',
       Number.isFinite(r.upfront) ? `move-in $${r.upfront.toLocaleString('en-AU')}` : ''].filter(Boolean).join(' · '),
     r.inspections?.length ? `Inspections: ${r.inspections.map((i) => i.label).join('; ')}` : '',
     r.url,
@@ -1439,7 +1441,7 @@ h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
 </style></head><body><h1>Rental shortlist</h1><div class="sub">${rows.length} listing${rows.length === 1 ? '' : 's'} · printed ${esc(now.toLocaleDateString('en-AU'))}</div>
 ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` : '<div></div>'}<div>
 <div class="p">${esc(r.price)}</div><div class="a">${esc(r.address)}</div>
-<div class="m">${esc([r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${r.beds ?? '?'} bed · ${r.baths ?? '?'} bath · ${r.cars ?? '?'} car` : '',
+<div class="m">${esc([r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${orQ(r.beds)} bed · ${orQ(r.baths)} bath · ${orQ(r.cars)} car` : '',
   Number.isFinite(r.upfront) ? `move-in $${r.upfront.toLocaleString('en-AU')}` : ''].filter(Boolean).join(' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}
@@ -2185,9 +2187,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const bulk = (sel, fn) => sel.addEventListener('change', () => {
       const v = sel.value;
       sel.value = '';
-      if (!v || !ui.rows?.length) return;
-      const before = marks.dump(ui.rows.map((r) => r.id));
-      const msg = fn(v, ui.rows);
+      const rows = (sel === ui.slBulk && ui.view === 'shortlist' && ui.bulkRows) || ui.rows;
+      if (!v || !rows?.length) return;
+      const before = marks.dump(rows.map((r) => r.id));
+      const msg = fn(v, rows);
       refreshMarks();
       if (msg) offerUndo(msg, () => { marks.restoreDump(before); refreshMarks(); });
     });
@@ -2389,9 +2392,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     if (ui.planDay && !days.some((d) => d.day === ui.planDay)) ui.planDay = null;
     ui.plan.value = ui.planDay || '';
     ui.plan.hidden = !days.length;
+    const slots = ui.planDay ? planDay(rows, ui.planDay) : null;
+    const cmp = ui.compare && !slots ? (ui.cmpSel?.size ? rows.filter((r) => ui.cmpSel.has(r.id)) : rows).slice(0, COMPARE_MAX) : null;
+    // Bulk actions act on what's on screen: the planned day's or compared listings when those views are up.
+    ui.bulkRows = slots ? [...new Set(slots.map((x) => x.r))] : cmp || null;
     ui.list.innerHTML = !rows.length ? '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>'
-      : ui.planDay ? planHtml(planDay(rows, ui.planDay), ui.planDay)
-      : ui.compare ? compareHtml((ui.cmpSel?.size ? rows.filter((r) => ui.cmpSel.has(r.id)) : rows).slice(0, COMPARE_MAX))
+      : slots ? planHtml(slots, ui.planDay)
+      : cmp ? compareHtml(cmp)
       : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
@@ -2806,19 +2813,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const onAct = (e) => {
       const b = e.target.closest?.('[data-card-act]');
       if (!b) return;
-      e.preventDefault();
       e.stopPropagation();
-      if (e.type !== 'click') return; // mousedown/pointerdown only swallowed, so REA sees nothing
+      if (e.type === 'touchend') return; // cancelling it would also cancel the click
+      e.preventDefault();
+      if (e.type !== 'click') return; // press/release events only swallowed, so REA sees nothing
       const id = b.dataset.id, act = b.dataset.cardAct;
       const on = marks.toggle(id, act, rowById(id));
       refreshMarks();
       if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); });
       else if (act === 's') setStatus(on ? 'Added to shortlist.' : 'Removed from shortlist.');
     };
-    for (const type of ['click', 'mousedown', 'pointerdown']) document.addEventListener(type, onAct, true);
+    for (const type of ['click', 'auxclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchend']) document.addEventListener(type, onAct, true);
   }
 
-  const filtersActive = () => FILTER_KEYS.some((k) => cfg[k]);
+  const filtersActive = () => activeFilters(cfg).length > 0;
 
   // Match set only changes with cfg or known rows; mutation bursts reuse it.
   let matchMemo = { sig: null, set: null };
