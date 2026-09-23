@@ -644,6 +644,7 @@
   #rf-panel *{box-sizing:border-box}
   .rf-head{padding:14px 16px;border-bottom:1px solid var(--rf-line);display:flex;align-items:center;gap:8px}
   .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1;color:var(--rf-fg)}
+  .rf-clear[hidden]{display:none}
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
   .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;gap:10px;max-height:60vh;overflow-y:auto}
@@ -960,6 +961,7 @@
     const sl = view === 'shortlist';
     ui.controls.hidden = sl;
     ui.slBar.hidden = !sl;
+    ui.panel.querySelector('.rf-clear').hidden = sl; // filters don't apply to the shortlist
     if (sl) renderShortlist();
     else if (cache) showResults();
     else { ui.list.innerHTML = '<div class="rf-empty">Set your dates, then search.<br>Every result page is merged and sorted by availability.</div>'; setStatus(''); setExport(true); }

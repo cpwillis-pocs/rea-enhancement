@@ -47,6 +47,12 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     return { c: now - 7 * day, m };
   };
   await shot('shortlist', { seed: history, act: async (page) => { await search(page); await page.hover('.rf-item:nth-child(2)'); } });
+  await shot('shortlist-tab', { seed: () => {
+    const h = history();
+    Object.assign(h.m[146500001], { st: Date.now(), n: 'Ask agent about pets and the second car space.', d: { u: `${ORIGIN}/property-apartment-nsw-bondi-146500001`, a: '13/3 Hall St, Bondi, NSW 2026', p: '$687 per week', v: '12 Oct 2026', i: 'https://i2.au.reastatic.net/{size}/fixture/1.svg'.replace('{size}', '345x260'), t: 'Apartment', b: 2, ba: 1, c: 1 } });
+    Object.assign(h.m[146500009], { s: 1, st: Date.now() - 864e5, d: { u: `${ORIGIN}/property-apartment-nsw-manly-146500009`, a: '4/21 The Corso, Manly, NSW 2095', p: '$940 per week', v: 'Sat 7th Nov', i: 'https://i2.au.reastatic.net/345x260/fixture/9.svg', t: 'Apartment', b: 2, ba: 2, c: 1 } });
+    return h;
+  }, act: async (page) => { await page.click('#rf-launch'); await page.click('[data-view=shortlist]'); } });
   await shot('badges', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
   await shot('drawer', { act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
   await shot('filters', { act: async (page) => {

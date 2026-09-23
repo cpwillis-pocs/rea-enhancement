@@ -19,7 +19,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 ## Features
 
 **Filter and sort across every page**
-- Available from / to. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
+- Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
 - Weekly rent min/max (monthly and annual rents converted to weekly), min beds/baths/cars, property type, photo required, inspection on a given day.
 - Keywords over headline, description and address: `pool -studio "north facing"`.
 - Sort by available date, price, price per bed, most beds, next inspection, newest listed.
@@ -33,6 +33,8 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
+- The **Shortlist** tab collects starred listings from every search you've run, with a private note per listing.
+- **Backup / Restore** the shortlist, hidden listings and notes as a JSON file, eg to move to another browser.
 - Listings you haven't seen before are tagged **new** for 48 hours; price changes show "was $X".
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
@@ -48,7 +50,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Polite to REA**: pages are fetched one at a time with a jittered ~600ms gap. 429/5xx responses back off exponentially (honouring `Retry-After`, capped at 60s) and requests time out after 20s. The page you're already on is reused rather than refetched, and results are cached per tab for 10 minutes. **Refresh** forces a refetch.
 - **SPA-aware**: changing the search cancels an in-flight crawl. Paging within a search keeps the cache.
 - **Non-invasive**: REA's DOM is only touched append-only (one badge per result card plus `data-rf-*` attributes), so React re-renders can't break it or be broken by it.
-- **Storage**: settings, shortlist and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted or hidden). Search results live in `sessionStorage` (two searches max). Clear site data to reset.
+- **Storage**: settings, shortlist, notes and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted, hidden or noted). Search results live in `sessionStorage` (two searches max). Clear site data to reset.
 
 ## When REA changes something
 
