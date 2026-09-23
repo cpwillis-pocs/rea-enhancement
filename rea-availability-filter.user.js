@@ -121,12 +121,22 @@
   // across searches, f=first seen, l=last seen, p/ps=last weekly price and its display,
   // pp/pps=previous.
   const NOTE_MAX = 500;
+  const INSPECT_KEEP = 3; // inspections kept per stored row
+  const isListingId = (v) => /^\d{1,15}$/.test(String(v));
+  // Studios report 0 beds: price per bed is then the full price.
+  const perBed = (priceNum, beds) => (isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +beds || 0)) : Infinity);
+  const cleanInspections = (a) => (Array.isArray(a) ? a : []).slice(0, INSPECT_KEEP)
+    .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }));
   const clip = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : '');
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
   });
   const keep = (e) => e.s || e.h || e.n;
+  // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
+  const fromSummary = (d) => ({
+    url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
+  });
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
     const load = () => {
@@ -148,6 +158,7 @@
       }
     };
     const save = () => { try { prune(); storage.setItem(MARKS_KEY, JSON.stringify(data)); } catch { /* quota/blocked */ } };
+    const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     return {
       invalidate() { data = null; },
       observe(rows) {
@@ -185,7 +196,7 @@
       // `row` lets a newly shortlisted listing carry its summary for the cross-search view.
       toggle(id, k, row) {
         const { m } = fresh();
-        const e = m[id] || (m[id] = { f: now(), l: now() });
+        const e = entry(m, id);
         e[k] = e[k] ? 0 : 1;
         if (k === 's') {
           if (e.s) { e.st = now(); if (row) e.d = summary(row); } else { delete e.st; }
@@ -196,7 +207,7 @@
       note: (id) => load().m[id]?.n || '',
       setNote(id, text) {
         const { m } = fresh();
-        const e = m[id] || (m[id] = { f: now(), l: now() });
+        const e = entry(m, id);
         const n = clip(String(text ?? '').trim(), NOTE_MAX);
         if (n) e.n = n; else delete e.n;
         save();
@@ -209,35 +220,34 @@
           .map(([id, e]) => {
             const d = e.d, priceNum = parsePrice(d.p);
             return {
-              id, url: d.u, address: d.a, suburb: d.su || '', price: d.p, priceNum, available: d.v || '-',
-              avail: parseAvail(d.v === 'Available now' ? 'now' : d.v), img: d.i, type: d.t,
-              beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: '',
-              ppb: isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +d.b || 0)) : Infinity,
+              ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
+              beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: '', ppb: perBed(priceNum, d.b),
               starred: true, hidden: !!e.h, note: e.n || '', inspections: [], listed: null,
             };
           });
       },
       // Backup/restore of what the user chose (shortlist, hidden, notes); sighting history is not exported.
-      exportJson() {
+      exportData() {
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
           if (keep(e)) out[id] = { s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, d: e.s ? e.d : undefined };
         }
-        return JSON.stringify({ app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out }, null, 1);
+        return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out };
       },
+      exportJson() { return JSON.stringify(this.exportData(), null, 1); },
       // Merges a backup: imported choices win per listing. Untrusted input: ids and
       // fields are validated and strings clipped; URLs pass through safeUrl.
-      importJson(text) {
-        let src;
-        try { src = JSON.parse(text); } catch { throw new Error('Not a JSON file.'); }
+      importJson(input) {
+        let src = input;
+        if (typeof input === 'string') { try { src = JSON.parse(input); } catch { throw new Error('Not a JSON file.'); } }
         if (src?.app !== 'rea-enhancement' || src?.kind !== 'marks' || typeof src.m !== 'object' || !src.m) throw new Error('Not an rea-enhancement backup.');
         const { m } = fresh();
         let n = 0;
         for (const [id, e] of Object.entries(src.m)) {
-          if (!/^\d{1,15}$/.test(id) || !e || typeof e !== 'object') continue;
-          const cur = m[id] || (m[id] = { f: now(), l: now() });
-          if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary({ url: e.d.u, address: e.d.a, price: e.d.p, available: e.d.v, img: e.d.i, type: e.d.t, beds: e.d.b, baths: e.d.ba, cars: e.d.c, suburb: e.d.su }); }
+          if (!isListingId(id) || !e || typeof e !== 'object') continue;
+          const cur = entry(m, id);
+          if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
           if (e.h) cur.h = 1;
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           n++;
@@ -259,32 +269,29 @@
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
     'cars', 'type', 'img', 'surrounding', 'inspect'];
-  const SNAP_DATES = ['avail', 'listed', 'nextInspect'];
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], 300) : r[k];
-    for (const k of SNAP_DATES) o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
+    for (const k of ROW_DATES) o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
     o.headline = clip(r.headline, 160);
     o.text = clip(r.text, 300);
-    o.inspections = (Array.isArray(r.inspections) ? r.inspections : []).slice(0, 3)
-      .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }));
+    o.inspections = cleanInspections(r.inspections);
     return o;
   };
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
   const fatRow = (o) => {
     const r = {};
     for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], 300) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
-    for (const k of SNAP_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
+    for (const k of ROW_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
     r.url = safeUrl(r.url);
     r.img = safeUrl(r.img);
-    r.id = /^\d{1,15}$/.test(String(o?.id)) ? String(o.id) : listingId(r.url);
+    r.id = isListingId(o?.id) ? String(o.id) : listingId(r.url);
     r.priceNum = typeof o?.priceNum === 'number' ? o.priceNum : parsePrice(r.price);
-    r.ppb = typeof o?.ppb === 'number' ? o.ppb : Infinity;
+    r.ppb = typeof o?.ppb === 'number' ? o.ppb : perBed(r.priceNum, r.beds);
     r.surrounding = !!o?.surrounding;
     r.headline = clip(o?.headline, 160);
     r.text = clip(o?.text, 300).toLowerCase();
-    r.inspections = Array.isArray(o?.inspections) ? o.inspections.slice(0, 3)
-      .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) })).filter((i) => i.label) : [];
+    r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
     return r;
   };
   const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < 2000;
@@ -356,11 +363,11 @@
         if (!src || typeof src !== 'object') return 0;
         const d = load();
         let n = 0;
+        const okIds = (a) => (Array.isArray(a) ? a.map(String).filter(isListingId) : null);
         for (const [k, e] of Object.entries(src)) {
           if (!isSearchKey(k) || !e || typeof e !== 'object' || typeof e.at !== 'number') continue;
           if (d.s[k] && d.s[k].at >= e.at) continue; // keep the newer copy
           const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, 1000).map(fatRow).filter((r) => r.url);
-          const okIds = (a) => (Array.isArray(a) ? a.map(String).filter((id) => /^\d{1,15}$/.test(id)) : null);
           d.s[k] = {
             at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
             ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
@@ -456,11 +463,12 @@
     return parseExchange(JSON.parse(m[1]));
   }
 
+  const PAGE_SEG = /\/(?:list|map)-(\d+)/; // results page segment, eg /list-3 or /map-1
   const pageUrl = (base, n) => {
     const u = new URL(base);
     u.hash = '';
-    u.pathname = /\/(list|map)-\d+/.test(u.pathname)
-      ? u.pathname.replace(/\/(list|map)-\d+/, `/list-${n}`)
+    u.pathname = PAGE_SEG.test(u.pathname)
+      ? u.pathname.replace(PAGE_SEG, `/list-${n}`)
       : u.pathname.replace(/\/?$/, `/list-${n}`);
     return u.href;
   };
@@ -468,7 +476,7 @@
   // Identity of a search regardless of which page / view is showing.
   const searchKey = (href) => pageUrl(href, 1);
   const isSearchPage = (href) => /^\/rent\/[^/]/.test(new URL(href).pathname);
-  const pageNum = (href) => +(new URL(href).pathname.match(/\/(?:list|map)-(\d+)/)?.[1] || 1);
+  const pageNum = (href) => +(new URL(href).pathname.match(PAGE_SEG)?.[1] || 1);
 
   // Field names below are best-effort: REA's GraphQL shape is undocumented, so several
   // plausible spellings are tried and anything unrecognised degrades to empty.
@@ -539,8 +547,7 @@
     const next = row.inspections.find((i) => i.at != null);
     row.nextInspect = next ? new Date(next.at) : null;
     row.inspect = row.inspections.map((i) => i.label).join('; ');
-    // Studios report 0 beds: price per bed is then the full price.
-    row.ppb = isFinite(row.priceNum) ? Math.round(row.priceNum / Math.max(1, +row.beds || 0)) : Infinity;
+    row.ppb = perBed(row.priceNum, row.beds);
     row.text = [row.headline, str(listing.description), row.address, row.type].filter(Boolean).join(' ').toLowerCase();
     return row;
   };
@@ -705,6 +712,8 @@
       .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at)))
       .sort(SORTS[cfg.sort] || SORTS.avail);
   }
+
+  const ppbLabel = (r) => (+r.beds > 1 && isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
@@ -913,14 +922,16 @@
   })();
 
   const bootAt = Date.now();
-  // sessionStorage access itself throws when the browser blocks site data.
-  const store = (() => { try { return rowStore(window.sessionStorage); } catch { return { get: () => null, set: () => {} }; } })();
-  const nullStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
-  const snaps = (() => { try { return snapshotStore(window.localStorage); } catch { return snapshotStore(nullStorage); } })();
+  // Reading window.localStorage/sessionStorage itself throws when site data is blocked;
+  // every store then runs on an inert storage and the tool works without persistence.
+  const nullStorage = { length: 0, key: () => null, getItem: () => null, setItem() {}, removeItem() {} };
+  const storageOr = (name) => { try { return window[name] || nullStorage; } catch { return nullStorage; } };
+  const store = rowStore(storageOr('sessionStorage'));
+  const snaps = snapshotStore(storageOr('localStorage'));
   let gone = []; // rows from the baseline that are no longer listed (shown when cfg.showGone)
   let baseAt = null; // when the baseline ("last visit") was taken
   const pool = () => (cfg.showGone && gone.length ? cache.concat(gone) : cache);
-  const marks = (() => { try { return marksStore(window.localStorage); } catch { return marksStore({ getItem: () => null, setItem: () => {} }); } })();
+  const marks = marksStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
 
   function build() {
@@ -1122,7 +1133,7 @@
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
-      const data = JSON.parse(marks.exportJson());
+      const data = marks.exportData();
       if (cfg.remember) data.snapshots = snaps.exportData();
       download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
     });
@@ -1133,9 +1144,10 @@
       if (!f) return;
       try {
         if (f.size > 5e6) throw new Error('File too large for a backup.');
-        const text = await f.text();
-        const n = marks.importJson(text);
-        const k = cfg.remember ? snaps.importData(JSON.parse(text).snapshots) : 0;
+        let data;
+        try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
+        const n = marks.importJson(data);
+        const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
         refreshMarks();
         setStatus(`Restored ${n} listing${n === 1 ? '' : 's'}${k ? ` and ${k} saved search${k === 1 ? '' : 'es'}` : ''} from backup.`);
       } catch (err) { setStatus(err.message, true); }
@@ -1318,7 +1330,7 @@
             r.baths !== '' ? `${r.baths} bath` : '',
             r.cars !== '' ? `${r.cars} car` : '',
             r.bond ? `bond ${r.bond}` : '',
-            +r.beds > 1 && isFinite(r.ppb) ? `$${r.ppb}/bed` : '',
+            ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
           ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
@@ -1464,7 +1476,6 @@
     for (const k of known.keys()) { if (known.size <= KNOWN_MAX) break; known.delete(k); }
     knownVer++;
   };
-  const rowsOf = rowsFrom;
 
   const badgeHtml = (r) => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1472,7 +1483,7 @@
       ? r.avail <= today ? '<span class="rf-b-now">Available now</span>' : `<span>Avail ${esc(r.available.replace(/^(from\s+)/i, ''))}</span>`
       : '<span class="rf-b-none">No date</span>';
     const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
-    const ppb = +r.beds > 1 && isFinite(r.ppb) ? `<span>$${r.ppb}/bed</span>` : '';
+    const ppb = ppbLabel(r) ? `<span>${ppbLabel(r)}</span>` : '';
     const star = r.starred ? '<span class="rf-b-star">★ Shortlisted</span>' : '';
     const fresh = r.isNew || r.sinceLast ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${r.priceDelta < 0 ? 'down' : 'up'}">Was ${esc(r.prevPrice)}</span>` : '';
@@ -1559,7 +1570,7 @@
     const key = searchKey(href), n = pageNum(href);
     if (cacheKey === key && cache) return scheduleAnnotate();
     if (boot && boot.key === key && boot.page === n && Date.now() - bootAt < ROWS_TTL_MS) return scheduleAnnotate();
-    try { learn(rowsOf(await getPage(pageUrl(href, n)))); } catch { return; }
+    try { learn(rowsFrom(await getPage(pageUrl(href, n)))); } catch { return; }
     if (location.href === href) scheduleAnnotate();
   }
 
@@ -1632,7 +1643,7 @@
   step('build', build);
   if (ui?.ready) { // only wire the rest if build() completed
     step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });
-    step('boot', () => { if (boot) learn(rowsOf(boot.results)); });
+    step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
     step('navigation', watchNavigation);
     step('cards', watchCards);
     step('sync', () => window.addEventListener('storage', (e) => {
