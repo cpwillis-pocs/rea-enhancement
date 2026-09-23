@@ -29,7 +29,7 @@ Put new logic above the guard where you can, and give it a unit test.
 - **Be polite to REA.** Pages are fetched sequentially with a jittered delay and a hard page cap. Don't add parallel fetching or remove the cap; a bot check blocks the user, not us.
 - **Escape everything rendered.** Listing text goes through `esc()`, URLs through `safeUrl()`, export cells through `safeCell()`.
 - **Bump `ROWS_VERSION`** when `toRow()` output changes shape, or cached rows from an old version will be read as the new one.
-- **Bump `@version`** in the userscript header whenever the script changes. Installs auto-update from `main` and Tampermonkey only pulls a higher version; CI fails a PR that changes the script without a bump.
+- **Bump `@version`** in the userscript header whenever the script changes, and add a line to [CHANGELOG.md](CHANGELOG.md). Installs auto-update from `main` and Tampermonkey only pulls a higher version; CI fails a PR that changes the script without a bump.
 
 ## Reporting REA format changes
 
