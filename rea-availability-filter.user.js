@@ -1006,6 +1006,43 @@
     return rows;
   };
 
+  // Active filters as removable chips: [{ key, amen?, label }]. `without` gives the cfg with
+  // that one chip removed, so the UI can show how many listings each filter is removing.
+  const shortDate = (ymd) => new Date(ymd + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  const money = (v) => `$${(+v).toLocaleString('en-AU')}`;
+  const CHIP_LABELS = {
+    from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
+    priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
+    bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
+    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has photo',
+    exactOnly: () => 'No nearby suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only',
+    staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
+  };
+  const activeFilters = (cfg) => {
+    const out = [];
+    for (const k of FILTER_KEYS) {
+      const v = cfg[k];
+      if (!v || v === DEFAULT_CFG[k]) continue;
+      if (k === 'amenities') {
+        for (const [id, st] of Object.entries(parseAmenCfg(v))) {
+          const a = AMENITIES.find((x) => x.id === id);
+          out.push({ key: k, amen: id, label: `${st === 'yes' ? '+' : '−'} ${a.label}` });
+        }
+      } else if (k !== 'maxKm' || parseAnchor(cfg.anchor)) out.push({ key: k, label: CHIP_LABELS[k] ? CHIP_LABELS[k](v) : k });
+    }
+    return out;
+  };
+  const without = (cfg, chip) => {
+    if (!chip.amen) return { ...cfg, [chip.key]: DEFAULT_CFG[chip.key] };
+    const st = parseAmenCfg(cfg.amenities);
+    delete st[chip.amen];
+    return { ...cfg, amenities: amenCfgString(st) };
+  };
+  const removedBy = (rows, cfg, now = new Date()) => {
+    const base = applyFilters(rows, cfg, now).length;
+    return activeFilters(cfg).map((chip) => ({ ...chip, removes: applyFilters(rows, without(cfg, chip), now).length - base }));
+  };
+
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
   const dedupe = (rows) => {
     const byUrl = new Map();
@@ -1192,7 +1229,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, extractListed, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1332,6 +1369,10 @@
   .rf-compare thead img{width:100%;height:64px;object-fit:cover;border-radius:6px}
   .rf-compare .rf-best{background:rgba(8,122,80,.12);color:var(--rf-accent-fg);font-weight:700}
   .rf-na{color:var(--rf-soft)}
+  .rf-active{display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px;border-bottom:1px solid var(--rf-line)}
+  .rf-active[hidden]{display:none}
+  .rf-achip{font-size:11px;padding:3px 8px}
+  .rf-achip span{color:var(--rf-soft);font-weight:400}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
@@ -1513,6 +1554,7 @@
         </div>
       </div>
       <div class="rf-status" role="status" aria-live="polite"></div>
+      <div class="rf-active" hidden aria-label="Active filters"></div>
       <div class="rf-list"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
 
     document.body.append(launch, panel);
@@ -1526,6 +1568,7 @@
       refresh: panel.querySelector('#rf-refresh'),
       exports: [...panel.querySelectorAll('[data-export]')],
       status: panel.querySelector('.rf-status'),
+      active: panel.querySelector('.rf-active'),
       controls: panel.querySelector('.rf-controls'),
       tabs: [...panel.querySelectorAll('[role=tab]')],
       slBar: panel.querySelector('.rf-sl-bar'),
@@ -1567,6 +1610,7 @@
     });
     ui.annotateBox = panel.querySelector('#rf-annotate');
     ui.more = panel.querySelector('#rf-more');
+    ui.moreSummary = ui.more.querySelector('summary');
     ui.more.open = MORE_KEYS.some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
     // Full-screen on phones, so modal there (focus trapped); a side drawer on desktop.
@@ -1590,9 +1634,15 @@
       }
     });
     panel.querySelector('.rf-clear').addEventListener('click', () => {
+      const before = { ...cfg };
       // Resets filters only; display preferences (sort, annotate, dim) are kept.
       for (const [k, el] of fields) write(el, DISPLAY_PREFS.includes(k) ? cfg[k] : DEFAULT_CFG[k]);
       ui.paintAmen();
+      queueMicrotask(() => offerUndo('Filters cleared.', () => {
+        for (const [k, el] of fields) write(el, before[k]);
+        ui.paintAmen();
+        onChange({ type: 'change' });
+      }));
       onChange();
     });
 
@@ -1666,6 +1716,15 @@
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    ui.active.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-chip]');
+      const chip = b && ui.activeChips?.[+b.dataset.chip];
+      if (!chip) return;
+      const next = without(cfg, chip);
+      for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
+      ui.paintAmen();
+      onChange({ type: 'change' });
+    });
     panel.querySelector('.rf-agencies').addEventListener('click', (e) => {
       const b = e.target.closest('[data-unhide-ag]');
       if (b) { marks.toggleAgency(b.dataset.unhideAg); refreshMarks(); }
@@ -1732,6 +1791,7 @@
     for (const t of ui.tabs) t.setAttribute('aria-selected', String(t.dataset.view === view));
     const sl = view === 'shortlist';
     ui.controls.hidden = sl;
+    ui.active.hidden = true; // results view re-shows it via renderActive()
     ui.slBar.hidden = !sl;
     ui.panel.querySelector('.rf-clear').hidden = sl; // filters don't apply to the shortlist
     ui.panel.classList.toggle('rf-wide', sl && !!ui.compare);
@@ -1831,6 +1891,7 @@
     if (err) { render([]); return setStatus(err, true); }
     const rows = applyFilters(pool(), cfg);
     render(rows);
+    renderActive();
     const st = diffStats(cache);
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
     const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`,
@@ -1840,6 +1901,16 @@
       (note ? ` ${note}` : ''));
     const warn = schemaWarnings(cache);
     if (warn.length) setStatus(`REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.`, true);
+  }
+
+  // Chips for active filters with how many listings each removes; click to drop that filter.
+  function renderActive() {
+    const chips = cache ? removedBy(pool(), cfg) : [];
+    ui.active.hidden = !chips.length || ui.view === 'shortlist';
+    ui.active.innerHTML = chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"
+      aria-label="Remove filter ${esc(c.label)}${c.removes ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join('');
+    ui.activeChips = chips;
+    ui.moreSummary.textContent = `More filters${chips.length ? ` (${chips.length} active)` : ''}`;
   }
 
   function render(rows) {

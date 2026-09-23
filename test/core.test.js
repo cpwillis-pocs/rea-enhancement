@@ -329,3 +329,16 @@ test('withScores: needs 2+ signals, explains parts, sorts best match first', () 
   const lone = core.withScores([mk('x', 700, 'Available now', -33.9)], {});
   assert.equal(lone[0].score, null, 'one signal (move-in) is not enough');
 });
+
+test('activeFilters / removedBy: labels, per-filter removal counts, amenity chips', () => {
+  const now = new Date(2026, 8, 23);
+  const L = (id, p, beds, d) => core.toRow(listing({ id, price: { display: `$${p} per week` }, generalFeatures: { bedrooms: { value: beds } }, description: d }), false);
+  const rows = [L('a', 500, 1, 'pets allowed'), L('b', 700, 2, ''), L('c', 900, 3, 'pets allowed')];
+  const cfg = { ...core.DEFAULT_CFG, priceMax: '800', bedsMin: '2', amenities: 'pets:yes' };
+  const chips = core.removedBy(rows, cfg, now);
+  assert.deepEqual(chips.map((c) => c.label), ['≤ $800/wk', '2+ bed', '+ Pets']);
+  // nothing matches all three; dropping each alone: price -> c matches (+1), beds -> a (+1), pets -> b (+1)
+  assert.deepEqual(chips.map((c) => c.removes), [1, 1, 1]);
+  assert.deepEqual(core.activeFilters({ ...core.DEFAULT_CFG, maxKm: '5' }), [], 'max km without an anchor is inactive');
+  assert.deepEqual(core.activeFilters(core.DEFAULT_CFG), []);
+});

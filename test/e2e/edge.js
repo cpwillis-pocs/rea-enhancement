@@ -361,6 +361,30 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 18. Active filter chips: counts, click to remove, summary count; Clear offers undo.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    await page.click('[data-amen=pets]');
+    const chips = await page.$$eval('.rf-achip', (e) => e.map((x) => x.textContent.trim()));
+    assert.equal(chips.length, 2);
+    assert.match(chips[0], /3\+ bed −\d+ ×/);
+    assert.match(await page.textContent('#rf-more summary'), /2 active/);
+    const before = await page.$$eval('.rf-item', (e) => e.length);
+    await page.click('.rf-achip >> nth=0');
+    assert.equal(await page.inputValue('#rf-bedsMin'), '');
+    assert.ok(await page.$$eval('.rf-item', (e) => e.length) > before, 'removing a chip widens results');
+    await page.click('.rf-clear');
+    assert.equal(await page.$eval('.rf-active', (b) => b.hidden), true);
+    await page.click('.rf-status .rf-undo');
+    assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: required', 'undo restores filters');
+    console.log('active filter chips + clear undo: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
