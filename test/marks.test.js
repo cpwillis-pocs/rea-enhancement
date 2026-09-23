@@ -313,3 +313,28 @@ test('marksStore: bulk undo restores only the bulk-touched listings (keeps anoth
   B.decorate(bulk);
   assert.deepEqual(bulk.map((r) => r.hidden), [false, false]);
 });
+
+test('marksStore: availability date changes (not just time passing)', () => {
+  let t = new Date(2026, 8, 23, 10).getTime();
+  const st = core.marksStore(mem(), () => t);
+  const at = (d) => Object.assign(row('146500009'), { avail: new Date(2026, 9, d) });
+  st.observe([at(5)]);
+  const r = [at(12)];
+  st.observe(r); st.decorate(r);
+  assert.equal(r[0].prevAvail, '5 Oct');
+  assert.equal(r[0].availDir, 'later');
+  // The date arriving (available "now") is not a change.
+  const st2 = core.marksStore(mem(), () => t);
+  st2.observe([at(5)]);
+  t = new Date(2026, 9, 6, 10).getTime();
+  const now = [Object.assign(row('146500009'), { avail: new Date(t) })];
+  st2.observe(now); st2.decorate(now);
+  assert.equal(now[0].prevAvail, '');
+  // Brought forward to now before the date: sooner.
+  const st3 = core.marksStore(mem(), () => t);
+  st3.observe([at(20)]);
+  const sooner = [Object.assign(row('146500009'), { avail: new Date(t) })];
+  st3.observe(sooner); st3.decorate(sooner);
+  assert.equal(sooner[0].prevAvail, '20 Oct');
+  assert.equal(sooner[0].availDir, 'sooner');
+});

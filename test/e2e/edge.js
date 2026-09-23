@@ -669,6 +669,26 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24d. Availability date change: a stored earlier date shows "was <date>" in the drawer and on the card.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const id = await page.evaluate(() => {
+      const it = [...document.querySelectorAll('.rf-item')].find((x) => /\d{4}/.test(x.querySelector('.rf-avail').textContent));
+      const key = 'rea-avail-filter/marks/v1';
+      const d = JSON.parse(localStorage.getItem(key));
+      d.m[it.dataset.id].av -= 3; // pretend it used to be available 3 days earlier
+      localStorage.setItem(key, JSON.stringify(d));
+      return it.dataset.id;
+    });
+    await page.click('#rf-refresh'); await waitStatus(page, /listings match/);
+    await page.waitForSelector(`.rf-item[data-id="${id}"] .rf-avail .rf-was.up`);
+    await page.waitForFunction(() => [...document.querySelectorAll('.rf-badge span')].some((b) => /^Avail was /.test(b.textContent)), null, { timeout: 5000 });
+    console.log('availability change: ok,', await page.textContent(`.rf-item[data-id="${id}"] .rf-avail`));
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

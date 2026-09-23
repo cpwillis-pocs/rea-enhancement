@@ -184,6 +184,7 @@
     inspections: cleanInspections(d.in), bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
+  const dayNum = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS; // local calendar day, DST-proof
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
@@ -234,6 +235,14 @@
             e.p = r.priceNum;
             e.ps = r.price;
           }
+          // Availability date as a day number (0 = available now). Moving to "now" once the old
+          // date has arrived is just time passing, not a change.
+          if (r.avail instanceof Date && !isNaN(r.avail)) {
+            const today = dayNum(new Date(t)), day = dayNum(r.avail);
+            const av = day <= today ? 0 : day;
+            if (e.av != null && e.av !== av && !(av === 0 && e.av <= today)) { e.pav = e.av; e.avt = t; }
+            e.av = av;
+          }
           // Same address under a new id = relisted: remember which listing it replaces.
           const ak = addressKey(r.address);
           if (ak) {
@@ -267,6 +276,9 @@
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
           r.prevPrice = e && e.pp != null && e.pp !== e.p && e.pt && t - e.pt < PRICE_CHANGE_MS ? e.pps || `$${e.pp}` : '';
           r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
+          const availMoved = e && e.pav != null && e.avt && t - e.avt < PRICE_CHANGE_MS && e.pav !== e.av;
+          r.prevAvail = availMoved ? (e.pav === 0 ? 'now' : new Date(e.pav * DAY_MS).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' })) : '';
+          r.availDir = availMoved ? ((e.av || 0) > (e.pav || 0) ? 'later' : 'sooner') : '';
         }
         return rows;
       },
@@ -1375,7 +1387,7 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2773,7 +2785,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(Date.now() - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(Date.now() - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
@@ -3014,9 +3026,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const star = r.starred ? `<span class="rf-b-star"${r.note ? ` title="${esc(r.note)}"` : ''}>★ ${r.appStatus ? esc(r.appStatus[0].toUpperCase() + r.appStatus.slice(1)) : 'Shortlisted'}${r.note ? ' ✎' : ''}</span>` : '';
     const fresh = isFresh(r) ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${priceDir(r)}">Was ${esc(r.prevPrice)}</span>` : '';
+    const availMoved = r.prevAvail ? `<span title="Availability date changed">Avail was ${esc(r.prevAvail)}</span>` : '';
     const pets = r.amen?.pets === 'yes' ? '<span class="rf-b-pets">Pets OK</span>' : '';
     const km = r.km != null ? `<span>${esc(kmLabel(r).replace(' away', ''))}</span>` : '';
-    return star + fresh + avail + moved + pets + km + insp + ppb;
+    return star + fresh + avail + availMoved + moved + pets + km + insp + ppb;
   };
 
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
