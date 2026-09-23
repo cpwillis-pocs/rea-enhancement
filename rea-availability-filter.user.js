@@ -4,7 +4,7 @@
 // @version      2.0.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
-// @match        https://www.realestate.com.au/rent/*
+// @match        https://www.realestate.com.au/*
 // @run-at       document-idle
 // @grant        none
 // @noframes
@@ -20,6 +20,9 @@
  * REA's markup uses obfuscated classes and React re-renders, so the script renders its
  * own drawer and only touches REA's DOM append-only: one badge per <article> result
  * card plus data-rf-* attributes, re-applied idempotently by a MutationObserver.
+ *
+ * Loads on every REA page because REA can reach /rent/ via client-side navigation;
+ * the UI only activates on /rent/ search pages.
  *
  * Console: reaFilter.probe() lists which listing fields exist in live data.
  */
@@ -162,6 +165,7 @@
 
   // Identity of a search regardless of which page / view is showing.
   const searchKey = (href) => pageUrl(href, 1);
+  const isSearchPage = (href) => /^\/rent\/[^/]/.test(new URL(href).pathname);
   const pageNum = (href) => +(new URL(href).pathname.match(/\/(?:list|map)-(\d+)/)?.[1] || 1);
 
   // Field names below are best-effort: REA's GraphQL shape is undocumented, so several
@@ -404,7 +408,7 @@
   // Node test harness: expose pure functions, skip all DOM work.
   if (typeof window === 'undefined') {
     module.exports = {
-      parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
+      parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
       fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
@@ -417,6 +421,7 @@
     background:#0b7;color:#fff;font:600 13px/1 system-ui,-apple-system,sans-serif;cursor:pointer;
     box-shadow:0 4px 16px rgba(0,0,0,.28)}
   #rf-launch:hover{background:#0a6}
+  #rf-launch[hidden]{display:none}
   #rf-panel{position:fixed;top:0;right:0;bottom:0;width:430px;max-width:100vw;z-index:2147483001;background:#fff;
     display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.22);
     font:13px/1.45 system-ui,-apple-system,sans-serif;color:#111}
@@ -487,6 +492,7 @@
   // The document we were loaded with already holds one page of results; after SPA
   // navigation it is stale, which the key/page match in fetchAllPages guards against.
   const boot = (() => {
+    if (!isSearchPage(location.href)) return null;
     try {
       const key = searchKey(location.href), page = pageNum(location.href);
       if (window.ArgonautExchange) return { key, page, results: parseExchange(window.ArgonautExchange) };
@@ -705,6 +711,7 @@
 
   // Restore rows for the current search from the session cache, if fresh. Returns hit.
   function restore() {
+    if (!isSearchPage(location.href)) return false;
     const key = searchKey(location.href);
     const hit = store.get(key);
     if (hit) adopt(key, hit.rows, hit.truncated, `Cached ${ago(Date.now() - hit.at)}.`);
@@ -804,7 +811,7 @@
 
   // Make sure the page currently on screen has rows: session cache, boot doc, or one fetch.
   async function ensureVisiblePage() {
-    if (!cfg.annotate) return;
+    if (!cfg.annotate || !isSearchPage(location.href)) return;
     const href = location.href;
     const key = searchKey(href), n = pageNum(href);
     if (cacheKey === key && cache) return scheduleAnnotate();
@@ -823,7 +830,7 @@
 
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
   function watchNavigation() {
-    let lastKey = searchKey(location.href);
+    let lastKey = isSearchPage(location.href) ? searchKey(location.href) : null;
     const fire = () => window.dispatchEvent(new Event('rf:navigate'));
     for (const fn of ['pushState', 'replaceState']) {
       const orig = history[fn];
@@ -831,8 +838,11 @@
     }
     window.addEventListener('popstate', fire);
     window.addEventListener('rf:navigate', () => {
+      const active = isSearchPage(location.href);
+      ui.launch.hidden = !active;
+      if (!active) ui.panel.hidden = true;
       setTimeout(ensureVisiblePage, 400); // let REA render the new page first
-      const key = searchKey(location.href);
+      const key = active ? searchKey(location.href) : null;
       if (key === lastKey) return; // same search, different page/view
       lastKey = key;
       if (cacheKey === key) return;
@@ -867,6 +877,7 @@
   };
 
   build();
+  ui.launch.hidden = !isSearchPage(location.href);
   if (boot) learn(rowsOf(boot.results));
   watchNavigation();
   watchCards();

@@ -166,3 +166,10 @@ test('schemaWarnings / probe', () => {
   assert.equal(p['availableDate.display'], 'Available 12 Oct 2026');
   assert.equal(p.inspections, '(missing)');
 });
+
+test('isSearchPage', () => {
+  assert.equal(core.isSearchPage('https://www.realestate.com.au/rent/in-bondi/list-1'), true);
+  assert.equal(core.isSearchPage('https://www.realestate.com.au/rent/'), false);
+  assert.equal(core.isSearchPage('https://www.realestate.com.au/property-apartment-nsw-bondi-146500010'), false);
+  assert.equal(core.isSearchPage('https://www.realestate.com.au/'), false);
+});

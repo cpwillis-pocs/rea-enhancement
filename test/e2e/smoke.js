@@ -45,10 +45,18 @@ const html = (n) => {
   await page.route('**/*', (route) => {
     const u = new URL(route.request().url());
     if (u.origin !== ORIGIN) return route.fulfill({ status: 204, body: '' });
+    if (!u.pathname.startsWith('/rent/')) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body><main>home</main></body></html>' });
     const n = +(u.pathname.match(/list-(\d+)/)?.[1] || 1);
     hits.push(n);
     return route.fulfill({ status: 200, contentType: 'text/html', body: html(n) });
   });
+  // Enter via the homepage: script loads there dormant, then activates on SPA nav to /rent/.
+  await page.goto(`${ORIGIN}/`);
+  await page.addScriptTag({ content: SCRIPT });
+  assert.equal(await page.$eval('#rf-launch', (b) => b.hidden), true, 'launcher hidden off /rent/');
+  await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
+  assert.equal(await page.$eval('#rf-launch', (b) => b.hidden), false, 'launcher shown after SPA nav');
+
   await page.goto(SEARCH);
   await page.addScriptTag({ content: SCRIPT });
 
