@@ -212,3 +212,14 @@ test('applyFilters: dedupe keeps exact copy over surrounding', () => {
   assert.equal(core.applyFilters([near, exact], { exactOnly: true }).length, 1);
   assert.equal(core.applyFilters([near, exact], {})[0].surrounding, false);
 });
+
+test('applyFilters: withinDays is relative to now and tightens "to"', () => {
+  const now = new Date(2026, 8, 23);
+  const L = (id, d) => core.toRow(listing({ id, availableDate: { display: d } }), false);
+  const rows = [L('a', 'Available 30 Sep 2026'), L('b', 'Available 12 Oct 2026'), L('c', 'Available 30 Nov 2026'), L('d', 'Contact agent')];
+  const ids = (cfg) => core.applyFilters(rows, cfg, now).map((r) => r.url.split('-').pop());
+  assert.deepEqual(ids({ withinDays: '14' }), ['a']);
+  assert.deepEqual(ids({ withinDays: '28' }), ['a', 'b']);
+  assert.deepEqual(ids({ withinDays: '84', to: '2026-10-01' }), ['a'], 'explicit earlier "to" wins');
+  assert.deepEqual(ids({ withinDays: '' }), ['a', 'b', 'c', 'd']);
+});

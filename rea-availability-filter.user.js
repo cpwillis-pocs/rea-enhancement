@@ -415,7 +415,7 @@
   // --------------------------------------------------------------- filter
 
   const DEFAULT_CFG = {
-    from: '', to: '', exactOnly: false,
+    from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
@@ -449,10 +449,17 @@
   // Undated listings ("Contact agent") can't satisfy a date bound, but are kept
   // (sorted last) when no bound is set so an empty filter never hides data.
   // Numeric minimums treat unknown values as failing; maximums likewise.
-  function applyFilters(rows, cfg) {
+  function applyFilters(rows, cfg, now = new Date()) {
     cfg = { ...DEFAULT_CFG, ...cfg };
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
-    const to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
+    let to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
+    // Rolling window ("within 4 weeks") tightens the upper bound relative to today, so a
+    // saved setting never goes stale the way a fixed date does.
+    const within = num(cfg.withinDays);
+    if (within != null) {
+      const w = new Date(now); w.setHours(23, 59, 59, 0); w.setDate(w.getDate() + within);
+      if (!to || w < to) to = w;
+    }
     const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax);
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
@@ -573,7 +580,7 @@
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
   .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;gap:10px;max-height:60vh;overflow-y:auto}
-  .rf-dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .rf-dates{display:grid;grid-template-columns:1fr 1fr .8fr;gap:10px}
   .rf-controls label{display:grid;gap:4px;font-size:11px;font-weight:600;text-transform:uppercase;
     letter-spacing:.04em;color:var(--rf-muted)}
   .rf-controls input:not([type=checkbox]),.rf-controls select{padding:7px 8px;border:1px solid var(--rf-input);border-radius:6px;
@@ -639,7 +646,8 @@
   .rf-badge .rf-b-new{background:#2563eb}
   .rf-badge .rf-b-down{background:#0a6}
   .rf-badge .rf-b-up{background:#c60}
-  @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)} }
+  @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
+    .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} }
   `;
 
   let cfg = { ...DEFAULT_CFG, ...loadCfg() };
@@ -693,6 +701,10 @@
         <div class="rf-dates">
           <label>Available from<input type="date" id="rf-from"></label>
           <label>Available to<input type="date" id="rf-to"></label>
+          <label>Within<select id="rf-withinDays">
+            <option value="">Any time</option><option value="14">2 weeks</option><option value="28">4 weeks</option>
+            <option value="56">8 weeks</option><option value="84">12 weeks</option>
+          </select></label>
         </div>
         <details class="rf-more" id="rf-more">
           <summary>More filters</summary>
@@ -1033,7 +1045,7 @@
     return star + fresh + avail + moved + insp + ppb;
   };
 
-  const filtersActive = () => ['from', 'to', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
+  const filtersActive = () => ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
     .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly || cfg.onlyStarred;
 
   // Match set only changes with cfg or known rows; mutation bursts reuse it.
