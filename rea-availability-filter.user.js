@@ -55,13 +55,26 @@
   const ROWS_KEEP = 2; // searches kept in sessionStorage
   const MARKS_KEY = 'rea-avail-filter/marks/v1';
   const MARKS_MAX = 5000;
-  const MARKS_TTL_MS = 90 * 864e5; // unstarred, unhidden listings forgotten after 90 days unseen
-  const PRICE_CHANGE_MS = 14 * 864e5; // "was $X" shown for two weeks after a change
-  const NEW_MS = 48 * 36e5; // a listing REA dates within 48h counts as new even without a baseline
+  const HOUR_MS = 36e5;
+  const DAY_MS = 864e5;
+  const MARKS_TTL_MS = 90 * DAY_MS; // unstarred, unhidden listings forgotten after 90 days unseen
+  const PRICE_CHANGE_MS = 14 * DAY_MS; // "was $X" shown for two weeks after a change
+  const NEW_MS = 48 * HOUR_MS; // a listing REA dates within 48h counts as new even without a baseline
   const ROWS_TEXT_MAX = 600;
   const SNAP_KEY = 'rea-avail-filter/snapshots/v1';
   const SNAP_MAX = 3; // searches remembered across sessions (localStorage is shared with REA)
-  const SNAP_VISIT_GAP_MS = 60 * 60 * 1000; // runs closer together than this count as one visit
+  const SNAP_VISIT_GAP_MS = HOUR_MS; // runs closer together than this count as one visit
+  const SNAP_TEXT_MAX = 300; // per-field text cap in remembered rows (sessionStorage rows: ROWS_TEXT_MAX)
+  const GONE_MAX = 200; // no-longer-listed rows kept per search
+  const IMPORT_ROWS_MAX = 1000; // rows accepted per search from a backup
+  const SEARCH_KEY_MAX = 2000; // longest search URL accepted from a backup
+  const YEARLESS_ROLL_MS = 60 * DAY_MS; // "3 Jan" more than this far in the past means next year
+  const INSPECT_GRACE_MS = HOUR_MS; // an inspection that started this recently is still shown
+  const BACKUP_MAX_BYTES = 5e6;
+  const INPUT_DEBOUNCE_MS = 200;
+  const NAV_SETTLE_MS = 400; // wait for REA to render after client-side navigation
+  const REVOKE_MS = 5000; // keep a download's object URL alive this long
+  const NARROW_MQ = '(max-width: 480px)'; // phones: drawer is full-screen (keep in sync with the CSS)
 
   // ---------------------------------------------------------------- config
 
@@ -119,7 +132,7 @@
   // Per-listing memory in localStorage, keyed by listing id: s=shortlisted (st=when),
   // h=hidden, n=note, d=summary kept for shortlisted listings so the shortlist works
   // across searches, f=first seen, l=last seen, p/ps=last weekly price and its display,
-  // pp/pps=previous.
+  // pp/pps=previous, pt=when it changed.
   const NOTE_MAX = 500;
   const INSPECT_KEEP = 3; // inspections kept per stored row
   const isListingId = (v) => /^\d{1,15}$/.test(String(v));
@@ -271,17 +284,17 @@
     'cars', 'type', 'img', 'surrounding', 'inspect'];
   const slimRow = (r) => {
     const o = {};
-    for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], 300) : r[k];
+    for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
     for (const k of ROW_DATES) o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
     o.headline = clip(r.headline, 160);
-    o.text = clip(r.text, 300);
+    o.text = clip(r.text, SNAP_TEXT_MAX);
     o.inspections = cleanInspections(r.inspections);
     return o;
   };
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
   const fatRow = (o) => {
     const r = {};
-    for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], 300) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
+    for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], SNAP_TEXT_MAX) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
     for (const k of ROW_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
     r.url = safeUrl(r.url);
     r.img = safeUrl(r.img);
@@ -290,11 +303,11 @@
     r.ppb = typeof o?.ppb === 'number' ? o.ppb : perBed(r.priceNum, r.beds);
     r.surrounding = !!o?.surrounding;
     r.headline = clip(o?.headline, 160);
-    r.text = clip(o?.text, 300).toLowerCase();
+    r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
     r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
     return r;
   };
-  const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < 2000;
+  const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < SEARCH_KEY_MAX;
 
   const snapshotStore = (storage, now = () => Date.now()) => {
     const load = () => {
@@ -352,7 +365,7 @@
             for (const r of prev.rows || []) if (!cur.has(String(r.id)) && base.has(String(r.id)) && !seen.has(String(r.id))) gone.push(r);
           }
         }
-        d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, 200) };
+        d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX) };
         persist(d);
         return view(d.s[key]);
       },
@@ -367,11 +380,11 @@
         for (const [k, e] of Object.entries(src)) {
           if (!isSearchKey(k) || !e || typeof e !== 'object' || typeof e.at !== 'number') continue;
           if (d.s[k] && d.s[k].at >= e.at) continue; // keep the newer copy
-          const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, 1000).map(fatRow).filter((r) => r.url);
+          const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, IMPORT_ROWS_MAX).map(fatRow).filter((r) => r.url);
           d.s[k] = {
             at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
             ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
-            gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, 200).map(fatRow).filter((r) => r.url).map(slimRow),
+            gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
           };
           n++;
         }
@@ -418,7 +431,7 @@
       if (month < 0) continue;
       let year = yr ? +yr : today.getFullYear();
       let d = new Date(year, month, +day);
-      if (!yr && today - d > 60 * 864e5) d = new Date(++year, month, +day);
+      if (!yr && today - d > YEARLESS_ROLL_MS) d = new Date(++year, month, +day);
       if (d.getDate() !== +day) return null; // 31 Feb, 29 Feb in a non-leap year
       return clamp(d);
     }
@@ -494,7 +507,7 @@
   function extractInspections(listing, now = new Date()) {
     const src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
     const list = Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : [];
-    const cutoff = now.getTime() - 60 * 60 * 1000; // keep one that started <1h ago
+    const cutoff = now.getTime() - INSPECT_GRACE_MS;
     return list
       .map((it) => {
         const at = toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt);
@@ -511,7 +524,9 @@
   const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
 
   // One malformed listing must not sink a page: rows that throw are dropped.
-  const safeRow = (listing, surrounding) => { try { return toRow(listing, surrounding); } catch { return null; } };
+  const safeRow = (listing, surrounding) => {
+    try { return toRow(listing, surrounding); } catch (e) { console.debug?.('[reaFilter] listing skipped:', e); return null; }
+  };
   // REA drift guard: `items` that isn't an array reads as empty rather than throwing.
   const itemsOf = (block) => (Array.isArray(block?.items) ? block.items : []);
   const sampleOf = (results) => itemsOf(results?.exact).find((i) => i?.listing)?.listing ?? null;
@@ -562,7 +577,8 @@
     const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
-  // Per-request timeout combined with the caller's cancel signal (AbortSignal.any: Chrome 116+).
+  // Per-request timeout combined with the caller's cancel signal. Without AbortSignal.any
+  // (Chrome < 116) a caller signal wins and the timeout is dropped.
   const withTimeout = (signal, ms) => {
     const t = AbortSignal.timeout?.(ms);
     if (!t) return signal;
@@ -636,6 +652,14 @@
   const sanitizeCfg = (c) => (c && typeof c === 'object'
     ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k]).map((k) => [k, c[k]]))
     : {});
+
+  // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
+  // are display preferences that Clear keeps (DISPLAY_PREFS).
+  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly'];
+  const MORE_KEYS = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
+    'onlyStarred', 'showHidden', 'newOnly', 'showGone'];
+  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember'];
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -806,7 +830,7 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    setTimeout(() => URL.revokeObjectURL(a.href), REVOKE_MS);
   }
   const stamp = () => ymdLocal(new Date());
   // BOM so Excel opens UTF-8 (en dashes, accented suburbs) correctly.
@@ -926,6 +950,11 @@
     .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:40vh} }
   `;
 
+  const EMPTY_INTRO = 'Set your dates, then search.<br>Every result page is merged and sorted by availability.';
+  const setEmpty = (html) => { ui.list.innerHTML = `<div class="rf-empty">${html}</div>`; };
+  const setLaunchCount = (n) => { ui.launch.textContent = n == null ? 'Availability filter' : `Availability filter (${n})`; };
+  const currentKey = () => (isSearchPage(location.href) ? searchKey(location.href) : null);
+
   let cfg = { ...DEFAULT_CFG, ...loadCfg() };
   let cache = null; // raw rows for the current search URL
   let cacheKey = null; // searchKey() of the cached rows
@@ -1043,7 +1072,7 @@
         </div>
       </div>
       <div class="rf-status" role="status" aria-live="polite"></div>
-      <div class="rf-list"><div class="rf-empty">Set your dates, then search.<br>Every result page is merged and sorted by availability.</div></div>`;
+      <div class="rf-list"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
 
     document.body.append(launch, panel);
 
@@ -1073,11 +1102,10 @@
     ui.type = panel.querySelector('#rf-type');
     ui.annotateBox = panel.querySelector('#rf-annotate');
     ui.more = panel.querySelector('#rf-more');
-    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn', 'onlyStarred', 'showHidden', 'newOnly', 'showGone']
-      .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
+    ui.more.open = MORE_KEYS.some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
     // Full-screen on phones, so modal there (focus trapped); a side drawer on desktop.
-    const narrow = window.matchMedia('(max-width: 480px)');
+    const narrow = window.matchMedia(NARROW_MQ);
     const setOpen = (open) => {
       panel.hidden = !open;
       launch.setAttribute('aria-expanded', String(open));
@@ -1098,8 +1126,7 @@
     });
     panel.querySelector('.rf-clear').addEventListener('click', () => {
       // Resets filters only; display preferences (sort, annotate, dim) are kept.
-      const keep = { sort: cfg.sort, annotate: cfg.annotate, dimCards: cfg.dimCards };
-      for (const [k, el] of fields) write(el, k in keep ? keep[k] : DEFAULT_CFG[k]);
+      for (const [k, el] of fields) write(el, DISPLAY_PREFS.includes(k) ? cfg[k] : DEFAULT_CFG[k]);
       onChange();
     });
 
@@ -1128,7 +1155,7 @@
       scheduleAnnotate();
       if (e?.target === ui.annotateBox && cfg.annotate) ensureVisiblePage();
       if (!cache) return;
-      if (e?.type === 'input') t = setTimeout(() => { t = null; showResults(); }, 200); // debounce typing
+      if (e?.type === 'input') t = setTimeout(() => { t = null; showResults(); }, INPUT_DEBOUNCE_MS); // debounce typing
       else showResults(); // re-filter without refetching
     };
     for (const [, el] of fields) {
@@ -1167,7 +1194,7 @@
       ui.slFile.value = '';
       if (!f) return;
       try {
-        if (f.size > 5e6) throw new Error('File too large for a backup.');
+        if (f.size > BACKUP_MAX_BYTES) throw new Error('File too large for a backup.');
         let data;
         try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
         const n = marks.importJson(data);
@@ -1215,7 +1242,7 @@
     ui.panel.querySelector('.rf-clear').hidden = sl; // filters don't apply to the shortlist
     if (sl) renderShortlist();
     else if (cache) showResults();
-    else { ui.list.innerHTML = '<div class="rf-empty">Set your dates, then search.<br>Every result page is merged and sorted by availability.</div>'; setStatus(''); setExport(true); }
+    else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
   }
 
   function renderShortlist() {
@@ -1310,11 +1337,8 @@
   function render(rows) {
     ui.rows = rows; // first: renderMore()/refreshMarks() read it even when the list is empty
     setExport(rows.length === 0);
-    ui.launch.textContent = `Availability filter (${rows.length})`;
-    if (!rows.length) {
-      ui.list.innerHTML = '<div class="rf-empty">Nothing matches those filters.</div>';
-      return;
-    }
+    setLaunchCount(rows.length);
+    if (!rows.length) return setEmpty('Nothing matches those filters.');
     ui.list.innerHTML = itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     ui.list.scrollTop = 0;
   }
@@ -1366,8 +1390,8 @@
     ui.type.value = cfg.type;
   }
 
-  function adopt(key, rows, trunc, note, snap = null, fresh = false) {
-    learn(rows, fresh);
+  function adopt(key, rows, trunc, note, snap = null, observe = false) {
+    learn(rows, observe);
     scheduleAnnotate();
     fillTypes(rows);
     cache = rows;
@@ -1444,9 +1468,9 @@
       if (id !== runId || ctrl.signal.aborted) return;
       cache = null;
       cacheKey = null;
-      ui.launch.textContent = 'Availability filter';
+      setLaunchCount(null);
       setStatus(err.message, true);
-      if (ui.view !== 'shortlist') ui.list.innerHTML = '<div class="rf-empty">Search failed.</div>';
+      if (ui.view !== 'shortlist') setEmpty('Search failed.');
     } finally {
       if (id === runId) setBusy(false);
       if (runCtrl === ctrl) runCtrl = null;
@@ -1458,7 +1482,7 @@
   // React-owned nodes) and idempotent, so the MutationObserver can't feed back on itself.
 
   const known = new Map(); // listing id -> row, from any source
-  // pageUrl -> { at, p: Promise<results> }; shared by annotation and full searches so a
+  // pageUrl -> { at, p: Promise<results>, signal }; shared by annotation and full searches so a
   // page is fetched once per ROWS_TTL_MS. Failures are evicted so they can be retried.
   const pageMemo = new Map();
   const getPage = (url, opts) => {
@@ -1496,8 +1520,7 @@
     return star + fresh + avail + moved + insp + ppb;
   };
 
-  const filtersActive = () => ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
-    .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly || cfg.onlyStarred || cfg.newOnly;
+  const filtersActive = () => FILTER_KEYS.some((k) => cfg[k]);
 
   // Match set only changes with cfg or known rows; mutation bursts reuse it.
   let matchMemo = { sig: null, set: null };
@@ -1576,7 +1599,7 @@
     const key = searchKey(href), n = pageNum(href);
     if (cacheKey === key && cache) return scheduleAnnotate();
     if (boot && boot.key === key && boot.page === n && Date.now() - bootAt < ROWS_TTL_MS) return scheduleAnnotate();
-    try { learn(rowsFrom(await getPage(pageUrl(href, n)))); } catch { return; }
+    try { learn(rowsFrom(await getPage(pageUrl(href, n)))); } catch (e) { console.debug?.('[reaFilter] annotate fetch failed:', e); return; }
     if (location.href === href) scheduleAnnotate();
   }
 
@@ -1593,7 +1616,7 @@
 
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
   function watchNavigation() {
-    let lastKey = isSearchPage(location.href) ? searchKey(location.href) : null;
+    let lastKey = currentKey();
     const fire = () => window.dispatchEvent(new Event('rf:navigate'));
     for (const fn of ['pushState', 'replaceState']) {
       const orig = history[fn];
@@ -1604,8 +1627,8 @@
       const active = isSearchPage(location.href);
       ui.launch.hidden = !active;
       if (!active) ui.setOpen(false);
-      setTimeout(ensureVisiblePage, 400); // let REA render the new page first
-      const key = active ? searchKey(location.href) : null;
+      setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
+      const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
       lastKey = key;
       if (cacheKey && cacheKey === key) return;
@@ -1619,9 +1642,9 @@
       ui.refresh.hidden = true;
       setExport(true);
       if (restore() || !hadState) return;
-      ui.launch.textContent = 'Availability filter';
+      setLaunchCount(null);
       if (ui.view === 'shortlist') return; // shortlist is search-independent
-      ui.list.innerHTML = '<div class="rf-empty">Search changed.</div>';
+      setEmpty('Search changed.');
       setStatus('Search changed - run again to refresh.');
     });
   }
