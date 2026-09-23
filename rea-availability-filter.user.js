@@ -184,6 +184,7 @@
     inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
+  const YEARLESS_SKIP_DAYS = 300; // a jump this far out from "now" is a yearless date rolling over
   const dayNum = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS; // local calendar day, DST-proof
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
@@ -240,8 +241,10 @@
           if (r.avail instanceof Date && !isNaN(r.avail)) {
             const today = dayNum(new Date(t)), day = dayNum(r.avail);
             const av = day <= today ? 0 : day;
-            if (e.av != null && e.av !== av && !(av === 0 && e.av <= today)) { e.pav = e.av; e.avt = t; }
-            e.av = av;
+            // A yearless date ("20th Jul") that has passed rolls into next year: not a change either.
+            const rolled = e.av === 0 && av - today > YEARLESS_SKIP_DAYS;
+            if (e.av != null && e.av !== av && !(av === 0 && e.av <= today) && !rolled) { e.pav = e.av; e.avt = t; e.avd = av > (e.av || today) ? 'later' : 'sooner'; }
+            if (!rolled) e.av = av;
           }
           // Same address under a new id = relisted: remember which listing it replaces.
           const ak = addressKey(r.address);
@@ -278,7 +281,7 @@
           r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
           const availMoved = e && e.pav != null && e.avt && t - e.avt < PRICE_CHANGE_MS && e.pav !== e.av;
           r.prevAvail = availMoved ? (e.pav === 0 ? 'now' : new Date(e.pav * DAY_MS).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' })) : '';
-          r.availDir = availMoved ? ((e.av || 0) > (e.pav || 0) ? 'later' : 'sooner') : '';
+          r.availDir = availMoved ? e.avd || ((e.av || 0) > (e.pav || 0) ? 'later' : 'sooner') : '';
         }
         return rows;
       },
@@ -321,7 +324,10 @@
         return Object.entries(m).filter(([, e]) => e.s && e.d?.u)
           .sort(([, a], [, b]) => (b.st || 0) - (a.st || 0))
           .map(([id, e]) => {
-            const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, typeof v === 'number' && !['b', 'ba', 'c', 'la', 'ln'].includes(k) ? String(v) : v]));
+            // Hand-edited or half-written summaries: text fields must be strings, numbers stay numbers.
+            const NUM = ['b', 'ba', 'c', 'la', 'ln'], KEEP = ['in', 'am'];
+            const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, KEEP.includes(k) ? v
+              : NUM.includes(k) ? (typeof v === 'number' || typeof v === 'string' ? v : '') : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '']));
             const priceNum = parsePrice(clip(d.p, 80));
             return {
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
@@ -2654,9 +2660,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       // Aborted by navigation or opting out: whoever aborted has already said why.
       if (!ctrl.signal.aborted && err?.name !== 'AbortError') { setStatus(`Check failed: ${err.message}`, true); logError(`saved: ${err.message}`); }
     } finally {
-      setBusy(false);
+      if (runCtrl === ctrl) { runCtrl = null; setBusy(false); } // a search that took over owns busy now
       btn.removeAttribute('aria-disabled');
-      if (runCtrl === ctrl) runCtrl = null;
       if (ui.savedCtrl === ctrl) ui.savedCtrl = null;
       renderSaved();
     }
@@ -3136,12 +3141,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (ex) return safeRow(ex, false);
     }
     const l = ex ? findListing(unpackJson(ex), id) : null;
-    return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: document.title.split(/\s[-|]\s/)[0] || 'This listing', price: '', inspections: [] };
+    return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: '', price: '', inspections: [], partial: true };
   }
-  function renderListingBar() {
+  function renderListingBar({ onlyIfMoved = false } = {}) {
     let bar = document.getElementById('rf-lbar');
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
     if (!id) { bar?.remove(); return; }
+    if (onlyIfMoved && bar?.dataset.id === id) return; // same listing (eg a gallery ?query): keep focus
+    const focusKey = bar?.contains(document.activeElement) ? document.activeElement.dataset.l : null;
     if (!bar) {
       bar = Object.assign(document.createElement('div'), { id: 'rf-lbar' });
       bar.setAttribute('role', 'region');
@@ -3150,7 +3157,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       bar.addEventListener('click', onListingBar);
       bar.addEventListener('change', onListingBar);
     }
-    const r = listingPageRow(id);
+    const r = bar._row?.id === id ? bar._row : listingPageRow(id);
     marks.decorate([r]);
     bar.dataset.id = id;
     bar._row = r;
@@ -3161,6 +3168,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
       <button type="button" data-l="h" aria-pressed="${r.hidden}">${r.hidden ? 'Unhide' : 'Hide'}</button>
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
+    if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
+    // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
+    if (r.partial && !bar._fetching) {
+      bar._fetching = id;
+      fetch(location.href, { credentials: 'include', signal: withTimeout(null, FETCH_TIMEOUT_MS) }).then((res) => (res.ok ? res.text() : ''))
+        .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
+        .catch(() => {}).finally(() => { bar._fetching = null; });
+    }
   }
   function onListingBar(e) {
     const bar = e.currentTarget, id = bar.dataset.id, r = bar._row;
@@ -3397,8 +3412,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     step('restore', restore);
     step('listing bar', () => {
       renderListingBar();
-      window.addEventListener('rf:navigate', () => setTimeout(renderListingBar, NAV_SETTLE_MS));
-      window.addEventListener('storage', (e) => { if (e.key === MARKS_KEY && document.getElementById('rf-lbar')) renderListingBar(); });
+      window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
+      window.addEventListener('storage', (e) => { if ((e.key === MARKS_KEY || e.key === null) && document.getElementById('rf-lbar')) { marks.invalidate(); renderListingBar(); } });
     });
     step('saved', renderSaved);
     step('annotate', ensureVisiblePage);

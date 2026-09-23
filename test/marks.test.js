@@ -338,3 +338,32 @@ test('marksStore: availability date changes (not just time passing)', () => {
   assert.equal(sooner[0].prevAvail, '20 Oct');
   assert.equal(sooner[0].availDir, 'sooner');
 });
+
+test('marksStore: yearless rollover is not a change; direction fixed when recorded', () => {
+  let t = new Date(2026, 8, 18, 10).getTime();
+  const st = core.marksStore(mem(), () => t);
+  const withAvail = (d) => Object.assign(row('146500010'), { avail: d });
+  st.observe([withAvail(new Date(2026, 6, 20))]); // past: stored as now
+  t = new Date(2026, 8, 20, 10).getTime();
+  const rolled = [withAvail(new Date(2027, 6, 20))];
+  st.observe(rolled); st.decorate(rolled);
+  assert.equal(rolled[0].prevAvail, '', 'rolled into next year');
+  // 1 Oct -> 5 Oct, then 5 Oct arrives: still "later".
+  t = new Date(2026, 8, 25, 10).getTime();
+  const st2 = core.marksStore(mem(), () => t);
+  st2.observe([withAvail(new Date(2026, 9, 1))]);
+  st2.observe([withAvail(new Date(2026, 9, 5))]);
+  t = new Date(2026, 9, 6, 10).getTime();
+  const arrived = [withAvail(new Date(t))];
+  st2.observe(arrived); st2.decorate(arrived);
+  assert.equal(arrived[0].availDir, 'later');
+});
+
+test('shortlist coerces odd summary field types', () => {
+  const m = mem();
+  m.setItem('rea-avail-filter/marks/v1', JSON.stringify({ c: 1, m: { 146500001: { s: 1, f: 1, l: 1, d: { u: 'https://www.realestate.com.au/p-146500001', v: true, a: {}, p: ['x'], b: {} } } } }));
+  const r = core.marksStore(m).shortlist()[0];
+  assert.equal(r.address, '');
+  assert.equal(r.available, '-');
+  assert.equal(r.beds, '');
+});

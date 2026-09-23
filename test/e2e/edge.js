@@ -737,6 +737,17 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500101']);
     assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
+    await page.focus('#rf-lbar [data-l=h]');
+    await page.evaluate(() => history.replaceState({}, '', location.pathname + '?gallery=1'));
+    await page.waitForTimeout(600);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.l), 'h', 'focus kept on replaceState');
+    // In-app move to another listing: its own page is read for the summary.
+    await page.evaluate(() => history.pushState({}, '', '/property-house-nsw-bondi-146500102'));
+    await page.waitForFunction(() => document.getElementById('rf-lbar')?.dataset.id === '146500102', null, { timeout: 3000 });
+    await page.waitForFunction(() => document.getElementById('rf-lbar')._row && !document.getElementById('rf-lbar')._row.partial, null, { timeout: 5000 });
+    await page.click('#rf-lbar [data-l=s]');
+    const second = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500102'].d);
+    assert.match(second.p, /\$999/); assert.match(second.u, /146500102/, 'summary is this listing');
     // Shows up on the Shortlist tab of a search.
     await page.goto(SEARCH); await page.addScriptTag({ content: SCRIPT });
     assert.equal(await page.$('#rf-lbar'), null, 'bar only on listing pages');
