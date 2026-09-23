@@ -621,6 +621,31 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24c. Saved searches: remembered searches listed; Check all fetches each and counts new.
+  {
+    const ctx = await browser.newContext();
+    const other = 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1';
+    await ctx.addInitScript((k) => {
+      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: Date.now() - 864e5 * 2, ids: [], rows: [], gone: [] } } }));
+    }, other);
+    const page = await open(ctx);
+    await page.click('#rf-launch');
+    assert.ok(await page.isVisible('.rf-saved'), 'saved searches shown');
+    assert.match(await page.textContent('.rf-saved-list'), /Manly NSW 2095/);
+    await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.waitForFunction(() => document.querySelectorAll('.rf-saved-list li').length === 2);
+    assert.match(await page.textContent('.rf-saved-list'), /this search/);
+    await page.click('.rf-saved summary');
+    await page.click('[data-saved-check]');
+    await waitStatus(page, /Checked 2 saved searches/, 30000);
+    const st = await status(page);
+    assert.match(st, /Manly NSW 2095: [1-9]\d* new/, 'all listings new for the empty snapshot');
+    assert.match(st, /Bondi[^:]*: 0 new/, 'current search unchanged');
+    assert.match(await page.textContent('.rf-saved-list'), /\d+ new/);
+    console.log('saved searches: ok,', st.slice(0, 90));
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

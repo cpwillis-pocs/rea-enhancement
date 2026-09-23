@@ -452,3 +452,10 @@ test('marketStats: per-bed quantiles, week buckets, studio and 5+ groups', () =>
   assert.equal(w.at(-1).n, 1, 'unknown');
   assert.equal(m.median, 540);
 });
+
+test('searchLabel: places and property filters from a search URL', () => {
+  assert.equal(core.searchLabel('https://www.realestate.com.au/rent/in-bondi,+nsw+2026/list-1'), 'Bondi NSW 2026');
+  assert.equal(core.searchLabel('https://www.realestate.com.au/rent/property-house-with-2-bedrooms-in-bondi,+nsw+2026%3b+manly,+nsw+2095/list-1'),
+    'Bondi NSW 2026, Manly NSW 2095 · house, 2 bedrooms');
+  assert.equal(core.searchLabel('not a url'), 'not a url');
+});

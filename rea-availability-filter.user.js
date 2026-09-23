@@ -473,6 +473,18 @@
   };
   const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < SEARCH_KEY_MAX;
 
+  // "property-house-with-2-bedrooms-in-bondi,+nsw+2026;+manly,+nsw+2095" -> "Bondi NSW 2026, Manly NSW 2095 · house, 2 bedrooms"
+  const searchLabel = (key) => {
+    let seg = '';
+    try { seg = decodeURIComponent(new URL(key).pathname.split('/')[2] || '').replace(/\+/g, ' '); } catch { return String(key); }
+    const m = seg.match(/^(?:(.*?)-)?in-(.+)$/);
+    const title = (w) => w.replace(/\b([a-z])([a-z]*)\b/g, (x, a, b) => (/^(nsw|act|vic|tas|qld|sa|wa|nt)$/.test(x) ? x.toUpperCase() : a.toUpperCase() + b));
+    if (!m) return title(seg.replace(/-/g, ' ')) || 'Search';
+    const places = m[2].split(';').map((p) => title(p.replace(/,/g, '').trim())).filter(Boolean).join(', ');
+    const what = (m[1] || '').replace(/^property-?/, '').replace(/-with-/, ', ').replace(/-/g, ' ').trim();
+    return what ? `${places} · ${what}` : places;
+  };
+
   const snapshotStore = (storage, now = () => Date.now()) => {
     const load = () => {
       try {
@@ -1572,7 +1584,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, marketStats, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, marketStats, searchLabel, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1753,6 +1765,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  .rf-saved-list{list-style:none;margin:6px 0;padding:0;display:grid;gap:6px;font-size:13px}
+  .rf-saved-list a{color:inherit;font-weight:600}
   .rf-market{padding:8px 12px;font-size:12px;min-width:0}
   .rf-market-t{overflow-x:auto;max-width:100%}
   .rf-market table{border-collapse:collapse;width:100%;margin:6px 0 12px}
@@ -1951,6 +1965,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
+        </details>
+        <details class="rf-more rf-saved" hidden>
+          <summary>Saved searches</summary>
+          <ul class="rf-saved-list"></ul>
+          <button type="button" class="rf-btn sec" data-saved-check title="Fetch each remembered search (one page at a time) and count what's new">Check all for new listings</button>
         </details>
         <div class="rf-row rf-presets">
           <select class="rf-preset" aria-label="Filter presets"></select>
@@ -2155,6 +2174,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
         snaps.clear();
         applySnap(null);
+        renderSaved();
         setStatus('Saved results cleared; results will no longer be remembered.');
       }
       clearTimeout(t);
@@ -2348,6 +2368,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       downloadIcs(rows);
     });
     ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
+    ui.saved = panel.querySelector('.rf-saved');
+    ui.savedResult = new Map();
+    ui.saved.querySelector('[data-saved-check]').addEventListener('click', (e) => checkSaved(e.currentTarget));
     ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
       const rows = shortlistRows();
       if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
@@ -2377,6 +2400,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
         presets.importData(data.presets);
         fillPresets();
+        renderSaved();
         refreshMarks();
         setStatus(`Restored ${n} listing${n === 1 ? '' : 's'}${k ? ` and ${k} saved search${k === 1 ? '' : 'es'}` : ''} from backup.`);
       } catch (err) { setStatus(err.message, true); }
@@ -2454,6 +2478,57 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       setBusy(false);
       btn.removeAttribute('aria-disabled');
       if (runCtrl === ctrl) runCtrl = null;
+    }
+  }
+
+  // Remembered searches, newest first, with what the last "Check all" found.
+  function renderSaved() {
+    const entries = cfg.remember ? Object.entries(snaps.exportData()).sort(([, a], [, b]) => b.at - a.at) : [];
+    ui.saved.hidden = !entries.length;
+    const here = currentKey();
+    ui.saved.querySelector('.rf-saved-list').innerHTML = entries.map(([k, e]) => {
+      const r = ui.savedResult.get(k);
+      const found = r ? ` · <strong>${r.added} new</strong>${r.gone ? `, ${r.gone} gone` : ''}` : '';
+      return `<li><a href="${esc(safeUrl(k))}">${esc(searchLabel(k))}</a>${k === here ? ' <span class="rf-tag">this search</span>' : ''}
+        <div class="rf-meta">${(e.ids || e.rows || []).length} listings · checked ${esc(ago(Date.now() - e.at))}${found}</div></li>`;
+    }).join('');
+  }
+
+  async function checkSaved(btn) {
+    if (busy) return;
+    const keys = Object.entries(snaps.exportData()).sort(([, a], [, b]) => b.at - a.at).map(([k]) => k);
+    if (!keys.length) return;
+    runCtrl?.abort();
+    const ctrl = runCtrl = new AbortController();
+    setBusy(true);
+    btn.setAttribute('aria-disabled', 'true');
+    const out = [];
+    try {
+      for (const [i, key] of keys.entries()) {
+        const label = searchLabel(key);
+        const before = new Set((snaps.get(key)?.rows || []).map((r) => r.id));
+        const res = await fetchAllPages(key, (m) => setStatus(`Checking ${label} (${i + 1} of ${keys.length}): ${m}`), {
+          signal: ctrl.signal, getPage: (url) => getPage(url, { signal: ctrl.signal }),
+        });
+        const ids = new Set(res.rows.map((r) => r.id));
+        const found = { added: res.rows.filter((r) => !before.has(r.id)).length, gone: [...before].filter((id) => !ids.has(id)).length };
+        store.set(key, res.rows, res.truncated);
+        const snap = snaps.save(key, res.rows, res.truncated);
+        if (key === currentKey()) adopt(key, res.rows, res.truncated, '', snap, true);
+        else learn(res.rows, true);
+        ui.savedResult.set(key, found);
+        out.push(`${label}: ${found.added} new${found.gone ? `, ${found.gone} gone` : ''}`);
+        if (i < keys.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
+      }
+      setStatus(`Checked ${keys.length} saved search${keys.length === 1 ? '' : 'es'}. ${out.join(' · ')}.`);
+    } catch (err) {
+      setStatus(ctrl.signal.aborted ? 'Check stopped.' : `Check failed: ${err.message}`, !ctrl.signal.aborted);
+      if (!ctrl.signal.aborted) logError(`saved: ${err.message}`);
+    } finally {
+      setBusy(false);
+      btn.removeAttribute('aria-disabled');
+      if (runCtrl === ctrl) runCtrl = null;
+      renderSaved();
     }
   }
 
@@ -2763,6 +2838,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   function adopt(key, rows, trunc, note, snap = null, observe = false) {
     learn(rows, observe);
+    if (snap) queueMicrotask(renderSaved);
     scheduleAnnotate();
     fillTypes(rows);
     cache = rows;
@@ -3034,6 +3110,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
       fillPresets();
+      renderSaved();
       setTimeout(() => enterSearchPresets(key), 0); // after the old search's state is cleared below
       lastKey = key;
       if (cacheKey && cacheKey === key) return;
@@ -3114,6 +3191,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
     });
     step('restore', restore);
+    step('saved', renderSaved);
     step('annotate', ensureVisiblePage);
   }
 })();
