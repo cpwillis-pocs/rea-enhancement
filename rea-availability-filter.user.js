@@ -255,7 +255,7 @@
   async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null } = {}) {
     const rows = [];
     const key = searchKey(base);
-    let page = 1, max = 1, total = 1;
+    let page = 1, max = 1, total = 1, sample = null;
     do {
       const label = `page ${page}${max > 1 ? ` of ${max}` : ''}`;
       onProgress(`Reading ${label}…`);
@@ -268,11 +268,12 @@
       max = Math.min(total, MAX_PAGES);
       for (const it of results.exact?.items || []) if (it.listing) rows.push(toRow(it.listing, false));
       for (const it of results.surrounding?.items || []) if (it.listing) rows.push(toRow(it.listing, true));
+      sample ??= results.exact?.items?.find((i) => i.listing)?.listing ?? null;
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
       if (page <= max && !seeded && !nextSeeded) await wait(jitter(PAGE_DELAY_MS));
     } while (page <= max);
-    return { rows, truncated: total > MAX_PAGES };
+    return { rows, truncated: total > MAX_PAGES, sample };
   }
 
   // --------------------------------------------------------------- filter
@@ -371,11 +372,36 @@
   const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
   const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
+  // Heuristic drift detection: parsing "worked" but the fields we depend on are gone.
+  function schemaWarnings(rows) {
+    if (!rows.length) return [];
+    const w = [];
+    const share = (f) => rows.filter(f).length / rows.length;
+    if (share((r) => r.available !== '-') === 0) w.push('no listing has availableDate.display');
+    else if (share((r) => r.avail) < 0.5 && share((r) => r.available !== '-') > 0.5) w.push('availability text found but mostly unparseable');
+    if (share((r) => r.url) === 0) w.push('no listing has _links.canonical.href');
+    if (share((r) => r.price) === 0) w.push('no listing has price.display');
+    return w;
+  }
+
+  // Paths toRow() reads, for reaFilter.probe() in the console.
+  const PROBE_PATHS = [
+    'id', 'availableDate.display', 'price.display', 'bond.display', 'address.display.fullAddress', 'address.suburb',
+    'generalFeatures.bedrooms.value', 'generalFeatures.bathrooms.value', 'generalFeatures.parkingSpaces.value',
+    'propertyType.display', 'media.mainImage.templatedUrl', '_links.canonical.href', 'title', 'headline', 'description',
+    'inspections', 'inspectionTimes', 'openHomes', 'inspectionsAndAuctions.inspections',
+    'dateListed', 'listedDate', 'listingDate', 'dateFirstListed', 'listedAt',
+  ];
+  const probe = (listing) => Object.fromEntries(PROBE_PATHS.map((p) => {
+    const v = p.split('.').reduce((o, k) => o?.[k], listing);
+    return [p, v === undefined ? '(missing)' : typeof v === 'object' ? JSON.stringify(v).slice(0, 160) : v];
+  }));
+
   // Node test harness: expose pure functions, skip all DOM work.
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
-      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, esc, safeUrl, rowStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
   }
@@ -465,6 +491,7 @@
   })();
 
   const store = rowStore(window.sessionStorage);
+  let rawSample = boot?.results?.exact?.items?.find((i) => i.listing)?.listing ?? null;
 
   function build() {
     const style = document.createElement('style');
@@ -603,6 +630,8 @@
     setStatus(`${rows.length} of ${cache.length} listings match.` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : ''));
+    const warn = schemaWarnings(cache);
+    if (warn.length) setStatus(`REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.`, true);
   }
 
   function render(rows) {
@@ -681,6 +710,7 @@
         getPage: (url) => getPage(url, { onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
+      if (res.sample) rawSample = res.sample;
       store.set(key, res.rows, res.truncated);
       adopt(key, res.rows, res.truncated);
     } catch (err) {
@@ -802,6 +832,22 @@
       setStatus('Search changed - run again to refresh.');
     });
   }
+
+  // Console helpers: reaFilter.probe() shows which listing fields exist in live data.
+  window.reaFilter = {
+    version: (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev',
+    rows: () => cache,
+    filtered: () => (cache ? applyFilters(cache, cfg) : null),
+    cfg: () => ({ ...cfg }),
+    probe: () => {
+      if (!rawSample) return 'No listing seen yet - load a results page or run a search.';
+      const out = probe(rawSample);
+      console.table(out);
+      console.log('Top-level listing keys:', Object.keys(rawSample).sort().join(', '));
+      return out;
+    },
+    raw: () => rawSample,
+  };
 
   build();
   if (boot) learn(rowsOf(boot.results));

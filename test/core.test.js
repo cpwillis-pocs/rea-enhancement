@@ -154,3 +154,15 @@ test('toCsv / toTsv: quoting, formatting, formula guard', () => {
   const tsv = core.toTsv([r]).split('\n');
   assert.equal(tsv[1].split('\t').length, tsv[0].split('\t').length);
 });
+
+test('schemaWarnings / probe', () => {
+  const ok = [core.toRow(listing(), false)];
+  assert.deepEqual(core.schemaWarnings(ok), []);
+  const drifted = [core.toRow(listing({ availableDate: undefined, _links: {} }), false)];
+  const w = core.schemaWarnings(drifted);
+  assert.ok(w.some((x) => /availableDate/.test(x)) && w.some((x) => /canonical/.test(x)));
+  assert.deepEqual(core.schemaWarnings([]), []);
+  const p = core.probe(listing());
+  assert.equal(p['availableDate.display'], 'Available 12 Oct 2026');
+  assert.equal(p.inspections, '(missing)');
+});

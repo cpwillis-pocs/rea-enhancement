@@ -110,6 +110,9 @@ const html = (n) => {
   await page.waitForFunction(() => /Cached/.test(document.querySelector('.rf-status')?.textContent || ''), null, { timeout: 5000 });
   assert.equal(hits.length, before + 1, 'only the reloaded document itself was fetched');
 
+  const probed = await page.evaluate(() => window.reaFilter.probe());
+  assert.equal(probed['availableDate.display'] !== '(missing)', true);
+
   assert.deepEqual(errors, [], 'no page errors');
   await browser.close();
   console.log('e2e smoke: ok');
