@@ -2,11 +2,17 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
-## Unreleased
+## 2.3.0
 
 - Remembers results per search between visits; Refresh tags listings new since the last visit and counts ones no longer listed (optionally shown). "New since last visit only" filter; "Newest first" falls back to first-seen time. Opt-out setting clears stored results.
 - "New" is now per search (was: first time this browser saw a listing, which tagged every listing in a newly searched suburb).
 - Backups include remembered searches.
+- Shortlist, hidden and notes stay in sync across tabs; corrupt stored data recovers.
+- Accessibility: focus kept after toggles and searches, Close returns focus, screen-reader names on icon buttons, focus trap when full-screen on phones, one announcement per search, AA-contrast accent, visible focus ring.
+- Undo after hiding a listing; action buttons always visible on touch screens; counts beside shortlist/hidden filters.
+- Fixed: first click after typing in a filter was swallowed.
+- "Was $X" expires after 14 days; status counts no longer double-count listings shown in both exact and nearby results; conflicting "from" and "within" explained.
+- Lower memory: at most 12 raw result pages cached.
 
 ## 2.2.0
 

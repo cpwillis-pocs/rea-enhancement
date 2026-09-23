@@ -42,7 +42,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Export**: CSV (opens cleanly in Excel), TSV, or copy to clipboard for Google Sheets. Includes weekly rent, $/bed, inspections, shortlist and previous price.
 
-**Dark mode and mobile width** follow your system settings.
+**Dark mode and mobile width** follow your system settings. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 
 <p><img src="docs/screenshots/drawer-dark.jpg" width="64%" alt="Dark mode"> <img src="docs/screenshots/mobile.jpg" width="24%" alt="Mobile width"></p>
 
