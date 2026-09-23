@@ -51,6 +51,15 @@ function report(script, out = path.join(__dirname, '../../coverage-e2e.txt')) {
     ...uiUncovered.map((l) => `${l}: ${lines[l - 1].trim()}`)].join('\n');
   fs.writeFileSync(out, text + '\n');
   console.log(text.split('\n')[0], `-> ${path.relative(process.cwd(), out)}`);
+  // COVERAGE_MIN=99.5 fails the run when UI line coverage drops below it (CI sets it on the last file).
+  const pct = uiTotal ? ((uiTotal - uiUncovered.length) / uiTotal) * 100 : 100;
+  const min = +process.env.COVERAGE_MIN;
+  if (process.env.GITHUB_STEP_SUMMARY && process.env.COVERAGE_APPEND) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### UI line coverage: ${pct.toFixed(2)}%\n\n${uiTotal - uiUncovered.length} of ${uiTotal} executable lines` +
+      `${min ? ` (minimum ${min}%)` : ''}.\n\n${uiUncovered.length ? `<details><summary>${uiUncovered.length} uncovered</summary>\n\n\`\`\`\n${uiUncovered.map((l) => `${l}: ${lines[l - 1].trim()}`).join('\n')}\n\`\`\`\n</details>\n` : ''}`);
+  }
+  // Only the merged total (last file, COVERAGE_APPEND) is held to the minimum.
+  if (min && process.env.COVERAGE_APPEND && pct < min) { console.error(`UI line coverage ${pct.toFixed(2)}% is below COVERAGE_MIN ${min}%`); process.exitCode = 1; }
 }
 
 module.exports = { track, collect, report };

@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
+const harness = require('./harness');
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { ORIGIN, serve } = require('./fixtures');
@@ -14,7 +15,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
-  const browser = await pw.chromium.launch();
+  const browser = harness.watch(await pw.chromium.launch());
   const shot = async (name, { dark = false, width = 1280, height = 860, act, seed, url = SEARCH, ready = 'article > .rf-badge' }) => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: dark ? 'dark' : 'light', timezoneId: 'Australia/Sydney', locale: 'en-AU' });
     const page = await ctx.newPage();
@@ -83,4 +84,4 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
   await shot('drawer-dark', { dark: true, act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
   await shot('mobile', { width: 390, height: 844, act: async (page) => { await search(page); } });
   await browser.close();
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch(harness.fail);

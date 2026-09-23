@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const assert = require('node:assert/strict');
 const { execSync } = require('child_process');
+const harness = require('./harness');
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { ORIGIN, serve, reaPage } = require('./fixtures');
@@ -17,7 +18,7 @@ const status = (p) => p.textContent('.rf-status');
 const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.rf-status').textContent), re.source, { timeout });
 
 (async () => {
-  const browser = await pw.chromium.launch();
+  const browser = harness.watch(await pw.chromium.launch());
   const errors = [];
   const open = async (ctx, url = SEARCH, { route = serve() } = {}) => {
     const page = await ctx.newPage();
@@ -982,4 +983,4 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
   cov.report(SCRIPT);
   await browser.close();
   console.log('e2e edge: ok');
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch(harness.fail);

@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const assert = require('node:assert/strict');
 const { execSync } = require('child_process');
+const harness = require('./harness');
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { listing, results, exchange } = require('../helpers');
@@ -41,7 +42,7 @@ const html = (n) => {
 };
 
 (async () => {
-  const browser = await pw.chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+  const browser = harness.watch(await pw.chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined }));
   const page = await browser.newPage();
   await page.clock.install({ time: FIXED });
   await cov.track(page);
@@ -345,4 +346,4 @@ const html = (n) => {
   cov.report(SCRIPT);
   await browser.close();
   console.log('e2e smoke: ok');
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch(harness.fail);
