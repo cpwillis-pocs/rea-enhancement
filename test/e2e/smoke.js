@@ -19,12 +19,12 @@ const dates = ['Available now', 'Available 12 Oct 2026', 'Available Mon 2nd Nov'
 const pageResults = (n) => results({
   maxPage: PAGES,
   exact: [0, 1].map((i) => listing({
-    id: `${n}${i}`,
+    id: `1465000${n}${i}`,
     availableDate: { display: dates[(n * 2 + i) % dates.length] },
     price: { display: `$${500 + n * 100 + i * 10} per week` },
     title: n === 2 && i === 0 ? 'Renovated with pool' : 'Nice place',
   })),
-  surrounding: n === 1 ? [listing({ id: 'near1', address: { suburb: 'Tamarama', display: { fullAddress: '9 Near St, Tamarama' } } })] : [],
+  surrounding: n === 1 ? [listing({ id: '146599901', address: { suburb: 'Tamarama', display: { fullAddress: '9 Near St, Tamarama' } } })] : [],
 });
 
 // Minimal stand-in for REA's markup: <article> cards linking to the canonical listing URL.
@@ -52,6 +52,22 @@ const html = (n) => {
   await page.goto(SEARCH);
   await page.addScriptTag({ content: SCRIPT });
 
+  // Badges from the boot document, no search run yet.
+  await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge').length === 3, null, { timeout: 5000 });
+  console.log('boot badges:', await page.$$eval('article > .rf-badge', (els) => els.map((e) => e.textContent).join(' | ')));
+
+  // SPA navigation to page 2: REA swaps the cards and pushState()s; script fetches that page once.
+  await page.evaluate((cards) => {
+    history.pushState({}, '', location.pathname.replace('list-1', 'list-2'));
+    document.querySelector('main').innerHTML = cards;
+  }, html(2).match(/<main>(.*)<\/main>/s)[1]);
+  await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge').length === 2, null, { timeout: 5000 });
+  assert.equal(hits.filter((n) => n === 2).length, 1, 'page 2 fetched once for annotation');
+
+  // React-style re-render wiping our badge gets re-annotated.
+  await page.evaluate(() => { const a = document.querySelector('article'); a.outerHTML = a.outerHTML.replace(/<div class="rf-badge".*?<\/div>(?=<\/article>)/s, ''); });
+  await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge').length === 2, null, { timeout: 5000 });
+
   await page.click('#rf-launch');
   await page.click('#rf-run');
   await page.waitForFunction(() => /listings match/.test(document.querySelector('.rf-status').textContent), null, { timeout: 15000 });
@@ -64,6 +80,11 @@ const html = (n) => {
   await page.fill('#rf-from', '2026-10-01');
   await page.dispatchEvent('#rf-from', 'change');
   const dated = await page.$$eval('.rf-avail', (els) => els.map((e) => e.textContent));
+  await page.waitForFunction(() => [...document.querySelectorAll('article')].some((e) => e.dataset.rfMatch), null, { timeout: 5000 });
+  const dim = await page.$$eval('article', (els) => els.map((e) => e.dataset.rfMatch));
+  console.log('dim flags on visible page:', dim.join(','));
+  assert.ok(dim.every((d) => d === '0' || d === '1'));
+  assert.equal(hits.filter((n) => n === 2).length, 1, 'page 2 not refetched by search');
   console.log('from 2026-10-01:', dated.join(' | '));
   assert.ok(dated.every((t) => !/now|Contact/i.test(t)));
 

@@ -190,6 +190,8 @@
   const extractListed = (listing) =>
     toDate(listing.dateListed ?? listing.listedDate ?? listing.listingDate ?? listing.dateFirstListed ?? listing.listedAt);
 
+  const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
+
   const toRow = (listing, surrounding) => {
     const display = listing.availableDate?.display || '';
     const price = listing.price?.display || '';
@@ -209,7 +211,7 @@
       url: safeUrl(listing._links?.canonical?.href),
       surrounding,
       headline: str(listing.title) || str(listing.headline) || '',
-      id: String(listing.id ?? listing._links?.canonical?.href?.match(/-(\d+)(?:[/?#]|$)/)?.[1] ?? ''),
+      id: String(listing.id ?? '') || listingId(listing._links?.canonical?.href),
       inspections: extractInspections(listing),
       listed: extractListed(listing),
     };
@@ -250,7 +252,7 @@
   }
 
   // `seed` = { key, page, results } from the already-loaded document, reused instead of refetching.
-  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep } = {}) {
+  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null } = {}) {
     const rows = [];
     const key = searchKey(base);
     let page = 1, max = 1, total = 1;
@@ -258,7 +260,7 @@
       const label = `page ${page}${max > 1 ? ` of ${max}` : ''}`;
       onProgress(`Reading ${label}…`);
       const seeded = seed && seed.key === key && seed.page === page;
-      const results = seeded ? seed.results : await fetchResults(pageUrl(base, page), {
+      const results = seeded ? seed.results : getPage ? await getPage(pageUrl(base, page)) : await fetchResults(pageUrl(base, page), {
         fetchImpl, wait,
         onRetry: (n, ms) => onProgress(`Retrying ${label} in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`),
       });
@@ -279,6 +281,7 @@
     from: '', to: '', exactOnly: false,
     priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
+    annotate: true, dimCards: true,
   };
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -372,7 +375,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
-      fetchResults, fetchAllPages, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, esc, safeUrl, rowStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
   }
@@ -433,6 +436,14 @@
   .rf-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#eee;
     color:#666;font-size:10px;font-weight:600;text-transform:uppercase;vertical-align:1px}
   .rf-empty{padding:28px 16px;text-align:center;color:#767680}
+  article[data-rf-id]{position:relative}
+  article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
+  article[data-rf-match="0"]:hover{opacity:1}
+  .rf-badge{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
+    font:600 11px/1 system-ui,-apple-system,sans-serif}
+  .rf-badge span{padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;white-space:nowrap}
+  .rf-badge .rf-b-now{background:#0a6}
+  .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
   `;
 
   let cfg = { ...DEFAULT_CFG, ...loadCfg() };
@@ -490,6 +501,8 @@
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
+          <label class="rf-check"><input type="checkbox" id="rf-annotate">Show availability on REA's result cards</label>
+          <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
         </details>
         <div class="rf-row">
           <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
@@ -537,6 +550,7 @@
     for (const [k, el] of fields) write(el, cfg[k]);
     ui.fields = fields;
     ui.type = panel.querySelector('#rf-type');
+    ui.annotateBox = panel.querySelector('#rf-annotate');
     ui.more = panel.querySelector('#rf-more');
     ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
@@ -549,6 +563,8 @@
       cfg = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
       saveCfg(cfg);
       clearTimeout(t);
+      scheduleAnnotate();
+      if (e?.target === ui.annotateBox && cfg.annotate) ensureVisiblePage();
       if (!cache) return;
       if (e?.type === 'input') t = setTimeout(showResults, 200); // debounce typing
       else showResults(); // re-filter without refetching
@@ -632,6 +648,8 @@
   }
 
   function adopt(key, rows, trunc, note) {
+    learn(rows);
+    scheduleAnnotate();
     fillTypes(rows);
     cache = rows;
     truncated = trunc;
@@ -656,7 +674,12 @@
     ui.run.disabled = ui.refresh.disabled = true;
     setExport(true);
     try {
-      const res = await fetchAllPages(base, (m) => { if (id === runId) setStatus(m); }, { seed: boot });
+      if (force) pageMemo.clear();
+      const onProgress = (m) => { if (id === runId) setStatus(m); };
+      const res = await fetchAllPages(base, onProgress, {
+        seed: boot,
+        getPage: (url) => getPage(url, { onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
+      });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
       store.set(key, res.rows, res.truncated);
       adopt(key, res.rows, res.truncated);
@@ -670,6 +693,88 @@
     }
   }
 
+  // ------------------------------------------------------------ annotate
+  // Adds a badge to REA's own result cards. Append-only (never reorders or removes
+  // React-owned nodes) and idempotent, so the MutationObserver can't feed back on itself.
+
+  const known = new Map(); // listing id -> row, from any source
+  // pageUrl -> Promise<results>; shared by annotation and full searches so a page is
+  // fetched once. Failures are evicted so they can be retried.
+  const pageMemo = new Map();
+  const getPage = (url, opts) => {
+    if (!pageMemo.has(url)) {
+      pageMemo.set(url, fetchResults(url, opts).catch((e) => { pageMemo.delete(url); throw e; }));
+      if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
+    }
+    return pageMemo.get(url);
+  };
+  const learn = (rows) => { for (const r of rows) if (r.id) known.set(r.id, r); };
+  const rowsOf = (results) => [
+    ...(results.exact?.items || []).filter((i) => i.listing).map((i) => toRow(i.listing, false)),
+    ...(results.surrounding?.items || []).filter((i) => i.listing).map((i) => toRow(i.listing, true)),
+  ];
+
+  const badgeHtml = (r) => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const avail = r.avail
+      ? r.avail <= today ? '<span class="rf-b-now">Available now</span>' : `<span>Avail ${esc(r.available.replace(/^(from\s+)/i, ''))}</span>`
+      : '<span class="rf-b-none">No date</span>';
+    const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
+    const ppb = +r.beds > 1 && isFinite(r.ppb) ? `<span>$${r.ppb}/bed</span>` : '';
+    return avail + insp + ppb;
+  };
+
+  const filtersActive = () => ['from', 'to', 'priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'inspectOn']
+    .some((k) => cfg[k]) || cfg.hideNoImage || cfg.exactOnly;
+
+  function annotate() {
+    const matches = cfg.dimCards && filtersActive()
+      ? new Set(applyFilters([...known.values()], cfg).map((r) => r.id)) : null;
+    const seen = new Set();
+    for (const a of document.querySelectorAll('a[href]')) {
+      if (a.closest('#rf-panel')) continue;
+      const id = listingId(a.getAttribute('href'));
+      const card = id && a.closest('article');
+      if (!card || seen.has(card)) continue;
+      seen.add(card);
+      const r = known.get(id);
+      let badge = card.querySelector(':scope > .rf-badge');
+      if (!cfg.annotate || !r) {
+        if (badge) badge.remove();
+        if (card.dataset.rfMatch) delete card.dataset.rfMatch;
+        continue;
+      }
+      if (card.dataset.rfId !== id) card.dataset.rfId = id;
+      const html = badgeHtml(r);
+      if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
+      if (badge.innerHTML !== html) badge.innerHTML = html;
+      const m = matches ? (matches.has(id) ? '1' : '0') : '';
+      if ((card.dataset.rfMatch || '') !== m) { if (m) card.dataset.rfMatch = m; else delete card.dataset.rfMatch; }
+    }
+  }
+
+  let annotateTimer;
+  const scheduleAnnotate = () => { clearTimeout(annotateTimer); annotateTimer = setTimeout(annotate, 120); };
+
+  // Make sure the page currently on screen has rows: session cache, boot doc, or one fetch.
+  async function ensureVisiblePage() {
+    if (!cfg.annotate) return;
+    const href = location.href;
+    const key = searchKey(href), n = pageNum(href);
+    if (cacheKey === key && cache) return scheduleAnnotate();
+    if (boot && boot.key === key && boot.page === n) return scheduleAnnotate();
+    try { learn(rowsOf(await getPage(pageUrl(href, n)))); } catch { return; }
+    if (location.href === href) scheduleAnnotate();
+  }
+
+  function watchCards() {
+    new MutationObserver((muts) => {
+      // Ignore mutations confined to our own badges/panel.
+      if (muts.every((m) => m.target.closest?.('.rf-badge, #rf-panel') || [...m.addedNodes].every((n) => n.classList?.contains('rf-badge')) && m.removedNodes.length === 0)) return;
+      scheduleAnnotate();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
   function watchNavigation() {
     let lastKey = searchKey(location.href);
@@ -680,6 +785,7 @@
     }
     window.addEventListener('popstate', fire);
     window.addEventListener('rf:navigate', () => {
+      setTimeout(ensureVisiblePage, 400); // let REA render the new page first
       const key = searchKey(location.href);
       if (key === lastKey) return; // same search, different page/view
       lastKey = key;
@@ -698,6 +804,9 @@
   }
 
   build();
+  if (boot) learn(rowsOf(boot.results));
   watchNavigation();
+  watchCards();
   restore();
+  ensureVisiblePage();
 })();
