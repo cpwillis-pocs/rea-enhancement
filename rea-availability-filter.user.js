@@ -1262,6 +1262,27 @@
       .map(icsFold).join('\r\n') + '\r\n';
   };
 
+  // Share a shortlist as a link: the data rides in the URL fragment (after #), which browsers
+  // never send to the server. Decoding is untrusted input: every field is re-validated.
+  const SHARE_MAX = 30;
+  const SHARE_PARAM = 'rf-share';
+  const b64url = (str) => btoa(String.fromCharCode(...new TextEncoder().encode(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const unb64url = (b) => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
+  const encodeShare = (rows, { notes = false } = {}) => b64url(JSON.stringify({ a: 'rea-enhancement', v: 1,
+    l: rows.slice(0, SHARE_MAX).map((r) => ({ i: r.id, u: r.url, a: clip(r.address, 120), p: clip(r.price, 60), v: clip(r.available, 40),
+      b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), ...(notes && r.note ? { n: clip(r.note, NOTE_MAX) } : {}) })) }));
+  const decodeShare = (b) => {
+    let d;
+    try { d = JSON.parse(unb64url(String(b || ''))); } catch { return null; }
+    if (d?.a !== 'rea-enhancement' || !Array.isArray(d.l)) return null;
+    return d.l.slice(0, SHARE_MAX).map((x) => ({
+      id: isListingId(x?.i) ? String(x.i) : '', url: safeUrl(x?.u), address: clip(x?.a, 120), price: clip(x?.p, 60),
+      available: clip(x?.v, 40), beds: scalar(x?.b), baths: scalar(x?.ba), cars: scalar(x?.c), note: clip(x?.n, NOTE_MAX),
+    })).filter((r) => r.id && r.url && /^https:\/\/www\.realestate\.com\.au\//.test(r.url));
+  };
+  const shareUrl = (rows, opts) => `https://www.realestate.com.au/rent/#${SHARE_PARAM}=${encodeShare(rows, opts)}`;
+  const shareFromHash = (hash) => { const m = String(hash || '').match(new RegExp(`[#&]${SHARE_PARAM}=([A-Za-z0-9_-]+)`)); return m ? decodeShare(m[1]) : null; };
+
   // Printable shortlist: a standalone HTML document (all text escaped), light theme forced.
   const printHtml = (rows, now = new Date()) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Rental shortlist ${ymdLocal(now)}</title><style>
@@ -1319,12 +1340,26 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
 
   // ------------------------------------------------------------------- ui
+
+  // Clipboard with a fallback: the async API needs focus/permission, execCommand doesn't.
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {
+      const ta = Object.assign(document.createElement('textarea'), { value: text });
+      ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch { /* unsupported */ }
+      ta.remove();
+      return ok;
+    }
+  }
 
   function downloadIcs(rows) {
     const ics = toIcs(rows);
@@ -1474,6 +1509,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-achip{font-size:11px;padding:3px 8px}
   .rf-achip span{color:var(--rf-soft);font-weight:400}
   .rf-preset{font:12px system-ui,sans-serif;padding:6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:100%}
+  .rf-share-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
+  .rf-share-in[hidden]{display:none}
+  .rf-share-in .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
+  .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
@@ -1589,6 +1628,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+        <button class="rf-btn sec" data-sl="share" title="Copy a link that shares these listings (no server involved)">Share</button>
         <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
         <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
         <input type="file" accept="application/json,.json" hidden>
@@ -1672,6 +1712,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
         <dt>n</dt><dd>note</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
         <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
+      </div>
+      <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
+        <span class="rf-share-msg"></span>
+        <button class="rf-btn" data-share="add">Add to my shortlist</button>
+        <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
       </div>
       <div class="rf-status" role="status" aria-live="polite"></div>
       <div class="rf-active" hidden aria-label="Active filters"></div>
@@ -1936,6 +1981,39 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
     });
     ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
+    ui.slBar.querySelector('[data-sl=share]').addEventListener('click', async () => {
+      const rows = shortlistRows();
+      if (!rows.length) return setStatus('Nothing on the shortlist to share.', true);
+      const notes = rows.some((r) => r.note) && window.confirm('Include your notes in the share link?');
+      const url = shareUrl(rows, { notes });
+      const ok = await copyText(url);
+      setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? ', with notes' : ''}). Anyone with this script can open it.`
+        : 'Clipboard blocked - could not copy the share link.', !ok);
+    });
+    // Incoming share (#rf-share=...): offer to import, then strip it from the URL.
+    const shareIn = panel.querySelector('.rf-share-in');
+    ui.offerShare = (rows) => {
+      if (!rows?.length) return;
+      shareIn.hidden = false;
+      shareIn.querySelector('.rf-share-msg').textContent = `${rows.length} shared listing${rows.length === 1 ? '' : 's'}:`;
+      ui.pendingShare = rows;
+      launch.hidden = false;
+      setOpen(true);
+    };
+    shareIn.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-share]');
+      if (!b) return;
+      const rows = ui.pendingShare || [];
+      if (b.dataset.share === 'add') {
+        const n = marks.setMany(rows, 's', true);
+        for (const r of rows) if (r.note && !marks.note(r.id)) marks.setNote(r.id, `Shared: ${r.note}`);
+        refreshMarks();
+        setView('shortlist');
+        setStatus(`Added ${n} shared listing${n === 1 ? '' : 's'} to your shortlist.`);
+      }
+      shareIn.hidden = true;
+      ui.pendingShare = null;
+    });
     ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
       const rows = shortlistRows();
       if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
@@ -1979,17 +2057,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
         else if (b.dataset.export === 'ics') downloadIcs(rows);
         else {
-          const text = toTsv(rows);
-          let ok = false;
-          try { await navigator.clipboard.writeText(text); ok = true; } catch {
-            // Async clipboard needs focus/permission; fall back to the legacy copy command.
-            const ta = Object.assign(document.createElement('textarea'), { value: text });
-            ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
-            document.body.appendChild(ta);
-            ta.select();
-            try { ok = document.execCommand('copy'); } catch { /* unsupported */ }
-            ta.remove();
-          }
+          const ok = await copyText(toTsv(rows));
           setStatus(ok ? `Copied ${rows.length} rows.` : 'Clipboard blocked - use TSV download instead.', !ok);
         }
       });
@@ -2561,6 +2629,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }
     }));
     step('presets', () => { fillPresets(); const b = presets.forSearch(currentKey()); if (b) applyPreset(b); });
+    step('share', () => {
+      const rows = shareFromHash(location.hash);
+      if (!rows) return;
+      history.replaceState(history.state, '', location.pathname + location.search); // don't keep it in history
+      ui.offerShare(rows);
+    });
     step('restore', restore);
     step('annotate', ensureVisiblePage);
   }

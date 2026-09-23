@@ -353,3 +353,20 @@ test('printHtml: escaped, one block per listing', () => {
   assert.match(html, /move-in \$4,200/);
   assert.match(html, /Status: applied/);
 });
+
+test('share links: round trip, notes opt-in, unicode, hostile input rejected', () => {
+  const rows = [{ id: '146500001', url: 'https://www.realestate.com.au/property-x-146500001', address: '1 Café St', price: '$700 per week',
+    available: '12 Oct', beds: 2, baths: 1, cars: 0, note: 'ask about pets' }];
+  const url = core.shareUrl(rows);
+  assert.ok(url.startsWith('https://www.realestate.com.au/rent/#rf-share='));
+  const back = core.shareFromHash(new URL(url).hash);
+  assert.equal(back[0].address, '1 Café St');
+  assert.equal(back[0].note, '', 'notes excluded by default');
+  assert.equal(core.shareFromHash('#rf-share=' + core.encodeShare(rows, { notes: true }))[0].note, 'ask about pets');
+  const evil = btoa(JSON.stringify({ a: 'rea-enhancement', v: 1, l: [{ i: '1', u: 'javascript:alert(1)' }, { i: 'x', u: 'https://www.realestate.com.au/p' }, { i: '2', u: 'https://evil.example/p' }] }));
+  assert.deepEqual(core.decodeShare(evil), []);
+  assert.equal(core.decodeShare('%%%'), null);
+  assert.equal(core.shareFromHash('#other=1'), null);
+  const many = Array.from({ length: 50 }, (_, i) => ({ ...rows[0], id: String(146500100 + i) }));
+  assert.equal(core.decodeShare(core.encodeShare(many)).length, 30, 'capped');
+});

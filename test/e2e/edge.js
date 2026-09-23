@@ -490,6 +490,37 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 23. Share: copy link from one browser profile, open it in another, import.
+  {
+    const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const a = await open(ctxA);
+    a.on('dialog', (d) => d.accept());
+    await a.click('#rf-launch'); await a.click('#rf-run'); await waitStatus(a, /listings match/);
+    for (const n of [1, 2]) { await a.hover(`.rf-item:nth-child(${n})`); await a.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
+    await a.hover('.rf-item:nth-child(1)'); await a.click('.rf-item:nth-child(1) >> [data-act=n]');
+    await a.fill('.rf-note-edit', 'great light'); await a.keyboard.press('Enter');
+    await a.click('[data-view=shortlist]');
+    await a.click('[data-sl=share]');
+    await waitStatus(a, /Share link copied \(2 listings, with notes\)/);
+    const link = await a.evaluate(() => navigator.clipboard.readText());
+    await done(a); await ctxA.close();
+
+    const ctxB = await browser.newContext();
+    const b = await ctxB.newPage();
+    await cov.track(b);
+    await b.route('**/*', serve());
+    await b.goto(link);
+    await b.addScriptTag({ content: SCRIPT });
+    await b.waitForSelector('.rf-share-in:not([hidden])');
+    assert.match(await b.textContent('.rf-share-msg'), /2 shared listings/);
+    assert.equal(await b.evaluate(() => location.hash), '', 'fragment stripped');
+    await b.click('[data-share=add]');
+    assert.equal(await b.$$eval('.rf-item', (e) => e.length), 2);
+    assert.match(await b.textContent('.rf-note'), /Shared: great light/);
+    console.log('share link across profiles: ok');
+    await done(b); await ctxB.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
