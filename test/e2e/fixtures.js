@@ -16,7 +16,7 @@ const photo = (i) => `<svg xmlns="http://www.w3.org/2000/svg" width="690" height
 <rect width="690" height="520" fill="url(#g)"/><rect x="180" y="190" width="330" height="230" fill="rgba(255,255,255,.55)"/>
 <polygon points="150,200 345,90 540,200" fill="rgba(255,255,255,.7)"/><rect x="310" y="310" width="70" height="110" fill="rgba(0,0,0,.25)"/></svg>`;
 
-function pageResults(n, { pages = 3, perPage = 6 } = {}) {
+function pageResults(n, { pages = 3, perPage = 6, noInspections = false } = {}) {
   const items = [];
   for (let i = 0; i < perPage; i++) {
     const k = (n - 1) * perPage + i;
@@ -36,7 +36,7 @@ function pageResults(n, { pages = 3, perPage = 6 } = {}) {
       listingCompany: { name: ['Bondi Realty', 'Harbour Property Co', 'Eastside Agents'][k % 3] },
       _links: { canonical: { href: `${ORIGIN}/property-apartment-nsw-bondi-${id}` } },
       title: ['Light-filled with harbour glimpses', 'Renovated with pool', 'Moments to the beach', 'Quiet leafy street'][k % 4],
-      inspections: k % 2 ? [] : [{ startTime: new Date(Date.UTC(2026, 8, 26 + (k % 3), 0, 30)).toISOString() }],
+      inspections: noInspections || k % 2 ? [] : [{ startTime: new Date(Date.UTC(2026, 8, 26 + (k % 3), 0, 30)).toISOString() }],
       description: ['Pets considered on application. Split system air conditioning.', 'Sorry, no pets. Dishwasher and sunny balcony.',
         'Offered unfurnished. Built-in robes throughout.'][k % 3],
     }));

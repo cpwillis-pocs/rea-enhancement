@@ -1330,6 +1330,38 @@ ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div 
 ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
 </div></div>`).join('')}</body></html>`;
 
+  // Drift canary: share of rows with each field, tracked as an average over searches. A field
+  // that's usually there but suddenly isn't means REA probably renamed or moved it.
+  const HEALTH_KEY = 'rea-avail-filter/health/v1';
+  const HEALTH_MIN_ROWS = 20; // smaller searches are too noisy to judge
+  const HEALTH_ALPHA = 0.3; // weight of the newest search in the running average
+  const HEALTH_FIELDS = {
+    availability: (r) => !!r.avail, price: (r) => Number.isFinite(r.priceNum), inspections: (r) => !!r.inspections?.length,
+    coordinates: (r) => r.lat != null, agency: (r) => !!r.agency, features: (r) => !!r.features?.length,
+    listed: (r) => r.listed instanceof Date, photos: (r) => r.photos != null,
+  };
+  const fillRates = (rows) => Object.fromEntries(Object.entries(HEALTH_FIELDS).map(([k, f]) => [k, rows.length ? rows.filter(f).length / rows.length : 0]));
+  const healthStore = (storage) => {
+    const load = () => { try { const d = JSON.parse(storage.getItem(HEALTH_KEY)); if (d && typeof d.ema === 'object') return d; } catch { /* corrupt */ } return { ema: {}, n: 0 }; };
+    return {
+      // Returns fields that dropped: [{ field, now, usual }]. Updates the average afterwards.
+      record(rows) {
+        if (rows.length < HEALTH_MIN_ROWS) return [];
+        const d = load(), rates = fillRates(rows), drops = [];
+        for (const [k, v] of Object.entries(rates)) {
+          const usual = d.ema[k];
+          if (d.n >= 2 && usual >= 0.3 && v < usual * 0.3) drops.push({ field: k, now: v, usual });
+          d.ema[k] = usual == null ? v : usual * (1 - HEALTH_ALPHA) + v * HEALTH_ALPHA;
+        }
+        d.n++;
+        try { storage.setItem(HEALTH_KEY, JSON.stringify(d)); } catch { /* quota/blocked */ }
+        return drops;
+      },
+      usual: () => load(),
+    };
+  };
+  const pct = (v) => `${Math.round(v * 100)}%`;
+
   // Heuristic drift detection: parsing "worked" but the fields we depend on are gone.
   function schemaWarnings(rows) {
     if (!rows.length) return [];
@@ -1367,7 +1399,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1621,6 +1653,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   let baseAt = null; // when the baseline ("last visit") was taken
   const pool = () => (cfg.showGone && gone.length ? cache.concat(gone) : cache);
   const marks = marksStore(storageOr('localStorage'));
+  const health = healthStore(storageOr('localStorage'));
+  const errorLog = []; // last few errors, for reaFilter.selfcheck()
+  const logError = (msg) => { errorLog.push(`${new Date().toISOString()} ${String(msg).slice(0, 200)}`); if (errorLog.length > 10) errorLog.shift(); };
   const presets = presetStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
 
@@ -2450,6 +2485,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
       if (res.sample) rawSample = res.sample;
+      const drops = health.record(res.rows);
+      if (drops.length) queueMicrotask(() => setStatus(`REA may have changed its data: ${drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`).join('; ')}. Run reaFilter.selfcheck() in the console and report it.`, true));
       store.set(key, res.rows, res.truncated);
       adopt(key, res.rows, res.truncated, '', cfg.remember ? snaps.save(key, res.rows, res.truncated) : null, true);
     } catch (err) {
@@ -2458,6 +2495,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       cacheKey = null;
       setLaunchCount(null);
       setStatus(err.message, true);
+      logError(`search: ${err.message}`);
       if (ui.view !== 'shortlist') setEmpty('Search failed.');
     } finally {
       if (id === runId) setBusy(false);
@@ -2682,10 +2720,28 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       return out;
     },
     raw: () => rawSample,
+    // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
+    selfcheck: () => {
+      const rows = cache || [];
+      const rates = fillRates(rows), usual = health.usual();
+      const report = [
+        `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${truncated ? ' (truncated)' : ''}`,
+        `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
+        `discovered paths: ${Object.entries(found).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'}`,
+        `schema warnings: ${schemaWarnings(rows).join('; ') || 'none'}`,
+        `recent errors: ${errorLog.length ? `\n  ${errorLog.join('\n  ')}` : 'none'}`,
+      ].join('\n');
+      console.log(report);
+      copyText(report).catch(() => {});
+      return report;
+    },
   };
 
   // Each step isolated: a failure in one (eg REA drift) must not take the others down.
-  const step = (name, fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn(`[reaFilter] ${name}:`, e)); } catch (e) { console.warn(`[reaFilter] ${name}:`, e); } };
+  const step = (name, fn) => {
+    const fail = (e) => { console.warn(`[reaFilter] ${name}:`, e); logError(`${name}: ${e?.message || e}`); };
+    try { const r = fn(); if (r?.catch) r.catch(fail); } catch (e) { fail(e); }
+  };
   step('build', build);
   if (ui?.ready) { // only wire the rest if build() completed
     step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });

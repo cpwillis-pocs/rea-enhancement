@@ -70,3 +70,14 @@ test('rowStore: all "unknown" numbers (upfront, bondNum too) come back as Infini
   const r = st.get('k').rows[0];
   for (const k of ['priceNum', 'ppb', 'upfront', 'bondNum']) assert.equal(r[k], Infinity, k);
 });
+
+test('healthStore: learns usual fill rates, flags a sudden drop, ignores small searches', () => {
+  const st = core.healthStore(memStorage());
+  const mk = (n, withInsp) => Array.from({ length: n }, (_, i) => ({ avail: new Date(), priceNum: 500, inspections: i < withInsp ? [{}] : [], lat: -33 }));
+  assert.deepEqual(st.record(mk(10, 0)), [], 'under 20 rows ignored');
+  st.record(mk(40, 24)); st.record(mk(40, 26)); st.record(mk(40, 25));
+  const drops = st.record(mk(40, 0));
+  assert.deepEqual(drops.map((d) => d.field), ['inspections']);
+  assert.ok(drops[0].usual > 0.5);
+  assert.equal(core.fillRates([]).price, 0);
+});

@@ -544,6 +544,20 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
+  {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/health/v1', JSON.stringify({ n: 5, ema: { inspections: 0.5, availability: 1, price: 0.9 } })));
+    const page = await open(ctx, SEARCH, { route: serve([], { pages: 4, perPage: 6, noInspections: true }) });
+    await page.click('#rf-launch'); await page.click('#rf-run');
+    await waitStatus(page, /REA may have changed its data: inspections on 0%/);
+    const report = await page.evaluate(() => window.reaFilter.selfcheck());
+    assert.match(report, /inspections 0%\/\d+%/);
+    assert.match(report, /page: \/rent\//);
+    console.log('drift canary + selfcheck: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
