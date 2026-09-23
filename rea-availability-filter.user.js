@@ -165,6 +165,7 @@
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
+  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'as', 'ast']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const keep = (e) => e.s || e.h || e.n || e.as;
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
@@ -406,9 +407,24 @@
         save();
         return ids.length;
       },
-      // Whole-store snapshot for one-step undo of bulk actions.
-      dump: () => JSON.stringify(load()),
-      restoreDump(json) { try { data = JSON.parse(json); save(); } catch { /* ignore */ } },
+      // Undo for bulk actions: snapshot only the user-choice fields of the listings touched, so
+      // restoring can't wipe changes made meanwhile to other listings (eg in another tab).
+      dump(ids) {
+        const { m } = fresh();
+        return JSON.stringify(Object.fromEntries(ids.map((id) => [id, m[id]
+          ? Object.fromEntries(MARK_FIELDS.filter((k) => k in m[id]).map((k) => [k, m[id][k]])) : null])));
+      },
+      restoreDump(json) {
+        let snap;
+        try { snap = JSON.parse(json); } catch { return; }
+        const { m } = fresh();
+        for (const [id, old] of Object.entries(snap || {})) {
+          if (!old && !m[id]) continue;
+          const cur = entry(m, id);
+          for (const k of MARK_FIELDS) { if (old && k in old) cur[k] = old[k]; else delete cur[k]; }
+        }
+        save();
+      },
     };
   };
 
@@ -1178,8 +1194,8 @@
     return { ...cfg, amenities: amenCfgString(st) };
   };
   const removedBy = (rows, cfg, now = new Date()) => {
-    const base = applyFilters(rows, cfg, now).length;
-    return activeFilters(cfg).map((chip) => ({ ...chip, removes: applyFilters(rows, without(cfg, chip), now).length - base }));
+    const base = filterRows(rows, cfg, now).length;
+    return activeFilters(cfg).map((chip) => ({ ...chip, removes: filterRows(rows, without(cfg, chip), now).length - base }));
   };
 
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
@@ -1227,7 +1243,14 @@
   // Undated listings ("Contact agent") can't satisfy a date bound, but are kept
   // (sorted last) when no bound is set so an empty filter never hides data.
   // Numeric minimums treat unknown values as failing; maximums likewise.
+  // Filter + score + sort. filterRows alone has no side effects on scores, so counting
+  // ("how many would this chip let back in?") can't disturb what's on screen.
   function applyFilters(rows, cfg, now = new Date()) {
+    cfg = { ...DEFAULT_CFG, ...cfg };
+    return withScores(filterRows(rows, cfg, now), cfg).sort(SORTS[cfg.sort] || SORTS.avail);
+  }
+
+  function filterRows(rows, cfg, now = new Date()) {
     cfg = { ...DEFAULT_CFG, ...cfg };
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
     let to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
@@ -1262,7 +1285,7 @@
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !kw || kw(r.text || ''))
       .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at)));
-    return withScores(kept, cfg).sort(SORTS[cfg.sort] || SORTS.avail);
+    return kept;
   }
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
@@ -1477,7 +1500,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2136,7 +2159,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const v = sel.value;
       sel.value = '';
       if (!v || !ui.rows?.length) return;
-      const before = marks.dump();
+      const before = marks.dump(ui.rows.map((r) => r.id));
       const msg = fn(v, ui.rows);
       refreshMarks();
       if (msg) offerUndo(msg, () => { marks.restoreDump(before); refreshMarks(); });

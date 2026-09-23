@@ -395,3 +395,16 @@ test('parseListingPage: nested JSON, id match, gone on 404/redirect, unknown oth
   assert.equal(core.parseListingPage('', '1', { redirectedTo: 'https://www.realestate.com.au/rent/in-bondi/list-1' }).status, 'gone');
   assert.equal(core.parseListingPage('<html>captcha</html>', '1').status, 'unknown');
 });
+
+test('removedBy only counts: shown rows keep their Match scores', () => {
+  const now = new Date(2026, 8, 23);
+  const L = (id, p, d) => core.toRow(listing({ id, bond: undefined, price: { display: `$${p} per week` }, availableDate: { display: d },
+    _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}` } } }), false);
+  const rows = [L('146500001', 600, 'Available 1 Oct 2026'), L('146500002', 700, 'Available 5 Oct 2026')];
+  const cfg = { ...core.DEFAULT_CFG, from: '2026-10-01', priceMax: '800', sort: 'match' };
+  const shown = core.applyFilters(rows, cfg, now);
+  const scores = shown.map((r) => r.score);
+  assert.ok(scores.every((s) => s != null));
+  core.removedBy(rows, cfg, now);
+  assert.deepEqual(shown.map((r) => r.score), scores);
+});

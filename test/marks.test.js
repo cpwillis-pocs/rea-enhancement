@@ -250,7 +250,7 @@ test('marksStore: bulk setMany/setStatusMany and dump/restore for undo', () => {
   let t = 1e12;
   const st = core.marksStore(mem(), () => t);
   const rows = ['146500101', '146500102', '146500103'].map((id) => row(id));
-  const before = st.dump();
+  const before = st.dump(rows.map((r) => r.id));
   assert.equal(st.setMany(rows, 's', true), 3);
   assert.equal(st.setMany(rows, 's', true), 0, 'idempotent');
   assert.equal(st.shortlist().length, 3);
@@ -297,4 +297,19 @@ test('marksStore: no price history stored for listings whose price never changed
   assert.equal(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m['146500300'].ph, undefined);
   st.observe([row('146500300', '$680 per week')]);
   assert.deepEqual(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m['146500300'].ph.map((x) => x[1]), ['$700 per week', '$680 per week']);
+});
+
+test('marksStore: bulk undo restores only the bulk-touched listings (keeps another tab\'s edits)', () => {
+  const s = mem(); const t = 1e12;
+  const A = core.marksStore(s, () => t), B = core.marksStore(s, () => t);
+  const bulk = [row('146500101'), row('146500102')];
+  B.toggle('146500102', 's', bulk[1]);
+  const before = A.dump(bulk.map((r) => r.id));
+  A.setMany(bulk, 'h', true);
+  B.toggle('146500999', 's', row('146500999'));
+  A.restoreDump(before);
+  B.invalidate();
+  assert.deepEqual(B.shortlist().map((r) => r.id).sort(), ['146500102', '146500999']);
+  B.decorate(bulk);
+  assert.deepEqual(bulk.map((r) => r.hidden), [false, false]);
 });
