@@ -55,9 +55,11 @@
   const MARKS_KEY = 'rea-avail-filter/marks/v1';
   const MARKS_MAX = 5000;
   const MARKS_TTL_MS = 90 * 864e5; // unstarred, unhidden listings forgotten after 90 days unseen
-  const NEW_MS = 48 * 36e5; // "New" tag lasts 48h from first sighting
-  const BASELINE_MS = 5 * 6e4; // listings seen in the first 5 min of use are the baseline, not "new"
+  const NEW_MS = 48 * 36e5; // a listing REA dates within 48h counts as new even without a baseline
   const ROWS_TEXT_MAX = 600;
+  const SNAP_KEY = 'rea-avail-filter/snapshots/v1';
+  const SNAP_MAX = 3; // searches remembered across sessions (localStorage is shared with REA)
+  const SNAP_VISIT_GAP_MS = 60 * 60 * 1000; // runs closer together than this count as one visit
 
   // ---------------------------------------------------------------- config
 
@@ -159,14 +161,16 @@
         save();
       },
       decorate(rows) {
-        const { m, c } = load();
+        const { m } = load();
         const t = now();
         for (const r of rows) {
           const e = m[r.id];
           r.starred = !!e?.s;
           r.hidden = !!e?.h;
           r.note = e?.n || '';
-          r.isNew = !!e && e.f - c > BASELINE_MS && t - e.f < NEW_MS;
+          r.firstSeen = e?.f ? new Date(e.f) : null;
+          // "New" is per search (see snapshotStore); here only REA's own listed date counts.
+          r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
           r.prevPrice = e && e.pp != null && e.pp !== e.p ? e.pps || `$${e.pp}` : '';
           r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
         }
@@ -239,6 +243,121 @@
         const { m } = load();
         const v = Object.values(m);
         return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length, notes: v.filter((e) => e.n).length };
+      },
+    };
+  };
+
+  // Remembered results per search, across sessions. Each save diffs against a baseline:
+  // the previous *visit's* ids (runs within SNAP_VISIT_GAP_MS of each other share one
+  // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
+  // longer listed.
+  const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
+    'cars', 'type', 'img', 'surrounding', 'inspect'];
+  const SNAP_DATES = ['avail', 'listed', 'nextInspect'];
+  const slimRow = (r) => {
+    const o = {};
+    for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], 300) : r[k];
+    for (const k of SNAP_DATES) o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
+    o.headline = clip(r.headline, 160);
+    o.text = clip(r.text, 300);
+    o.inspections = (Array.isArray(r.inspections) ? r.inspections : []).slice(0, 3)
+      .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }));
+    return o;
+  };
+  // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
+  const fatRow = (o) => {
+    const r = {};
+    for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], 300) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
+    for (const k of SNAP_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
+    r.url = safeUrl(r.url);
+    r.img = safeUrl(r.img);
+    r.id = /^\d{1,15}$/.test(String(o?.id)) ? String(o.id) : listingId(r.url);
+    r.priceNum = typeof o?.priceNum === 'number' ? o.priceNum : parsePrice(r.price);
+    r.ppb = typeof o?.ppb === 'number' ? o.ppb : Infinity;
+    r.surrounding = !!o?.surrounding;
+    r.headline = clip(o?.headline, 160);
+    r.text = clip(o?.text, 300).toLowerCase();
+    r.inspections = Array.isArray(o?.inspections) ? o.inspections.slice(0, 3)
+      .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) })).filter((i) => i.label) : [];
+    return r;
+  };
+  const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < 2000;
+
+  const snapshotStore = (storage, now = () => Date.now()) => {
+    const load = () => {
+      try {
+        const d = JSON.parse(storage.getItem(SNAP_KEY));
+        if (d && typeof d.s === 'object' && d.s) return d;
+      } catch { /* corrupt */ }
+      return { v: 1, s: {} };
+    };
+    // Newest SNAP_MAX kept; on quota, drop older searches, then the gone lists, then give up.
+    const persist = (d) => {
+      const keys = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
+      for (const k of keys.slice(SNAP_MAX)) delete d.s[k];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { storage.setItem(SNAP_KEY, JSON.stringify(d)); return true; } catch {
+          const ks = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
+          if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) delete d.s[k];
+          else for (const k of ks) d.s[k].gone = [];
+        }
+      }
+      return false;
+    };
+    const view = (e) => ({
+      at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated,
+      rows: (e.rows || []).map(fatRow).filter((r) => r.url),
+      gone: (e.gone || []).map(fatRow).filter((r) => r.url).map((r) => Object.assign(r, { gone: true })),
+      newIds: new Set(e.baseIds ? (e.ids || []).filter((id) => !new Set(e.baseIds).has(id)) : []),
+    });
+    return {
+      get(key) {
+        const e = load().s[key];
+        return e ? view(e) : null;
+      },
+      save(key, rows, truncated) {
+        const d = load();
+        const prev = d.s[key];
+        const t = now();
+        const ids = rows.map((r) => r.id).filter(Boolean);
+        const cur = new Set(ids);
+        let baseIds = null, baseAt = null, gone = [];
+        if (prev && t - prev.at > SNAP_VISIT_GAP_MS) { // new visit: previous run is the baseline
+          baseIds = prev.ids || []; baseAt = prev.at;
+          gone = (prev.rows || []).filter((r) => !cur.has(String(r.id)));
+        } else if (prev) { // same visit: keep its baseline
+          baseIds = prev.baseIds || null; baseAt = prev.baseAt ?? null;
+          gone = (prev.gone || []).filter((r) => !cur.has(String(r.id)));
+          if (baseIds) { // rows that were in the baseline and have since dropped out this visit
+            const seen = new Set(gone.map((r) => String(r.id)));
+            for (const r of prev.rows || []) if (!cur.has(String(r.id)) && baseIds.includes(String(r.id)) && !seen.has(String(r.id))) gone.push(r);
+          }
+        }
+        d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, 200) };
+        persist(d);
+        return view(d.s[key]);
+      },
+      clear() { try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
+      exportData: () => load().s,
+      // Untrusted: keys must be REA rent search URLs; rows round-trip through fatRow/slimRow.
+      importData(src) {
+        if (!src || typeof src !== 'object') return 0;
+        const d = load();
+        let n = 0;
+        for (const [k, e] of Object.entries(src)) {
+          if (!isSearchKey(k) || !e || typeof e !== 'object' || typeof e.at !== 'number') continue;
+          if (d.s[k] && d.s[k].at >= e.at) continue; // keep the newer copy
+          const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, 1000).map(fatRow).filter((r) => r.url);
+          const okIds = (a) => (Array.isArray(a) ? a.map(String).filter((id) => /^\d{1,15}$/.test(id)) : null);
+          d.s[k] = {
+            at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
+            ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
+            gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, 200).map(fatRow).filter((r) => r.url).map(slimRow),
+          };
+          n++;
+        }
+        persist(d);
+        return n;
       },
     };
   };
@@ -486,6 +605,7 @@
     priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
+    remember: true, newOnly: false, showGone: false,
   };
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -496,7 +616,8 @@
     price: (a, b) => byPrice(a, b) || byAvail(a, b),
     ppb: (a, b) => a.ppb - b.ppb || byAvail(a, b),
     beds: (a, b) => (+b.beds || 0) - (+a.beds || 0) || byPrice(a, b),
-    listed: (a, b) => (b.listed ?? -Infinity) - (a.listed ?? -Infinity) || byAvail(a, b),
+    // Newest first: REA's listed date when present, else when this browser first saw it.
+    listed: (a, b) => (b.listed ?? b.firstSeen ?? -Infinity) - (a.listed ?? a.firstSeen ?? -Infinity) || byAvail(a, b),
     inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
   };
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
@@ -538,6 +659,8 @@
     return [...byUrl.values()]
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => cfg.showHidden || !r.hidden)
+      .filter((r) => cfg.showGone || !r.gone)
+      .filter((r) => !cfg.newOnly || r.isNew || r.sinceLast)
       .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
@@ -616,7 +739,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, listingId, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG,
     };
     return;
   }
@@ -708,6 +831,7 @@
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
   .rf-acts button[data-act=s][aria-pressed=true]{color:#e6a700}
   .rf-tag.rf-new{background:#0a6;color:#fff}
+  .rf-tag.rf-gone{background:#8a8a95;color:#fff}
   .rf-was{font-weight:600;font-size:11px;padding:1px 5px;border-radius:4px}
   .rf-was.down{color:#0a6;background:rgba(0,170,102,.12)}
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
@@ -751,6 +875,11 @@
   const bootAt = Date.now();
   // sessionStorage access itself throws when the browser blocks site data.
   const store = (() => { try { return rowStore(window.sessionStorage); } catch { return { get: () => null, set: () => {} }; } })();
+  const nullStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  const snaps = (() => { try { return snapshotStore(window.localStorage); } catch { return snapshotStore(nullStorage); } })();
+  let gone = []; // rows from the baseline that are no longer listed (shown when cfg.showGone)
+  let baseAt = null; // when the baseline ("last visit") was taken
+  const pool = () => (cfg.showGone && gone.length ? cache.concat(gone) : cache);
   const marks = (() => { try { return marksStore(window.localStorage); } catch { return marksStore({ getItem: () => null, setItem: () => {} }); } })();
   let rawSample = boot?.results?.exact?.items?.find((i) => i.listing)?.listing ?? null;
 
@@ -782,7 +911,7 @@
       </div>
       <div class="rf-sl-bar" hidden>
         <span class="rf-label">Shortlist, all searches</span>
-        <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings and notes as JSON">Backup</button>
+        <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
         <input type="file" accept="application/json,.json" hidden>
       </div>
@@ -808,10 +937,13 @@
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
+          <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
+          <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
           <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only</label>
           <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings</label>
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show availability on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
+          <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
         </details>
         <div class="rf-row">
           <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
@@ -821,7 +953,7 @@
             <option value="ppb">Price per bed</option>
             <option value="beds">Most beds</option>
             <option value="inspect">Next inspection</option>
-            <option value="listed">Newest listed</option>
+            <option value="listed">Newest first</option>
           </select></label>
         </div>
         <div class="rf-actions">
@@ -866,7 +998,7 @@
     ui.type = panel.querySelector('#rf-type');
     ui.annotateBox = panel.querySelector('#rf-annotate');
     ui.more = panel.querySelector('#rf-more');
-    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn', 'onlyStarred', 'showHidden']
+    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn', 'onlyStarred', 'showHidden', 'newOnly', 'showGone']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
     const setOpen = (open) => { panel.hidden = !open; launch.setAttribute('aria-expanded', String(open)); };
@@ -885,8 +1017,14 @@
 
     let t;
     const onChange = (e) => {
+      const wasRemember = cfg.remember;
       cfg = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
       saveCfg(cfg);
+      if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
+        snaps.clear();
+        applySnap(null);
+        setStatus('Saved results cleared; results will no longer be remembered.');
+      }
       clearTimeout(t);
       scheduleAnnotate();
       if (e?.target === ui.annotateBox && cfg.annotate) ensureVisiblePage();
@@ -912,8 +1050,11 @@
     });
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
-    ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () =>
-      download(`rea-shortlist-${stamp()}.json`, marks.exportJson(), 'application/json'));
+    ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
+      const data = JSON.parse(marks.exportJson());
+      if (cfg.remember) data.snapshots = snaps.exportData();
+      download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
+    });
     ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
     ui.slFile.addEventListener('change', async () => {
       const f = ui.slFile.files?.[0];
@@ -921,9 +1062,11 @@
       if (!f) return;
       try {
         if (f.size > 5e6) throw new Error('File too large for a backup.');
-        const n = marks.importJson(await f.text());
+        const text = await f.text();
+        const n = marks.importJson(text);
+        const k = cfg.remember ? snaps.importData(JSON.parse(text).snapshots) : 0;
         refreshMarks();
-        setStatus(`Restored ${n} listing${n === 1 ? '' : 's'} from backup.`);
+        setStatus(`Restored ${n} listing${n === 1 ? '' : 's'}${k ? ` and ${k} saved search${k === 1 ? '' : 'es'}` : ''} from backup.`);
       } catch (err) { setStatus(err.message, true); }
     });
 
@@ -931,7 +1074,7 @@
     ui.refresh.addEventListener('click', () => run(true));
     for (const b of ui.exports) {
       b.addEventListener('click', async () => {
-        const rows = ui.view === 'shortlist' ? marks.shortlist() : cache ? applyFilters(cache, cfg) : null;
+        const rows = ui.view === 'shortlist' ? marks.shortlist() : cache ? applyFilters(pool(), cfg) : null;
         if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
@@ -1038,12 +1181,13 @@
       render([]);
       return setStatus('Min $/wk is above max $/wk.', true);
     }
-    const rows = applyFilters(cache, cfg);
+    const rows = applyFilters(pool(), cfg);
     render(rows);
     let nNew = 0, nMoved = 0, nHidden = 0;
-    for (const r of cache) { nNew += r.isNew ? 1 : 0; nMoved += r.prevPrice ? 1 : 0; nHidden += r.hidden ? 1 : 0; }
-    const extra = [nNew && `${nNew} new`, nMoved && `${nMoved} price changed`, !cfg.showHidden && nHidden && `${nHidden} hidden`]
-      .filter(Boolean).join(' · ');
+    for (const r of cache) { nNew += r.isNew || r.sinceLast ? 1 : 0; nMoved += r.prevPrice ? 1 : 0; nHidden += r.hidden ? 1 : 0; }
+    const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
+    const extra = [nNew && `${nNew} new${since}`, gone.length && `${gone.length} no longer listed`, nMoved && `${nMoved} price changed`,
+      !cfg.showHidden && nHidden && `${nHidden} hidden`].filter(Boolean).join(' · ');
     setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : ''));
@@ -1073,11 +1217,11 @@
 
   function itemsHtml(rows) {
     return rows.map((r) => `
-      <div class="rf-item${r.hidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
+      <div class="rf-item${r.gone ? ' rf-hidden' : ''}${r.hidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.isNew ? '<span class="rf-tag rf-new">new</span>' : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.gone ? '<span class="rf-tag rf-gone">no longer listed</span>' : r.isNew || r.sinceLast ? '<span class="rf-tag rf-new">new</span>' : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${r.priceDelta < 0 ? 'down' : 'up'}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
@@ -1115,29 +1259,52 @@
     ui.type.value = cfg.type;
   }
 
-  function adopt(key, rows, trunc, note) {
-    learn(rows);
+  function adopt(key, rows, trunc, note, snap = null, fresh = false) {
+    learn(rows, fresh);
     scheduleAnnotate();
     fillTypes(rows);
     cache = rows;
+    applySnap(snap);
     truncated = trunc;
     cacheKey = key;
     ui.refresh.hidden = false;
     showResults(note);
   }
 
-  // Restore rows for the current search from the session cache, if fresh. Returns hit.
-  function restore() {
+  // Apply a snapshot diff: flag rows new since the baseline, and hold the gone rows.
+  function applySnap(info) {
+    const ids = info?.newIds || new Set();
+    for (const r of cache || []) r.sinceLast = ids.has(r.id);
+    for (const r of known.values()) r.sinceLast = ids.has(r.id);
+    gone = info?.gone || [];
+    baseAt = info?.baseAt ?? null;
+    knownVer++;
+  }
+
+  // Fresh rows from this tab's session cache. Returns hit.
+  function restoreSession() {
     if (!isSearchPage(location.href)) return false;
     const key = searchKey(location.href);
     const hit = store.get(key);
-    if (hit) adopt(key, hit.rows, hit.truncated, `Cached ${ago(Date.now() - hit.at)}.`);
-    return !!hit;
+    if (!hit) return false;
+    adopt(key, hit.rows, hit.truncated, `Cached ${ago(Date.now() - hit.at)}.`, cfg.remember ? snaps.get(key) : null);
+    return true;
+  }
+
+  // Session cache first, else the remembered results from a previous visit (no fetch).
+  function restore() {
+    if (restoreSession()) return true;
+    if (!cfg.remember || !isSearchPage(location.href)) return false;
+    const key = searchKey(location.href);
+    const snap = snaps.get(key);
+    if (!snap?.rows.length) return false;
+    adopt(key, snap.rows, snap.truncated, `Saved ${ago(Date.now() - snap.at)}. Refresh for current listings.`, snap);
+    return true;
   }
 
   let runCtrl = null; // AbortController of the in-flight search, aborted on navigation
   async function run(force = false) {
-    if (!force && restore()) return;
+    if (!force && restoreSession()) return;
     runCtrl?.abort();
     const ctrl = runCtrl = new AbortController();
     const id = ++runId;
@@ -1157,7 +1324,7 @@
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
       if (res.sample) rawSample = res.sample;
       store.set(key, res.rows, res.truncated);
-      adopt(key, res.rows, res.truncated);
+      adopt(key, res.rows, res.truncated, '', cfg.remember ? snaps.save(key, res.rows, res.truncated) : null, true);
     } catch (err) {
       if (id !== runId || ctrl.signal.aborted) return;
       cache = null;
@@ -1191,8 +1358,10 @@
   };
   let knownVer = 0;
   // Insertion-ordered; re-learning an id moves it to the end, oldest evicted past KNOWN_MAX.
-  const learn = (rows) => {
-    marks.observe(rows);
+  // `observe` = these rows are fresh from REA: record sightings and price changes. Rows
+  // replayed from a cache or snapshot are only decorated, or stale prices would register.
+  const learn = (rows, observe = true) => {
+    if (observe) marks.observe(rows);
     marks.decorate(rows);
     for (const r of rows) if (r.id) { known.delete(r.id); known.set(r.id, r); }
     for (const k of known.keys()) { if (known.size <= KNOWN_MAX) break; known.delete(k); }
@@ -1208,7 +1377,7 @@
     const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
     const ppb = +r.beds > 1 && isFinite(r.ppb) ? `<span>$${r.ppb}/bed</span>` : '';
     const star = r.starred ? '<span class="rf-b-star">★ Shortlisted</span>' : '';
-    const fresh = r.isNew ? '<span class="rf-b-new">New</span>' : '';
+    const fresh = r.isNew || r.sinceLast ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${r.priceDelta < 0 ? 'down' : 'up'}">Was ${esc(r.prevPrice)}</span>` : '';
     return star + fresh + avail + moved + insp + ppb;
   };
@@ -1329,6 +1498,7 @@
       const hadState = cacheKey || ui.run.disabled;
       runCtrl?.abort(); // stop crawling the old search
       runId++;
+      applySnap(null);
       cache = null;
       cacheKey = null;
       ui.run.disabled = ui.refresh.disabled = false;

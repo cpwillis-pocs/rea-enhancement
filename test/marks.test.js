@@ -7,19 +7,15 @@ const { listing } = require('./helpers');
 const mem = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), _m: m }; };
 const row = (id, price = '$700 per week') => core.toRow(listing({ id, _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}` } }, price: { display: price } }), false);
 
-test('marksStore: baseline not new, later sightings new for 48h', () => {
-  let t = 1e12;
+test('marksStore: "new" from REA listed date only (per-search newness lives in snapshots)', () => {
+  const t = Date.UTC(2026, 8, 23);
   const st = core.marksStore(mem(), () => t);
-  const a = [row('146500001')];
-  st.observe(a); st.decorate(a);
-  assert.equal(a[0].isNew, false, 'first-use baseline');
-  t += 10 * 6e4;
-  const b = [row('146500002')];
-  st.observe(b); st.decorate(b);
-  assert.equal(b[0].isNew, true);
-  t += 49 * 36e5;
-  st.decorate(b);
-  assert.equal(b[0].isNew, false);
+  const fresh = core.toRow(listing({ id: '146500001', dateListed: new Date(t - 36e5).toISOString() }), false);
+  const old = core.toRow(listing({ id: '146500002', dateListed: new Date(t - 5 * 864e5).toISOString() }), false);
+  const undated = row('146500003');
+  st.observe([fresh, old, undated]); st.decorate([fresh, old, undated]);
+  assert.deepEqual([fresh.isNew, old.isNew, undated.isNew], [true, false, false]);
+  assert.ok(undated.firstSeen instanceof Date);
 });
 
 test('marksStore: price change detection', () => {

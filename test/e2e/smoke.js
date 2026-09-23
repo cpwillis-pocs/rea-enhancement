@@ -244,6 +244,54 @@ const html = (n) => {
     await slow.close();
   }
 
+  // Remembered state: a new tab (fresh sessionStorage) shows the saved results without
+  // fetching; Refresh diffs against them. Clock moved 1 day so it counts as a new visit.
+  {
+    const ctx = await browser.newContext();
+    let variant = 0, fetched = 0;
+    await ctx.route('**/*', (route) => {
+      const u = new URL(route.request().url());
+      if (u.origin !== ORIGIN) return route.fulfill({ status: 204, body: '' });
+      fetched++;
+      const ids = variant ? ['148000002', '148000003'] : ['148000001', '148000002'];
+      const r = results({ exact: ids.map((id) => listing({ id, _links: { canonical: { href: `${ORIGIN}/property-unit-nsw-bondi-${id}` } } })) });
+      return route.fulfill({ status: 200, contentType: 'text/html', body: `<html><body><main></main><script>window.ArgonautExchange=${JSON.stringify(exchange(r))};</script></body></html>` });
+    });
+    const p1 = await ctx.newPage();
+    await p1.clock.install({ time: new Date('2026-09-23T10:00:00+10:00') });
+    await p1.goto(SEARCH);
+    await p1.addScriptTag({ content: SCRIPT });
+    await p1.click('#rf-launch');
+    await p1.click('#rf-run');
+    await p1.waitForFunction(() => /2 of 2 listings match/.test(document.querySelector('.rf-status').textContent));
+    await p1.close();
+
+    const p2 = await ctx.newPage();
+    await p2.clock.install({ time: new Date('2026-09-24T10:00:00+10:00') });
+    await p2.goto(SEARCH);
+    const before = fetched;
+    await p2.addScriptTag({ content: SCRIPT });
+    await p2.click('#rf-launch');
+    await p2.waitForFunction(() => /Saved/.test(document.querySelector('.rf-status').textContent));
+    assert.equal(fetched, before, 'remembered results shown without fetching');
+    variant = 1;
+    await p2.click('#rf-refresh');
+    await p2.waitForFunction(() => /no longer listed/.test(document.querySelector('.rf-status').textContent), null, { timeout: 10000 });
+    const st = await p2.textContent('.rf-status');
+    console.log('after refresh:', st);
+    assert.match(st, /1 new since/);
+    assert.match(st, /1 no longer listed/);
+    await p2.click('#rf-more summary');
+    await p2.check('#rf-newOnly');
+    assert.deepEqual(await p2.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['148000003']);
+    await p2.uncheck('#rf-newOnly');
+    await p2.check('#rf-showGone');
+    assert.match(await p2.textContent('.rf-item[data-id="148000001"] .rf-avail'), /no longer listed/);
+    await p2.uncheck('#rf-remember');
+    assert.equal(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'opt-out clears');
+    await ctx.close();
+  }
+
   // Large result set renders in chunks of 100.
   {
     const big = await browser.newPage();
