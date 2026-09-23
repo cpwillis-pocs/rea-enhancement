@@ -1262,6 +1262,26 @@
       .map(icsFold).join('\r\n') + '\r\n';
   };
 
+  // Printable shortlist: a standalone HTML document (all text escaped), light theme forced.
+  const printHtml = (rows, now = new Date()) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Rental shortlist ${ymdLocal(now)}</title><style>
+body{font:13px/1.45 system-ui,-apple-system,sans-serif;color:#111;background:#fff;margin:24px}
+h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
+.l{display:grid;grid-template-columns:150px 1fr;gap:14px;padding:12px 0;border-top:1px solid #ddd;break-inside:avoid}
+.l img{width:150px;height:110px;object-fit:cover;border-radius:6px;background:#eee}
+.p{font-weight:700;font-size:15px}.a{font-weight:600}.m{color:#444;margin-top:2px}.n{margin-top:6px;padding:6px 8px;background:#f4f4f6;border-radius:4px;white-space:pre-wrap}
+.box{margin-top:8px;height:64px;border:1px dashed #aaa;border-radius:4px;color:#999;font-size:11px;padding:4px}
+.u{color:#666;font-size:11px;word-break:break-all}@media print{body{margin:10mm}}
+</style></head><body><h1>Rental shortlist</h1><div class="sub">${rows.length} listing${rows.length === 1 ? '' : 's'} · printed ${esc(now.toLocaleDateString('en-AU'))}</div>
+${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` : '<div></div>'}<div>
+<div class="p">${esc(r.price)}</div><div class="a">${esc(r.address)}</div>
+<div class="m">${esc([r.available && r.available !== '-' ? `Available ${r.available}` : '', [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? `${r.beds ?? '?'} bed · ${r.baths ?? '?'} bath · ${r.cars ?? '?'} car` : '',
+  Number.isFinite(r.upfront) ? `move-in $${r.upfront.toLocaleString('en-AU')}` : ''].filter(Boolean).join(' · '))}</div>
+${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
+${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}
+${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
+</div></div>`).join('')}</body></html>`;
+
   // Heuristic drift detection: parsing "worked" but the fields we depend on are gone.
   function schemaWarnings(rows) {
     if (!rows.length) return [];
@@ -1299,7 +1319,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1569,6 +1589,7 @@
         <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+        <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
         <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
         <input type="file" accept="application/json,.json" hidden>
       </div>
@@ -1915,6 +1936,16 @@
       download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
     });
     ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
+    ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
+      const rows = shortlistRows();
+      if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
+      const w = window.open('', '_blank');
+      if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
+      w.document.open();
+      w.document.write(printHtml(rows));
+      w.document.close();
+      w.addEventListener('load', () => w.print(), { once: true });
+    });
     ui.slBar.querySelector('[data-sl=compare]').addEventListener('click', (e) => {
       ui.compare = !ui.compare;
       e.currentTarget.setAttribute('aria-pressed', String(ui.compare));

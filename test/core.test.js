@@ -342,3 +342,14 @@ test('activeFilters / removedBy: labels, per-filter removal counts, amenity chip
   assert.deepEqual(core.activeFilters({ ...core.DEFAULT_CFG, maxKm: '5' }), [], 'max km without an anchor is inactive');
   assert.deepEqual(core.activeFilters(core.DEFAULT_CFG), []);
 });
+
+test('printHtml: escaped, one block per listing', () => {
+  const html = core.printHtml([{ id: '1', url: 'https://www.realestate.com.au/property-x-1', price: '$700 per week', address: '<b>1 A St</b>',
+    available: '12 Oct', beds: 2, baths: 1, cars: 1, upfront: 4200, inspections: [{ label: 'Sat 10am' }], note: 'pets?', appStatus: 'applied' }],
+  new Date(2026, 8, 23));
+  assert.ok(html.startsWith('<!doctype html>'));
+  assert.ok(html.includes('&lt;b&gt;1 A St&lt;/b&gt;') && !html.includes('<b>1 A St'));
+  assert.equal((html.match(/class="l"/g) || []).length, 1);
+  assert.match(html, /move-in \$4,200/);
+  assert.match(html, /Status: applied/);
+});

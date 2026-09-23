@@ -474,6 +474,22 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 22. Print: opens a document with one block per shortlisted listing.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    for (const n of [1, 2]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    const [pop] = await Promise.all([ctx.waitForEvent('page'), page.click('[data-sl=print]')]);
+    await pop.waitForLoadState();
+    assert.equal(await pop.$$eval('.l', (e) => e.length), 2);
+    assert.match(await pop.title(), /Rental shortlist/);
+    console.log('print shortlist: ok');
+    await pop.close();
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
