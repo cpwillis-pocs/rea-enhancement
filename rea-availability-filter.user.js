@@ -510,6 +510,17 @@
     return what ? `${places} · ${what}` : places;
   };
 
+  // Everything this tool keeps in a storage area: keys share the prefix, so it can be measured
+  // and removed without touching REA's own data. Sizes are UTF-16 (2 bytes a character).
+  const TOOL_PREFIX = 'rea-avail-filter/';
+  const toolKeys = (storage) => {
+    const out = [];
+    try { for (let i = 0; i < storage.length; i++) { const k = storage.key(i); if (k && k.startsWith(TOOL_PREFIX)) out.push(k); } } catch { /* blocked */ }
+    return out;
+  };
+  const toolBytes = (storage) => toolKeys(storage).reduce((n, k) => { try { return n + 2 * (k.length + (storage.getItem(k) || '').length); } catch { return n; } }, 0);
+  const fmtBytes = (b) => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
+
   const snapshotStore = (storage, now = () => Date.now()) => {
     const load = () => {
       try {
@@ -1634,7 +1645,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, marketStats, searchLabel, incomePct, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1815,6 +1826,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
     padding:8px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
@@ -2023,6 +2035,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
+          <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
+            <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
           <label>Household income, $ a year before tax (optional)<input type="number" id="rf-income" min="0" step="1000" inputmode="numeric" placeholder="eg 120000"
             title="Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser."></label>
         </details>
@@ -2434,6 +2448,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       downloadIcs(rows);
     });
     ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
+    const storageLine = panel.querySelector('.rf-storage-n');
+    const paintStorage = () => {
+      const ls = storageOr('localStorage'), ss = storageOr('sessionStorage');
+      const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
+      storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${n} remembered search${n === 1 ? '' : 'es'}).`;
+    };
+    panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
+    panel.querySelector('[data-forget]').addEventListener('click', () => {
+      if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
+      for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
+      marks.invalidate();
+      location.reload();
+    });
     ui.saved = panel.querySelector('.rf-saved');
     ui.savedResult = new Map();
     ui.saved.querySelector('[data-saved-check]').addEventListener('click', (e) => checkSaved(e.currentTarget));

@@ -737,6 +737,25 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24f. Storage line and "Delete all my data" (tool keys only).
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    page.on('dialog', (d) => d.accept());
+    await page.evaluate(() => localStorage.setItem('reaOwnKey', 'keep me'));
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.hover('.rf-item:nth-child(1)'); await page.click('.rf-item:nth-child(1) >> [data-act=s]');
+    await page.click('.rf-settings summary');
+    await page.waitForFunction(() => document.querySelector('.rf-storage-n').textContent);
+    assert.match(await page.textContent('.rf-storage-n'), /Stored in this browser only: \d+ KB \(1 shortlisted, 0 hidden, 1 remembered search\)/);
+    await Promise.all([page.waitForEvent('load'), page.click('[data-forget]')]);
+    const keys = await page.evaluate(() => Object.keys(localStorage).concat(Object.keys(sessionStorage)));
+    assert.deepEqual(keys.filter((k) => k.startsWith('rea-avail-filter/')), [], 'tool data gone');
+    assert.ok(keys.includes('reaOwnKey'), "REA's own data kept");
+    console.log('delete all data: ok');
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

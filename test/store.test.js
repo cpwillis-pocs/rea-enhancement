@@ -171,3 +171,11 @@ test('discovery: a null/empty branch does not cache a miss for deeper siblings',
   assert.equal(core.extractCoords({ id: '1', meta: { x: {} }, price: {} }), null);
   assert.deepEqual(core.extractCoords({ id: '2', meta: { x: { geo: { latitude: -33.8, longitude: 151.2 } } }, price: {} }), { lat: -33.8, lng: 151.2 });
 });
+
+test('toolKeys/toolBytes/fmtBytes: only this tool\'s keys', () => {
+  const m = memStorage();
+  m.setItem('rea-avail-filter/v1', 'abc'); m.setItem('rea-avail-filter/marks/v1', '{}'); m.setItem('reaOwn', 'xxxxxxxx');
+  assert.deepEqual(core.toolKeys(m).sort(), ['rea-avail-filter/marks/v1', 'rea-avail-filter/v1']);
+  assert.equal(core.toolBytes(m), 2 * ('rea-avail-filter/v1abc'.length + 'rea-avail-filter/marks/v1{}'.length));
+  assert.deepEqual([core.fmtBytes(10), core.fmtBytes(2048), core.fmtBytes(3 * 1024 * 1024)], ['10 B', '2 KB', '3.0 MB']);
+});
