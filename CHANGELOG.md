@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.15.2
+
+- Faster: reading a results page is about 40% quicker (heads-up and pool checks no longer recompile or backtrack), shortlist/hide/note clicks write about half as much work (the stored shortlist is reused until another tab changes it), and re-rendering after a click keeps the listings you had shown in one pass.
+- Backups now keep when you opened each kept listing.
+- Internals: shared helpers for market grouping, storage keys, hidden agencies/suburbs, plurals and listing facts; one rule for hidden elements.
+
 ## 2.15.1
 
 - Remembered searches take about 20% less browser storage; the per-tab cache no longer stores values it rebuilds anyway.
