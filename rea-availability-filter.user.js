@@ -501,6 +501,7 @@
     } catch { return null; }
   })();
 
+  const bootAt = Date.now();
   const store = rowStore(window.sessionStorage);
   let rawSample = boot?.results?.exact?.items?.find((i) => i.listing)?.listing ?? null;
 
@@ -728,8 +729,9 @@
     try {
       if (force) pageMemo.clear();
       const onProgress = (m) => { if (id === runId) setStatus(m); };
+      // Refresh means "newer than what I'm looking at", so the load-time seed is skipped too.
       const res = await fetchAllPages(base, onProgress, {
-        seed: boot,
+        seed: force || Date.now() - bootAt > ROWS_TTL_MS ? null : boot,
         getPage: (url) => getPage(url, { onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
@@ -751,15 +753,17 @@
   // React-owned nodes) and idempotent, so the MutationObserver can't feed back on itself.
 
   const known = new Map(); // listing id -> row, from any source
-  // pageUrl -> Promise<results>; shared by annotation and full searches so a page is
-  // fetched once. Failures are evicted so they can be retried.
+  // pageUrl -> { at, p: Promise<results> }; shared by annotation and full searches so a
+  // page is fetched once per ROWS_TTL_MS. Failures are evicted so they can be retried.
   const pageMemo = new Map();
   const getPage = (url, opts) => {
-    if (!pageMemo.has(url)) {
-      pageMemo.set(url, fetchResults(url, opts).catch((e) => { pageMemo.delete(url); throw e; }));
-      if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
-    }
-    return pageMemo.get(url);
+    const hit = pageMemo.get(url);
+    if (hit && Date.now() - hit.at < ROWS_TTL_MS) return hit.p;
+    const p = fetchResults(url, opts).catch((e) => { pageMemo.delete(url); throw e; });
+    pageMemo.delete(url); // re-insert so Map order stays oldest-first for eviction
+    pageMemo.set(url, { at: Date.now(), p });
+    if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
+    return p;
   };
   const learn = (rows) => { for (const r of rows) if (r.id) known.set(r.id, r); };
   const rowsOf = (results) => [
@@ -815,7 +819,7 @@
     const href = location.href;
     const key = searchKey(href), n = pageNum(href);
     if (cacheKey === key && cache) return scheduleAnnotate();
-    if (boot && boot.key === key && boot.page === n) return scheduleAnnotate();
+    if (boot && boot.key === key && boot.page === n && Date.now() - bootAt < ROWS_TTL_MS) return scheduleAnnotate();
     try { learn(rowsOf(await getPage(pageUrl(href, n)))); } catch { return; }
     if (location.href === href) scheduleAnnotate();
   }

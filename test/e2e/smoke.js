@@ -118,6 +118,12 @@ const html = (n) => {
   const csvBody = fs.readFileSync(await csv.path(), 'utf8');
   assert.ok(csvBody.startsWith('\ufeffavailable_date,'), 'csv has BOM + header');
 
+  // Refresh bypasses the seed and memo: every page refetched once.
+  const pre = hits.length;
+  await page.click('#rf-refresh');
+  await page.waitForFunction(() => !document.querySelector('#rf-refresh').disabled, null, { timeout: 15000 });
+  assert.deepEqual(hits.slice(pre).sort(), [1, 2, 3], 'refresh refetched all pages');
+
   // Reload: rows restored from session cache without refetching.
   const before = hits.length;
   await page.reload();
