@@ -474,22 +474,49 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
     await page.click('#rf-more summary');
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
-    await page.selectOption('.rf-preset', '+save');
+    await page.selectOption('.rf-preset', 'c:save');
     assert.match(await status(page), /Saved preset "3-bed"/);
     await page.click('.rf-clear');
-    await page.selectOption('.rf-preset', '3-bed');
+    await page.selectOption('.rf-preset', 'a:3-bed');
     assert.equal(await page.inputValue('#rf-bedsMin'), '3', 'preset applied');
     await page.click('.rf-clear');
     await page.click('[data-amen=pets]');
-    await page.selectOption('.rf-preset', '+bind');
+    await page.selectOption('.rf-preset', 'c:bind');
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
     await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 3000 });
     assert.match(await page.textContent('.rf-preset option'), /Preset: Bondi pets/);
-    await page.selectOption('.rf-preset', '-3-bed');
-    assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('3-bed'));
+    await page.selectOption('.rf-preset', 'd:3-bed');
+    assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:3-bed'));
     console.log('presets: ok');
+    await done(page); await ctx.close();
+  }
+
+  // 21b. Preset names that look like menu commands, bound type across reload, once per visit.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'd:x' : '-3-bed'));
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.selectOption('#rf-type', 'Townhouse');
+    await page.selectOption('.rf-preset', 'c:save');
+    assert.match(await status(page), /Saved preset "-3-bed"/);
+    await page.selectOption('.rf-preset', 'c:bind');
+    assert.match(await status(page), /d:x/);
+    const vals = await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value));
+    assert.ok(vals.includes('a:-3-bed') && vals.includes('d:-3-bed'), 'command-like name kept as a preset');
+    await page.selectOption('#rf-type', '');
+    await page.selectOption('.rf-preset', 'a:-3-bed');
+    assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'applying a "-" name applies, not deletes');
+    await page.evaluate(() => sessionStorage.removeItem('rea-avail-filter/preset-visit'));
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'bound type survives page load');
+    await page.evaluate(() => { const el = document.querySelector('#rf-type'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); });
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    assert.equal(await page.inputValue('#rf-type'), '', 'bound preset applies once per visit, not over edits');
+    console.log('presets names/type: ok');
     await done(page); await ctx.close();
   }
 

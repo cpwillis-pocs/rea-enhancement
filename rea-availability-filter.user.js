@@ -1941,7 +1941,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     // Inputs map 1:1 to cfg keys via their id (rf-<key>); exactOnly keeps its legacy id.
     const fields = Object.keys(DEFAULT_CFG).map((k) => [k, panel.querySelector(`#rf-${k === 'exactOnly' ? 'exact' : k}`)]);
     const read = (el) => (el.type === 'checkbox' ? el.checked : el.value);
-    const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? ''; };
+    const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else { ensureOption(el, v); el.value = v ?? ''; } };
     for (const [k, el] of fields) write(el, cfg[k]);
     queueMicrotask(() => ui.paintAmen?.());
     ui.fields = fields;
@@ -2145,15 +2145,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ui.preset.addEventListener('change', () => {
       const v = ui.preset.value;
       ui.preset.value = '';
-      if (v === '+save' || v === '+bind') {
-        const key = v === '+bind' ? currentKey() : null;
+      if (v === 'c:save' || v === 'c:bind') {
+        const key = v === 'c:bind' ? currentKey() : null;
         const name = window.prompt(key ? 'Preset name (auto-applies on this search):' : 'Preset name:', '');
         const saved = name && presets.save(name, cfg, key);
         if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
-      } else if (v.startsWith('-')) {
-        presets.remove(v.slice(1));
-        setStatus(`Deleted preset "${v.slice(1)}".`);
-      } else if (v) applyPreset(presets.get(v));
+      } else if (v.startsWith('d:')) {
+        presets.remove(v.slice(2));
+        setStatus(`Deleted preset "${v.slice(2)}".`);
+      } else if (v.startsWith('a:')) applyPreset(presets.get(v.slice(2)));
       fillPresets();
     });
     // Bulk actions: one write, one re-render, one undo that restores the exact previous state.
@@ -2579,19 +2579,49 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const list = presets.list();
     const bound = presets.forSearch(currentKey());
     ui.preset.innerHTML = `<option value="">${bound ? `Preset: ${esc(bound.name)}` : 'Presets…'}</option>` +
-      list.map((p) => `<option value="${esc(p.name)}">Apply: ${esc(p.name)}${p.key ? (p.key === currentKey() ? ' (this search)' : ' (another search)') : ''}</option>`).join('') +
-      '<option value="+save">Save current filters…</option><option value="+bind">Save for this search…</option>' +
-      list.map((p) => `<option value="-${esc(p.name)}">Delete: ${esc(p.name)}</option>`).join('');
+      list.map((p) => `<option value="a:${esc(p.name)}">Apply: ${esc(p.name)}${p.key ? (p.key === currentKey() ? ' (this search)' : ' (another search)') : ''}</option>`).join('') +
+      '<option value="c:save">Save current filters…</option><option value="c:bind">Save for this search…</option>' +
+      list.map((p) => `<option value="d:${esc(p.name)}">Delete: ${esc(p.name)}</option>`).join('');
+  }
+
+  // A search's bound preset applies once per visit in this tab (a reload doesn't re-apply it
+  // over your edits). Leaving for a search without one puts back the filters you had before.
+  const PRESET_VISIT_KEY = 'rea-avail-filter/preset-visit';
+  function enterSearchPresets(key) {
+    const bound = key && presets.forSearch(key);
+    let visited = null;
+    try { visited = window.sessionStorage.getItem(PRESET_VISIT_KEY); } catch { /* blocked */ }
+    if (bound) {
+      if (visited === key) return;
+      if (!ui.prePreset) ui.prePreset = { ...cfg };
+      applyPreset(bound);
+      try { window.sessionStorage.setItem(PRESET_VISIT_KEY, key); } catch { /* blocked */ }
+      return;
+    }
+    try { window.sessionStorage.removeItem(PRESET_VISIT_KEY); } catch { /* blocked */ }
+    if (ui.prePreset) {
+      const before = ui.prePreset;
+      ui.prePreset = null;
+      applyPreset({ name: 'your previous filters', cfg: Object.fromEntries([...FILTER_KEYS, 'anchor', 'sort'].map((k) => [k, before[k]])) });
+    }
   }
 
   // Apply a preset's filters through the normal field path (so everything stays in sync).
   function applyPreset(p) {
     if (!p) return;
     const next = { ...cfg, ...Object.fromEntries(FILTER_KEYS.map((k) => [k, DEFAULT_CFG[k]])), ...p.cfg };
-    for (const [k, el] of ui.fields) if (next[k] !== cfg[k]) (el.type === 'checkbox' ? (el.checked = !!next[k]) : (el.value = next[k] ?? ''));
+    for (const [k, el] of ui.fields) {
+      ensureOption(el, next[k]);
+      if (el.value !== String(next[k] ?? '') || el.type === 'checkbox') (el.type === 'checkbox' ? (el.checked = !!next[k]) : (el.value = next[k] ?? ''));
+    }
     ui.paintAmen();
     ui.fields[0][1].dispatchEvent(new Event('change'));
     setStatus(`Applied preset "${p.name}".`);
+  }
+
+  // A select can't take a value it has no option for yet (eg type before results load).
+  function ensureOption(el, v) {
+    if (el.tagName === 'SELECT' && v && ![...el.options].some((o) => o.value === v)) el.add(new Option(v, v));
   }
 
   function fillTypes(rows) {
@@ -2873,8 +2903,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
       fillPresets();
-      const bound = key && presets.forSearch(key);
-      if (bound) setTimeout(() => applyPreset(bound), 0); // after the old search's state is cleared below
+      setTimeout(() => enterSearchPresets(key), 0); // after the old search's state is cleared below
       lastKey = key;
       if (cacheKey && cacheKey === key) return;
       const hadState = cacheKey || busy;
@@ -2943,7 +2972,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       // Another tab changed the shortlist/hidden/notes: pick it up here.
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }
     }));
-    step('presets', () => { fillPresets(); const b = presets.forSearch(currentKey()); if (b) applyPreset(b); });
+    step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
     step('share', () => {
       const rows = shareFromHash(location.hash);
       if (!rows) return;
