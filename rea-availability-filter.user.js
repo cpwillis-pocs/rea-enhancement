@@ -1574,6 +1574,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     letter-spacing:0;color:var(--rf-fg)}
   .rf-check input{margin:0;accent-color:var(--rf-accent)}
   .rf-actions{display:flex;gap:8px;align-items:center}
+  .rf-controls>.rf-actions:not(.rf-exports){position:sticky;bottom:-12px;background:var(--rf-bg);padding:6px 0;z-index:1}
   .rf-btn{flex:1;padding:9px 12px;border:0;border-radius:6px;background:var(--rf-accent);color:#fff;
     font:600 13px system-ui,sans-serif;cursor:pointer}
   .rf-btn:hover{background:var(--rf-accent-hover)}
@@ -1697,7 +1698,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-badge .rf-b-down{background:#087a50}
   .rf-badge .rf-b-up{background:#c60}
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
-    .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:40vh} }
+    .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:48vh}
+    .rf-actions{flex-wrap:wrap} .rf-actions .rf-bulk{flex:1 1 100%}
+    .rf-acts,.rf-note,.rf-note-edit,.rf-app{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
+    .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px} }
+  .rf-btn{white-space:nowrap}
   `;
 
   const EMPTY_INTRO = 'Set your dates, then search.<br>Every result page is merged and sorted by availability.';
