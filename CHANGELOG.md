@@ -2,6 +2,17 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.17.0
+
+- **Taken listings**: "Deposit taken", "Under application" and "Leased" (headline only, for Leased) are tagged in the drawer and on REA's cards, with a **Hide listings already taken** filter and an export column.
+- **Suburb medians**: in a search across several suburbs, rent is compared with the listing's own suburb and bed count ("at median for Maroubra 2-bed") when there are enough of them, so a cheaper suburb no longer reads as a bargain against a dearer one. Best value and Best match follow.
+- **Pin saved searches**: pinned searches are kept when you open more than 3; a banner says which search stopped being remembered.
+- **Calendar**: optional reminder before each inspection (Settings: none / 30 min / 1 h / 2 h, default 1 h), agency, apply-via, lease and your status in the event notes, and **Add to calendar** for one listing in its ⋯ menu.
+- **Heads-up** also flags a required professional clean, rent payment fees and garden/pool upkeep.
+- Fixed: a cancelled open home (or a dropped clause) now leaves the shortlist when the listing is next seen in search results, and is shown as "Inspection … cancelled" for a week instead of prompting "Did you inspect?".
+- Fixed: fortnightly rents ("$1,200 per fortnight") are halved and nightly rents scaled to a week; inspection times on REA's cards show in the listing's own time zone; "Available 1/11" is read as a date.
+- Re-check works through the least recently seen shortlisted listings first, and says when there are more; exports add application date, checklist results and hide reason.
+
 ## 2.16.1
 
 - Fixed: "Inspections available…" or "Parking available now" no longer read as the home's availability date; lease terms need the number next to "lease"/"term" ("renovated 3 months ago, lease…" isn't a 3-month lease; "12-mth lease" is 12); "Shop 3/12 Smith St" and "Suite 1, Level 2, 5 Smith St" group into their building; "Address on request" and number-less streets no longer count as twins.

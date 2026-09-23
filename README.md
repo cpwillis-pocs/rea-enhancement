@@ -31,9 +31,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Lease overlap**: with your current lease end set, each listing shows the days of double rent (and cost) or the nights you'd need to cover, sortable.
 - **Lease term** and **Apply via** portal picked out of the text; filter out leases shorter than you need; availability read from the description when REA's date is missing.
 - **Same building**: see other units in the building, spot the same place listed twice, or keep one listing per building.
-- **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
+- **Rent vs median** for the same bed count in your results (eg "12% below 2-bed median"); when a search spans several suburbs, each listing is compared with its own suburb ("at median for Maroubra 2-bed").
+- **Taken listings**: "Deposit taken", "Under application" or "Leased" in the listing text is tagged in the drawer and on REA's cards; **Hide listings already taken** filters them out.
 - **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
-- **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval and lease-break terms, picked out of the listing text; **Hide if mentioned** filters them out.
+- **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval, lease-break terms, a required professional clean, rent payment fees and garden/pool upkeep, picked out of the listing text; **Hide if mentioned** filters them out.
 - **Household income** (optional): rent as a share of income, flagged over 30%.
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
@@ -58,7 +59,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
-- **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder.
+- **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder. **Pin** a search to keep it when you open others (3 are remembered); you're told when one is forgotten.
 - **Opened tracking**: "opened 2d ago" on listings you've looked at, and a **Not opened yet** filter.
 - **Hide with a reason** (too small, location, condition, price) so you remember why later.
 - **Application follow-up**: "did you inspect?" after an inspection passes, time since you applied, a "follow up?" nudge, a **Needs action** filter, and your record with each agency.
@@ -72,7 +73,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ![Market view](docs/screenshots/market.jpg)
 
-**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist. Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and previous price.
+**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
 
 **Dark mode and mobile width** follow your system settings. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 
