@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## Unreleased
+
+- Remembers results per search between visits; Refresh tags listings new since the last visit and counts ones no longer listed (optionally shown). "New since last visit only" filter; "Newest first" falls back to first-seen time. Opt-out setting clears stored results.
+- "New" is now per search (was: first time this browser saw a listing, which tagged every listing in a newly searched suburb).
+- Backups include remembered searches.
+
 ## 2.2.0
 
 - Rolling "available within 2/4/8/12 weeks" filter.
