@@ -14,6 +14,8 @@ const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filt
 const ORIGIN = 'https://www.realestate.com.au';
 const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 const PAGES = 3;
+// Fixed clock so fixture dates keep their meaning whatever day this runs.
+const FIXED = new Date('2026-09-23T10:00:00+10:00');
 
 const dates = ['Available now', 'Available 12 Oct 2026', 'Available Mon 2nd Nov', 'Contact agent', 'Available 20/12/2026'];
 const pageResults = (n) => results({
@@ -39,6 +41,7 @@ const html = (n) => {
 (async () => {
   const browser = await pw.chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const page = await browser.newPage();
+  await page.clock.install({ time: FIXED });
   const hits = [];
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -220,6 +223,7 @@ const html = (n) => {
   // Navigating to another search mid-crawl aborts it: no further page fetches, UI usable.
   {
     const slow = await browser.newPage();
+    await slow.clock.install({ time: FIXED });
     const got = [];
     await slow.route('**/*', async (route) => {
       const u = new URL(route.request().url());
@@ -295,6 +299,7 @@ const html = (n) => {
   // Large result set renders in chunks of 100.
   {
     const big = await browser.newPage();
+    await big.clock.install({ time: FIXED });
     await big.route('**/*', require('./fixtures').serve([], { pages: 6, perPage: 25 }));
     await big.goto(SEARCH);
     await big.addScriptTag({ content: SCRIPT.replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;') });

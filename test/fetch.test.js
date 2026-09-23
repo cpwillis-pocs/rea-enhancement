@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+require('./clock');
 const core = require('../rea-availability-filter.user.js');
 const { listing, results, page } = require('./helpers');
 
