@@ -497,3 +497,21 @@ test('after-inspection prompts: inspected? then apply?', () => {
   t += 3 * 864e5;
   assert.equal(core.needsAction(st.shortlist()[0], t), 'apply');
 });
+
+test('a past inspection is remembered after REA drops it from the listing; backups keep answers', () => {
+  let t = Date.now();
+  const st = core.marksStore(mem(), () => t);
+  const r = Object.assign(row('146500072'), { inspections: [{ at: t + 864e5, label: 'Mon' }] });
+  st.toggle('146500072', 's', r);
+  t += 2 * 864e5;
+  st.observe([Object.assign(row('146500072'), { inspections: [] })]); // listing refetched without it
+  const s1 = st.shortlist()[0];
+  assert.equal(s1.lastInspect, r.inspections[0].at);
+  assert.equal(core.needsAction(s1, t), 'inspected');
+  st.answerInspect('146500072');
+  const back = st.exportData().m['146500072'];
+  assert.equal(typeof back.nd, 'number'); assert.equal(back.li, r.inspections[0].at);
+  const other = core.marksStore(mem(), () => t);
+  other.importJson(st.exportJson());
+  assert.equal(core.needsAction(other.shortlist()[0], t), '', 'restored answer is not asked again');
+});

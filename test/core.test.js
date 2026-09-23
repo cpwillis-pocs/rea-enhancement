@@ -140,7 +140,7 @@ test('toDate / extractListed', () => {
 test('applyFilters: inspectOn and listed sort', () => {
   const L = (id, o) => core.toRow(listing({ id, ...o }), false);
   const soon = new Date(Date.now() + 2 * 864e5); soon.setHours(10, 0, 0, 0);
-  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const iso = (d) => d.toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }); // inspectOn compares in the listing's zone
   const rows = [
     L('a', { inspections: [{ startTime: soon.toISOString() }], dateListed: '2026-09-01' }),
     L('b', { dateListed: '2026-09-10' }),
@@ -634,4 +634,40 @@ test('building filter matches the building exactly (2 Hall St is not 12 Hall St)
   const key = core.buildingKey(rows[0].address);
   assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, building: `${key}|2 Hall St` }).map((r) => r.id), ['1', '3']);
   assert.equal(core.activeFilters({ ...core.DEFAULT_CFG, building: `${key}|2 Hall St` })[0].label, 'Building: 2 Hall St');
+});
+
+test('text parsers: availability, lease terms, address keys (QA cases)', () => {
+  const now = new Date(2026, 8, 23);
+  assert.equal(core.availFromText('Inspections available 1st October. Parking available now.', now), null, 'not the home');
+  assert.ok(core.availFromText('Inspections are available Saturday. Available from 1st October.', now) instanceof Date, 'a later real match still counts');
+  const t = (x) => core.leaseCode(core.leaseTermOf(x));
+  assert.deepEqual(['the 12-month lease', '12-mth lease', 'Available in 2 months, 12 month lease', 'renovated 3 months ago, lease available', '3 bed townhouse 2 years old, long term lease'].map(t),
+    ['12', '12', '12', '', '']);
+  assert.equal(core.addressKey('Address available on request, Bondi NSW 2026'), '');
+  assert.equal(core.addressKey('Hall Street, Bondi NSW 2026'), '', 'no street number: not one address');
+  assert.equal(core.buildingKey('Shop 3/12 Smith St, Bondi NSW 2026'), '12 smith st bondi nsw 2026');
+  assert.equal(core.buildingKey('Suite 1, Level 2, 5 Smith St, Bondi NSW 2026'), '5 smith st bondi nsw 2026');
+});
+
+test('buildings: hidden and gone listings do not count; building filter overrides one-per-building', () => {
+  const rows = [
+    { id: '1', url: 'a', address: '5/12 Hall St, Bondi NSW 2026', priceNum: 700 },
+    { id: '2', url: 'b', address: '6/12 Hall St, Bondi NSW 2026', priceNum: 650, hidden: true },
+    { id: '3', url: 'c', address: '7/12 Hall St, Bondi NSW 2026', priceNum: 600, gone: true },
+    { id: '4', url: 'd', address: '8/12 Hall St, Bondi NSW 2026', priceNum: 800 },
+  ];
+  core.withBuildings(rows);
+  assert.equal(rows[0].buildingN, 2);
+  const key = core.buildingKey(rows[0].address);
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, onePerBuilding: true, building: `${key}|12 Hall St` }).map((r) => r.id), ['1', '4']);
+});
+
+test('lease fit: a lease end already past gives no fit; ties sort by rent; exports carry lease columns', () => {
+  const now = new Date(2026, 8, 23);
+  assert.equal(core.leaseFit({ avail: new Date(2026, 9, 1), priceNum: 700 }, '2026-09-01', now), null);
+  const rows = [{ id: 'dear', url: 'a', avail: new Date(2026, 9, 20), priceNum: 800 }, { id: 'cheap', url: 'b', avail: new Date(2026, 9, 20), priceNum: 600 }];
+  assert.deepEqual(core.applyFilters(rows, { ...core.DEFAULT_CFG, leaseEnd: '2026-10-10', sort: 'fit' }, now).map((r) => r.id), ['cheap', 'dear']);
+  const [head, line] = core.toCsv([{ ...rows[1], lease: '6-12', applyVia: 'Snug', fit: { overlap: 0, gap: 9, cost: 0 } }]).split('\n');
+  const cell = (h) => line.split(',')[head.split(',').indexOf(h)];
+  assert.deepEqual([cell('lease'), cell('apply_via'), cell('lease_fit')], ['Lease 6–12 mo', 'Snug', '9 nights gap']);
 });

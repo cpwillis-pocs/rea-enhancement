@@ -87,11 +87,12 @@
 
   // ---------------------------------------------------------------- config
 
+  // `building` narrows one search's results, so it is never stored (or carried to the next search).
   const loadCfg = () => {
-    try { return sanitizeCfg(JSON.parse(localStorage.getItem(CFG_KEY))); } catch { return {}; }
+    try { const { building, ...c } = sanitizeCfg(JSON.parse(localStorage.getItem(CFG_KEY))); return c; } catch { return {}; }
   };
   const saveCfg = (cfg) => {
-    try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch { /* private mode */ }
+    try { const { building, ...c } = cfg; localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch { /* private mode */ }
   };
 
   // Per-search row cache in sessionStorage (tab-scoped, survives reloads/back-nav).
@@ -218,9 +219,13 @@
   const CHECK_MAX = 12;
   const cleanChecks = (o) => (isObj(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => k && (v === 'y' || v === 'n')).slice(0, CHECK_MAX).map(([k, v]) => [clip(k, 30), v])) : {});
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
+  // Needs a street number in the street part ("Address available on request, Bondi NSW 2026" has
+  // only the postcode, so two such listings aren't the same place).
   const addressKey = (a) => {
-    const k = String(a || '').toLowerCase().replace(/[^a-z0-9/]+/g, ' ').replace(/\s+/g, ' ').trim();
-    return /\d/.test(k) && k.length > 6 ? k : '';
+    const street = String(a || '').split(',')[0];
+    if (!/\d/.test(street) || /\brequest\b/i.test(a)) return '';
+    const k = String(a).toLowerCase().replace(/[^a-z0-9/]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return k.length > 6 ? k : '';
   };
   const PRICE_HISTORY_MAX = 10;
   const RELIST_GAP_MS = HOUR_MS; // old listing unseen at least this long before a same-address one counts as a relist
@@ -322,7 +327,11 @@
           const e = m[r.id] || (m[r.id] = { f: t });
           e.l = t;
           delete e.x; // seen again, so not gone
-          if (e.s) e.d = mergeSummary(e.d, summary(r)); // keep the shortlist's copy current, never poorer
+          if (e.s) {
+            const li = Math.max(e.li || 0, lastPast(e.d?.in, t)); // REA drops an inspection once it's over
+            e.d = mergeSummary(e.d, summary(r)); // keep the shortlist's copy current, never poorer
+            if (li) e.li = li;
+          }
           if (Number.isFinite(r.priceNum)) {
             if (e.p != null && e.p !== r.priceNum) {
               // History only once the price actually changes (seeded with the previous price), so
@@ -475,7 +484,7 @@
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
               gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck),
               // The latest inspection that has already happened (the display list drops past ones).
-              lastInspect: Math.max(0, ...(Array.isArray(d.in) ? d.in : []).map((i) => i?.at).filter((at) => typeof at === 'number' && at + INSPECT_MINUTES * 60e3 < now())) || null,
+              lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
               inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
             };
           });
@@ -485,7 +494,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, nd: e.nd, li: e.li, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -508,6 +517,7 @@
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
+          for (const k of ['nd', 'li']) if (typeof e[k] === 'number') cur[k] = Math.max(cur[k] || 0, e[k]);
           n++;
         }
         for (const f of Object.keys(NAMED)) {
@@ -1165,10 +1175,18 @@
   // Availability from the description when REA's field is missing: "Available from 1st Nov",
   // "available now", "Availability: 12/11/2026". Not "available for inspection", "available to view".
   const AVAIL_TEXT = /\bavailab(?:le|ility)\b\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|[^.;,\n()]{3,32})/i;
+  // Something else being available (an inspection, the agent, parking) isn't the move-in date.
+  const AVAIL_NOT_HOME = /\b(?:inspections?|agents?|viewings?|appointments?|parking|car ?spaces?|garages?|storage|lock-?up|keys?|furniture|nbn|internet)\s*(?:is|are)?\s*$/i;
+  const AVAIL_TEXT_G = new RegExp(AVAIL_TEXT.source, 'gi');
   const availFromText = (text, now = new Date()) => {
-    const m = String(text || '').match(AVAIL_TEXT);
-    if (!m) return null;
-    return /^(now|immediately)$/i.test(m[1].trim()) ? startOfDay(now) : parseAvail(`Available ${m[1]}`, now);
+    const src = String(text || '');
+    AVAIL_TEXT_G.lastIndex = 0;
+    for (let m; (m = AVAIL_TEXT_G.exec(src));) {
+      if (AVAIL_NOT_HOME.test(src.slice(Math.max(0, m.index - 24), m.index))) continue;
+      const d = /^(now|immediately)$/i.test(m[1].trim()) ? startOfDay(now) : parseAvail(`Available ${m[1]}`, now);
+      if (d) return d;
+    }
+    return null;
   };
 
   // How the agent takes applications, when the text names a portal (display only, never contacted).
@@ -1185,13 +1203,15 @@
   const leaseTermOf = (text) => {
     const t = String(text || '').toLowerCase();
     if (/\bflexible (?:lease|term)s?\b|\blease (?:terms?|length) (?:is )?(?:flexible|negotiable)\b/.test(t)) return { flexible: true };
-    const mo = '(?:months?|mths?|mo)\\b';
-    let m = t.match(new RegExp(`\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})\\s*${mo}[^.;]{0,20}?\\b(?:lease|tenancy|term)`))
-      || t.match(new RegExp(`\\b(?:lease|tenancy|term)\\b[^.;]{0,20}?\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})\\s*${mo}`));
+    // The number must sit next to "lease"/"term": the gap can't cross a comma, a full stop or another number
+    // ("available in 2 months, 12 month lease" is 12; "renovated 3 months ago, lease..." is nothing).
+    const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)';
+    let m = t.match(new RegExp(`\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})${mo}${gap}${word}`))
+      || t.match(new RegExp(`${word}\\b${gap}\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})${mo}`));
     if (m) return { min: Math.min(+m[1], +m[2]), max: Math.max(+m[1], +m[2]) };
-    m = t.match(new RegExp(`\\b(\\d{1,2})\\s*${mo}[^.;]{0,20}?\\b(?:lease|tenancy|term)`)) || t.match(new RegExp(`\\b(?:lease|tenancy|term)\\b[^.;]{0,20}?\\b(\\d{1,2})\\s*${mo}`));
+    m = t.match(new RegExp(`\\b(\\d{1,2})${mo}${gap}${word}`)) || t.match(new RegExp(`${word}\\b${gap}\\b(\\d{1,2})${mo}`));
     if (m && +m[1] >= 1 && +m[1] <= 60) return { min: +m[1], max: +m[1] };
-    m = t.match(/\b(\d)\s*(?:years?|yrs?)\b[^.;]{0,12}?\b(?:lease|tenancy|term)/) || t.match(/\b(?:lease|tenancy|term)\b[^.;]{0,12}?\b(\d)\s*(?:years?|yrs?)\b/);
+    m = t.match(/\b(\d)\s*-?\s*(?:years?|yrs?)\b[^.;,\d]{0,12}?\b(?:lease|tenancy|term)/) || t.match(/\b(?:lease|tenancy|term)\b[^.;,\d]{0,12}?\b(\d)\s*-?\s*(?:years?|yrs?)\b/);
     return m ? { min: +m[1] * 12, max: +m[1] * 12 } : null;
   };
   // Compact form for rows and storage: "6-12", "12", "flex" or "".
@@ -1398,7 +1418,7 @@
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
     'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
-  const PRESET_KEYS = [...FILTER_KEYS, 'anchor', 'sort']; // what a preset saves and restores
+  const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort']; // what a preset saves and restores
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -1414,7 +1434,7 @@
     inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
     value: (a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b),
     distance: (a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || byAvail(a, b),
-    fit: (a, b) => fitKey(a.fit) - fitKey(b.fit) || byAvail(a, b),
+    fit: (a, b) => fitKey(a.fit) - fitKey(b.fit) || (a.priceNum ?? Infinity) - (b.priceNum ?? Infinity) || byAvail(a, b),
     allnear: (a, b) => (worstKm(a) ?? Infinity) - (worstKm(b) ?? Infinity) || byAvail(a, b),
     match: (a, b) => (b.score ?? -1) - (a.score ?? -1) || byAvail(a, b),
   };
@@ -1695,11 +1715,11 @@
         const need = num(cfg.leaseMin), l = need ? leaseFromCode(r.lease) : null;
         return !l || l.flexible || l.max >= need;
       });
-    return cfg.onePerBuilding ? onePerBuilding(kept) : kept;
+    return cfg.onePerBuilding && !cfg.building ? onePerBuilding(kept) : kept;
   }
 
   // Same building: a unit address without its unit ("5/12 Hall St, Bondi" -> "12 hall st bondi").
-  const UNIT_PREFIX = /^\s*(?:(?:unit|apartment|apt|flat|suite|villa|townhouse|lot)\s*[\w-]+\s*[,\/]?\s*|[\w-]+\s*\/\s*)/i;
+  const UNIT_PREFIX = /^\s*(?:(?:(?:unit|apartment|apt|flat|suite|villa|townhouse|lot|shop|studio|penthouse|room)\s*[\w-]+|level\s*\d+)\s*[,\/]?\s*)+|^\s*(?:(?:shop|studio|penthouse|suite)\s+)?[\w-]+\s*\/\s*/i;
   const buildingKey = (address) => (UNIT_PREFIX.test(String(address || '')) ? addressKey(String(address).replace(UNIT_PREFIX, '')) : '');
   // One per building keeps the cheapest unit; houses and unit-less addresses always stay.
   const onePerBuilding = (rows) => {
@@ -1715,7 +1735,7 @@
   const withBuildings = (rows) => {
     const byB = new Map(), byA = new Map();
     const add = (m, k, r) => { if (k) { if (!m.has(k)) m.set(k, []); m.get(k).push(r); } };
-    for (const r of dedupe(rows)) { add(byB, buildingKey(r.address), r); add(byA, addressKey(r.address), r); }
+    for (const r of dedupe(rows)) if (!r.gone && !ruledOut(r)) { add(byB, buildingKey(r.address), r); add(byA, addressKey(r.address), r); } // count what you could still pick
     for (const r of rows) {
       const b = buildingKey(r.address), same = b ? byB.get(b) || [] : [];
       r.buildingN = same.length > 1 ? same.length : 0;
@@ -1730,6 +1750,7 @@
   const leaseFit = (r, leaseEnd, now = new Date()) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(leaseEnd || '')) || !(r.avail instanceof Date) || isNaN(r.avail)) return null;
     const end = dayNum(new Date(`${leaseEnd}T00:00:00`)), start = Math.max(dayNum(r.avail), dayNum(now));
+    if (end < dayNum(now)) return null; // your lease already ended: nothing to fit
     const overlap = Math.max(0, end - start + 1), gap = Math.max(0, start - end - 1);
     return { overlap, gap, cost: overlap && Number.isFinite(r.priceNum) ? Math.round((overlap * r.priceNum) / 7) : 0 };
   };
@@ -1741,7 +1762,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
@@ -1749,7 +1770,7 @@
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
+      : k === 'leaseText' ? leaseLabel(leaseFromCode(r.lease)) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -1767,6 +1788,8 @@
   // Upcoming inspections as an iCalendar file (RFC 5545) for any calendar app. REA gives a
   // start time only, so each event is INSPECT_MINUTES long. '' when there are none.
   const INSPECT_MINUTES = 15;
+  // Start of the latest inspection in `ins` that has finished by `t` (0 if none).
+  const lastPast = (ins, t) => Math.max(0, ...(Array.isArray(ins) ? ins : []).map((i) => i?.at).filter((at) => typeof at === 'number' && at + INSPECT_MINUTES * 60e3 < t));
   const icsText = (v) => String(v ?? '').replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\r\n?|\n/g, '\\n');
   const icsTime = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   // Lines over 75 octets are folded: CRLF + one space, per RFC 5545 3.1.
@@ -2675,6 +2698,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const typed = (el) => el?.tagName === 'TEXTAREA' || el?.type === 'text' || el?.type === 'number' || el?.type === 'date';
     const renderNow = (defer) => { if (defer && pressing) renderAfterPress = true; else showResults(); };
     panel.addEventListener('pointerdown', () => { pressing = true; }, true);
+    panel.addEventListener('keydown', () => { pressing = false; }, true); // a press that never got its pointerup can't hold renders
     const endPress = () => setTimeout(() => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } }, 0);
     for (const type of ['pointerup', 'pointercancel', 'click']) document.addEventListener(type, endPress, true); // pointerup's timeout runs after its click
     const onChange = (e) => {
@@ -2689,6 +2713,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const wasRemember = cfg.remember;
       cfg = next;
       saveCfg(cfg);
+      if (!cfg.remember || !cfg.remindSaved) document.getElementById('rf-remind')?.remove();
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
         ui.savedCtrl?.abort();
         snaps.clear();
@@ -2738,7 +2763,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (!r?.buildingAddr) return;
         write(panel.querySelector('#rf-building'), `${buildingKey(r.address)}|${r.buildingAddr}`);
         onChange({ type: 'change' });
-        return setStatus(`Showing the ${r.buildingN} listings at ${r.buildingAddr}. Remove the Building chip to go back.`);
+        return setStatus(`Showing ${plural(ui.rows?.length ?? r.buildingN, 'listing')} at ${r.buildingAddr}. Remove the Building chip to go back.`);
       }
       const b = e.target.closest('.rf-acts button');
       if (!b) return;
@@ -2753,6 +2778,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (b.dataset.act === 'anchor') write(panel.querySelector('#rf-anchor'), at);
         else {
           const lines = String(cfg.places || '').split('\n').filter((l) => l.trim());
+          if (parsePlaces(cfg.places).some((p) => Math.abs(p.lat - r.lat) < 1e-4 && Math.abs(p.lng - r.lng) < 1e-4)) return setStatus('Already in Other places.');
           if (lines.length >= PLACES_MAX) return setStatus(`Other places holds ${PLACES_MAX}; remove one first.`, true);
           write(panel.querySelector('#rf-places'), [...lines, `${clip(String(r.address).split(',')[0], 24).replace(/:/g, '')}: ${at}`].join('\n'));
           msg = 'Added to Other places (under More filters).';
@@ -2984,6 +3010,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     panel.querySelector('[data-forget]').addEventListener('click', () => {
       if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
       for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
+      document.getElementById('rf-remind')?.remove();
       marks.invalidate();
       location.reload();
     });
@@ -3228,6 +3255,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (cache) marks.decorate(cache);
     if (gone.length) marks.decorate(gone);
     marks.decorate([...known.values()]);
+    if (cache) withBuildings(cache); // hiding one changes "N in this building"
     knownVer++;
     updateCounts();
     const top = ui.list.scrollTop;
@@ -3710,15 +3738,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const REMIND_KEY = `${TOOL_PREFIX}remind-at`;
   const REMIND_EVERY_MS = DAY_MS;
   function remindSaved() {
-    if (!cfg.remember || !cfg.remindSaved || !isSearchPage(location.href)) return;
-    const entries = Object.values(snaps.exportData());
-    const newest = Math.max(0, ...entries.map((e) => e.at));
+    const old = document.getElementById('rf-remind');
+    if (!cfg.remember || !cfg.remindSaved) { old?.remove(); return; }
+    if (old || !isSearchPage(location.href)) return;
+    const stale = Object.values(snaps.exportData()).filter((e) => Date.now() - e.at >= REMIND_EVERY_MS);
     const remind = keyStore(storageOr('localStorage'), REMIND_KEY);
-    if (!entries.length || Date.now() - newest < REMIND_EVERY_MS || Date.now() - (+remind.get() || 0) < REMIND_EVERY_MS) return;
+    if (!stale.length || Date.now() - (+remind.get() || 0) < REMIND_EVERY_MS) return;
     remind.set(String(Date.now()));
+    const oldest = Math.min(...stale.map((e) => e.at));
     const tip = Object.assign(document.createElement('div'), { id: 'rf-remind' });
     tip.setAttribute('role', 'status');
-    tip.innerHTML = `${esc(plural(entries.length, 'saved search', 'es'))}, last checked ${esc(ago(Date.now() - newest))}.
+    tip.innerHTML = `${esc(plural(stale.length, 'saved search', 'es'))} not checked for ${esc(ago(Date.now() - oldest).replace(/ ago$/, ''))}.
       <button type="button" data-r="check" class="rf-btn">Check now</button><button type="button" data-r="later" class="rf-btn sec">Later</button>`;
     tip.addEventListener('click', (e) => {
       const b = e.target.closest('[data-r]');
@@ -3944,6 +3974,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       renderSaved();
       setTimeout(() => enterSearchPresets(key), 0); // after the old search's state is cleared below
       lastKey = key;
+      if (cfg.building) { cfg.building = ''; const b = document.getElementById('rf-building'); if (b) b.value = ''; }
+      remindSaved();
       if (cacheKey && cacheKey === key) return;
       const hadState = cacheKey || busy;
       runCtrl?.abort(); // stop crawling the old search
