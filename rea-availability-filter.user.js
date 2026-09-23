@@ -369,6 +369,8 @@
     o.text = clip(r.text, SNAP_TEXT_MAX);
     o.inspections = cleanInspections(r.inspections);
     o.features = (Array.isArray(r.features) ? r.features : []).slice(0, 40).map((f) => clip(f, 80));
+    // Stored as computed: the text kept here is clipped, so recomputing could miss a late "no pets".
+    o.amen = Object.fromEntries(AMENITIES.map((a) => [a.id, r.amen?.[a.id] ?? null]));
     return o;
   };
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
@@ -391,7 +393,9 @@
     r.lng = typeof o?.lng === 'number' ? o.lng : null;
     r.photos = typeof o?.photos === 'number' ? o.photos : null;
     r.floorplan = typeof o?.floorplan === 'boolean' ? o.floorplan : null;
-    r.amen = amenitiesOf({ features: r.features, amenText: r.address ? r.text.replace(r.address.toLowerCase(), ' ') : r.text });
+    const stored = o?.amen && typeof o.amen === 'object'
+      ? Object.fromEntries(AMENITIES.map((a) => [a.id, o.amen[a.id] === 'yes' || o.amen[a.id] === 'no' ? o.amen[a.id] : null])) : null;
+    r.amen = stored || amenitiesOf({ features: r.features, amenText: r.address ? r.text.replace(r.address.toLowerCase(), ' ') : r.text });
     return r;
   };
   const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < SEARCH_KEY_MAX;

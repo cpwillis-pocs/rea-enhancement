@@ -91,3 +91,15 @@ test('snapshotStore: quota falls back to newest search, then drops gone lists', 
   assert.ok(st.get(KEY), 'current search kept');
   assert.equal(st.get(other), null, 'older search dropped to fit');
 });
+
+test('snapshotStore: amenity states survive the round trip even when text is clipped', () => {
+  const st = core.snapshotStore(mem(), () => 1e12);
+  const r = core.toRow(listing({ id: '146500090', _links: { canonical: { href: 'https://www.realestate.com.au/property-x-146500090' } },
+    description: `${'Lovely home. '.repeat(40)}Sorry, no pets.` }), false);
+  assert.equal(r.amen.pets, 'no');
+  st.save(KEY, [r], false);
+  assert.equal(st.get(KEY).rows[0].amen.pets, 'no');
+  const bad = core.snapshotStore(mem(), () => 1e12);
+  bad.importData({ [KEY]: { at: 5, rows: [{ id: '146500091', url: 'https://www.realestate.com.au/property-x-146500091', amen: { pets: '<b>', pool: 'yes' } }] } });
+  assert.deepEqual([bad.get(KEY).rows[0].amen.pets, bad.get(KEY).rows[0].amen.pool], [null, 'yes']);
+});
