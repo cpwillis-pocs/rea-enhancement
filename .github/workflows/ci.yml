@@ -57,6 +57,8 @@ jobs:
       fail-fast: false
       matrix:
         node: [20, 22, 24] # engines.node is >=20
+    env:
+      TZ: ${{ matrix.node == 20 && 'America/Los_Angeles' || 'Australia/Sydney' }} # dates must not depend on the runner's zone
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v5

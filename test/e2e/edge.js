@@ -679,9 +679,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
   {
     const ctx = await browser.newContext();
     const other = 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1';
-    await ctx.addInitScript((k) => {
-      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: Date.now() - 864e5 * 2, ids: [], rows: [], gone: [] } } }));
-    }, other);
+    // Init scripts run before the page's fake clock is installed: stamp from FIXED, not Date.now().
+    await ctx.addInitScript(([k, at]) => {
+      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at, ids: [], rows: [], gone: [] } } }));
+    }, [other, +FIXED - 864e5 * 2]);
     const page = await open(ctx);
     await page.click('#rf-launch');
     assert.ok(await page.isVisible('.rf-saved'), 'saved searches shown');
@@ -939,7 +940,8 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.uncheck('#rf-onePerBuilding');
     await page.click('.rf-item[data-id="146500000"] [data-act=bldg]');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), 3, 'only that building');
-    assert.match(await status(page), /Showing the 3 listings at 2 Curlewis St/);
+    assert.match(await status(page), /Showing 3 listings at 2 Curlewis St/);
+    assert.ok(!('building' in JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1')))), 'the building filter is not stored');
     await page.click('.rf-achip:has-text("Building: 2 Curlewis St")');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), before, 'chip removes the building filter');
     // Measure from a listing; add it as a place (feedback line).
@@ -950,6 +952,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('.rf-item[data-id="146500003"] [data-act=place]');
     assert.match(await page.inputValue('#rf-places'), /^10\/2 Curlewis St: -33/);
     assert.match(await page.textContent('.rf-places-fb'), /10\/2 Curlewis St ✓/);
+    await page.click('.rf-item[data-id="146500003"] .rf-acts-more summary');
+    await page.click('.rf-item[data-id="146500003"] [data-act=place]');
+    assert.match(await status(page), /Already in Other places/);
+    assert.equal((await page.inputValue('#rf-places')).split('\n').length, 1, 'not added twice');
     await page.fill('#rf-places', 'Work: -33.87, 151.21\nnonsense'); await page.dispatchEvent('#rf-places', 'input');
     assert.match(await page.textContent('.rf-places-fb'), /Work ✓ · 1 line not understood/);
     // After-inspection prompt on the shortlist: a past inspection you were down for.
@@ -961,7 +967,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.selectOption('.rf-sl-filter', '!');
     assert.match(await item('146500000'), /Did you inspect\?/);
     await page.click('.rf-item[data-id="146500000"] [data-na=yes]');
-    assert.equal(await page.inputValue('.rf-item[data-id="146500000"] select[data-app]').catch(() => 'gone'), 'gone', 'no longer needs action once answered');
+    await page.waitForSelector('.rf-item[data-id="146500000"]', { state: 'detached', timeout: 3000 }); // no longer needs action once answered
     await page.selectOption('.rf-sl-filter', '');
     assert.equal(await page.inputValue('.rf-item[data-id="146500000"] select[data-app]'), 'inspected');
     await page.click('[data-view=results]');
@@ -972,12 +978,20 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
   // 24m. Saved-search reminder by the launcher (at most daily), Check now runs Check all.
   {
     const ctx = await browser.newContext();
-    await ctx.addInitScript(() => {
-      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1': { at: Date.now() - 3 * 864e5, ids: [], rows: [], gone: [] } } }));
-    });
+    await ctx.addInitScript((at) => {
+      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1': { at, ids: [], rows: [], gone: [] } } }));
+    }, +FIXED - 3 * 864e5);
     const page = await open(ctx);
     await page.waitForSelector('#rf-remind');
-    assert.match(await page.textContent('#rf-remind'), /1 saved search, last checked 3d ago/);
+    assert.match(await page.textContent('#rf-remind'), /1 saved search not checked for 3d\./);
+    await page.click('#rf-launch'); await page.click('.rf-settings summary');
+    await page.uncheck('#rf-remindSaved');
+    assert.equal(await page.$('#rf-remind'), null, 'turning reminders off removes the prompt');
+    await page.check('#rf-remindSaved');
+    await page.evaluate(() => localStorage.removeItem('rea-avail-filter/remind-at'));
+    await page.click('#rf-panel .rf-x'); // the prompt sits by the launcher, under the drawer
+    await page.evaluate(() => history.pushState(null, '', location.href.replace(/in-[^/]+/, 'in-coogee,+nsw+2034'))); // a different search re-checks
+    await page.waitForSelector('#rf-remind');
     await page.click('#rf-remind [data-r=check]');
     await waitStatus(page, /Checked 1 saved search/, 30000);
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
