@@ -18,16 +18,16 @@ npm run ci      # check + e2e, the whole gate locally
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR and push to `main`, weekly (to catch Chromium or Node changes), and on demand from **Actions → ci → Run workflow**:
+`.github/workflows/ci.yml` runs on PRs, weekly (to catch Chromium or Node changes), and on demand from **Actions → ci → Run workflow**. It deliberately doesn't run on pushes to `main`, to keep within the repo's monthly Actions minutes: run `npm run ci` locally, or the workflow on demand, before releasing.
 
 | Job | What | When |
 |---|---|---|
 | lint | `npm run lint` | always (first) |
-| unit | unit tests on Node 20, 22, 24, with a JUnit report | PR, push, schedule, on demand `all`/`unit` |
-| e2e | `smoke.js` and `edge.js` in parallel; failure screenshots and logs as artifacts | PR, push, schedule, on demand `all`/`e2e` |
-| coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | push, schedule, on demand `all`/`coverage` |
+| unit | unit tests on Node 20, 22, 24, with a JUnit report | PR, schedule, on demand `all`/`unit` |
+| e2e | `smoke.js` and `edge.js` in parallel; failure screenshots and logs as artifacts | PR, schedule, on demand `all`/`e2e` |
+| coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | schedule, on demand `all`/`coverage` |
 | screenshots | regenerates `docs/screenshots` and uploads them (nothing committed) | on demand `screenshots` |
-| version-bump | a script change must raise `@version` | PR, push |
+| version-bump | a script change must raise `@version` | PR |
 
 On-demand options: **suite** (all, lint, unit, e2e, coverage, screenshots), **repeat** (run each e2e file 1/3/5/10 times to hunt flaky tests; the run stops at the first failure and says which attempt) and **artifacts** (upload logs and screenshots even when everything passes). A newer push to the same PR cancels the older run. Playwright's version is pinned in the workflow and its browsers are cached.
 

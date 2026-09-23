@@ -1,12 +1,11 @@
 name: ci
 
-# Gate for PRs and main, a weekly run to catch Chromium/Node drift, and an on-demand run
-# (Actions tab -> ci -> Run workflow) that can pick a suite, repeat e2e to hunt flakes, or
-# regenerate the README screenshots as an artifact.
+# Gate for PRs, a weekly run to catch Chromium/Node drift, and an on-demand run (Actions tab ->
+# ci -> Run workflow) that can pick a suite, repeat e2e to hunt flakes, or regenerate the README
+# screenshots as an artifact. Deliberately not run on push: pushes to main would use up the
+# repo's monthly Actions minutes; run it on demand before releasing instead.
 on:
   pull_request:
-  push:
-    branches: [main]
   schedule:
     - cron: '0 20 * * 0' # Mondays 06:00 AEST
   workflow_dispatch:
@@ -29,7 +28,7 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR supersedes the older run; main and scheduled runs always finish.
+# A newer push to the same PR supersedes the older run; scheduled and on-demand runs always finish.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -128,7 +127,7 @@ jobs:
   # UI line coverage from both e2e files, held to a floor so new UI code comes with a scenario.
   coverage:
     if: >-
-      (github.event_name == 'push' || github.event_name == 'schedule') ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["all","coverage"]'), inputs.suite))
     needs: lint
     runs-on: ubuntu-latest
@@ -180,8 +179,8 @@ jobs:
   # Installs auto-update from main via @updateURL, and Tampermonkey only installs a
   # higher @version, so a script change without a bump would never reach users.
   version-bump:
-    # PRs compare against their base; direct pushes to main against the previous tip.
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000')
+    # PRs compare against their base.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -190,7 +189,7 @@ jobs:
           fetch-depth: 0
       - name: Require @version bump when the userscript changes
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           f=rea-availability-filter.user.js
           if git diff --quiet "$BASE" HEAD -- "$f"; then echo "script unchanged"; exit 0; fi
