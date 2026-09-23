@@ -342,6 +342,25 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 17. Star / hide on REA's own cards: stored, reflected, card faded, REA's handlers not reached.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.waitForSelector('article > .rf-badge [data-card-act=s]');
+    await page.evaluate(() => { window.__reaClicks = 0; document.querySelector('article').addEventListener('click', () => window.__reaClicks++); });
+    const id = await page.$eval('article > .rf-badge [data-card-act=s]', (b) => b.dataset.id);
+    await page.click(`article > .rf-badge [data-card-act=s][data-id="${id}"]`);
+    await page.waitForFunction((i) => document.querySelector(`[data-card-act=s][data-id="${i}"]`)?.getAttribute('aria-pressed') === 'true', id);
+    assert.equal(await page.evaluate(() => window.__reaClicks), 0, 'click did not reach REA');
+    assert.equal(await page.evaluate((i) => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m[i].s, id), 1);
+    await page.click(`article > .rf-badge [data-card-act=h][data-id="${id}"]`);
+    await page.waitForFunction((i) => document.querySelector(`article[data-rf-id="${i}"]`)?.dataset.rfMatch === '0', id);
+    await page.click('#rf-launch');
+    assert.match(await page.textContent('.rf-count'), /\(1\)/);
+    console.log('card quick actions: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

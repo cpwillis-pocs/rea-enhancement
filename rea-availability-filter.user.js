@@ -1349,10 +1349,15 @@
   article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
   article[data-rf-match="0"]:hover{opacity:1}
-  .rf-badge{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
+  .rf-badge{position:absolute;top:10px;left:10px;right:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
     font:600 11px/1 system-ui,-apple-system,sans-serif}
   .rf-badge span{padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;white-space:nowrap}
   .rf-badge .rf-b-pets{background:#7c3aed}
+  .rf-card-acts{display:inline-flex;gap:4px;margin-left:auto;pointer-events:auto}
+  .rf-badge .rf-card-acts button{pointer-events:auto;border:0;border-radius:999px;padding:5px 9px;cursor:pointer;
+    font:600 11px/1 system-ui,-apple-system,sans-serif;background:rgba(255,255,255,.92);color:#111;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+  .rf-badge .rf-card-acts button[aria-pressed=true]{background:#e6a700}
+  .rf-badge .rf-card-acts button:focus-visible{outline:2px solid #087a50;outline-offset:1px}
   .rf-badge .rf-b-now{background:#087a50}
   .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
   .rf-badge .rf-b-star{background:#e6a700;color:#111}
@@ -2065,6 +2070,28 @@
     return star + fresh + avail + moved + pets + km + insp + ppb;
   };
 
+  // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
+  // click is stopped in the capture phase so REA's card link doesn't navigate.
+  const cardActsHtml = (r) => `<span class="rf-card-acts">` +
+    `<button type="button" data-card-act="s" data-id="${esc(r.id)}" aria-pressed="${!!r.starred}" aria-label="${r.starred ? 'Remove from shortlist' : 'Shortlist'}" title="${r.starred ? 'Remove from shortlist' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>` +
+    `<button type="button" data-card-act="h" data-id="${esc(r.id)}" aria-label="${r.hidden ? 'Unhide' : 'Hide'} listing" title="${r.hidden ? 'Unhide' : 'Hide'} listing">${r.hidden ? 'Unhide' : 'Hide'}</button></span>`;
+
+  function watchCardActions() {
+    const onAct = (e) => {
+      const b = e.target.closest?.('[data-card-act]');
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type !== 'click') return; // mousedown/pointerdown only swallowed, so REA sees nothing
+      const id = b.dataset.id, act = b.dataset.cardAct;
+      const on = marks.toggle(id, act, rowById(id));
+      refreshMarks();
+      if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); });
+      else if (act === 's') setStatus(on ? 'Added to shortlist.' : 'Removed from shortlist.');
+    };
+    for (const type of ['click', 'mousedown', 'pointerdown']) document.addEventListener(type, onAct, true);
+  }
+
   const filtersActive = () => FILTER_KEYS.some((k) => cfg[k]);
 
   // Match set only changes with cfg or known rows; mutation bursts reuse it.
@@ -2118,7 +2145,7 @@
         if (statics.has(card)) card.dataset.rfPos = '';
       }
       r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
-      const html = badgeHtml(r);
+      const html = badgeHtml(r) + cardActsHtml(r);
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
       if (badge.dataset.rfHtml !== html) { badge.innerHTML = html; badge.dataset.rfHtml = html; }
@@ -2222,6 +2249,7 @@
     step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
     step('navigation', watchNavigation);
     step('cards', watchCards);
+    step('card actions', watchCardActions);
     step('sync', () => window.addEventListener('storage', (e) => {
       // Another tab changed the shortlist/hidden/notes: pick it up here.
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }
