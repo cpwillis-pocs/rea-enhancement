@@ -7,6 +7,8 @@ Versions match the userscript's `@version`; installs auto-update from `main` whe
 - **Heads-up tags** from the listing text: short lease, water usage charged, fees mentioned, invites higher offers, subject to strata approval, lease-break terms. Shown on listings, in Compare and in exports; "no application fee" isn't flagged.
 - **Search the shortlist** by address, note, agency, suburb or status (`/` on the Shortlist tab).
 - Settings shows how much this script stores in your browser, with **Delete all my data** (removes only this script's keys).
+- `x` ticks a shortlisted listing for Compare.
+- Fixed: a yearless date ("20th Jul") rolling into next year read as a date change; the direction of a date change flipped once the new date arrived; the listing bar dropped keyboard focus when REA updated the URL, used the previous listing's details after in-app navigation, and missed storage being cleared in another tab; odd stored field types could break the Shortlist tab.
 
 ## 2.11.0
 
