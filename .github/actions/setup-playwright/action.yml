@@ -1,0 +1,24 @@
+name: Set up Playwright
+description: Install the pinned Playwright package and Chromium, reusing cached browsers.
+inputs:
+  version:
+    description: Playwright version (keep in step with local runs)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Cache Playwright browsers
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ inputs.version }}
+    - name: Install Playwright + Chromium
+      shell: bash
+      env:
+        PW: ${{ inputs.version }}
+        HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        npm install --no-save --no-audit --no-fund "playwright@$PW"
+        # Cached browsers still need the system libraries on a fresh runner.
+        if [ "$HIT" = "true" ]; then npx playwright install-deps chromium; else npx playwright install --with-deps chromium; fi

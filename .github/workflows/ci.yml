@@ -1,30 +1,181 @@
 name: ci
 
-# Runs on PRs so outside contributions get the same gate as `npm run check` locally.
+# Gate for PRs and main, a weekly run to catch Chromium/Node drift, and an on-demand run
+# (Actions tab -> ci -> Run workflow) that can pick a suite, repeat e2e to hunt flakes, or
+# regenerate the README screenshots as an artifact.
 on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 20 * * 0' # Mondays 06:00 AEST
   workflow_dispatch:
+    inputs:
+      suite:
+        description: What to run
+        type: choice
+        default: all
+        options: [all, lint, unit, e2e, coverage, screenshots]
+      repeat:
+        description: Run each e2e file this many times (flake hunting)
+        type: choice
+        default: '1'
+        options: ['1', '3', '5', '10']
+      artifacts:
+        description: Upload e2e logs and screenshots even when everything passes
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A newer push to the same PR supersedes the older run; main and scheduled runs always finish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PLAYWRIGHT_VERSION: 1.56.1
+  FORCE_COLOR: 1
+
 jobs:
-  test:
+  lint:
+    if: github.event_name != 'workflow_dispatch' || inputs.suite != 'screenshots' # every suite but screenshots builds on it
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # version check diffs against the PR base
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      # No dependencies to install for unit tests; playwright only for the browser smoke test.
-      - run: npm run check
-      - run: npx -y playwright@1.56.1 install --with-deps chromium
-      - run: npm install --no-save playwright@1.56.1
-      - run: npm run e2e
+      - name: Syntax, header, changelog, privacy and storage-key invariants
+        run: npm run lint
+
+  unit:
+    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","unit"]'), inputs.suite)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24] # engines.node is >=20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit tests
+        run: |
+          node --test --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination=junit-node${{ matrix.node }}.xml test/*.test.js
+      - name: Summary
+        if: always()
+        run: |
+          f=junit-node${{ matrix.node }}.xml
+          [ -f "$f" ] || exit 0
+          tests=$(grep -o '<testcase ' "$f" | wc -l); fails=$(grep -o '<failure' "$f" | wc -l)
+          echo "### Unit tests on Node ${{ matrix.node }}: $((tests - fails))/$tests passed" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: unit-junit-node${{ matrix.node }}
+          path: junit-node${{ matrix.node }}.xml
+          retention-days: 14
+
+  e2e:
+    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","e2e"]'), inputs.suite)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        file: [smoke, edge] # independent, so they run in parallel
+    env:
+      E2E_ARTIFACTS: e2e-artifacts
+      E2E_TIMEOUT_MS: '600000'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: ./.github/actions/setup-playwright
+        with:
+          version: ${{ env.PLAYWRIGHT_VERSION }}
+      - name: e2e ${{ matrix.file }} (x${{ inputs.repeat || '1' }})
+        run: |
+          n=${{ inputs.repeat || '1' }}
+          for i in $(seq 1 "$n"); do
+            echo "::group::run $i of $n"
+            start=$(date +%s)
+            node test/e2e/${{ matrix.file }}.js || { echo "::error::e2e ${{ matrix.file }} failed on run $i of $n"; exit 1; }
+            echo "::endgroup::"
+            echo "run $i: $(( $(date +%s) - start ))s" >> e2e-times.txt
+          done
+      - name: Summary
+        if: always()
+        run: |
+          { echo "### e2e ${{ matrix.file }}: ${{ job.status }}"; [ -f e2e-times.txt ] && sed 's/^/- /' e2e-times.txt; true; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: failure() || inputs.artifacts
+        with:
+          name: e2e-${{ matrix.file }}-artifacts
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # UI line coverage from both e2e files, held to a floor so new UI code comes with a scenario.
+  coverage:
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'schedule') ||
+      (github.event_name == 'workflow_dispatch' && contains(fromJSON('["all","coverage"]'), inputs.suite))
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COVERAGE_MIN: '98'
+      E2E_ARTIFACTS: e2e-artifacts
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: ./.github/actions/setup-playwright
+        with:
+          version: ${{ env.PLAYWRIGHT_VERSION }}
+      - name: Unit + e2e coverage
+        run: npm run coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            coverage-e2e.txt
+            e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # On demand only: regenerate docs/screenshots from fixtures and hand them back as an artifact
+  # (commit them yourself if they look right).
+  screenshots:
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'screenshots'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: ./.github/actions/setup-playwright
+        with:
+          version: ${{ env.PLAYWRIGHT_VERSION }}
+      - run: npm run screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: docs/screenshots/
+          retention-days: 14
 
   # Installs auto-update from main via @updateURL, and Tampermonkey only installs a
   # higher @version, so a script change without a bump would never reach users.
@@ -32,6 +183,7 @@ jobs:
     # PRs compare against their base; direct pushes to main against the previous tip.
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:

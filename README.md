@@ -99,13 +99,14 @@ Then [open an issue](../../issues/new?template=rea-format-changed.md) with the o
 No dependencies; Node 20+.
 
 ```sh
-npm run check   # syntax check + unit tests (what CI runs first)
+npm run lint    # syntax + project invariants (header, privacy, storage keys, changelog)
+npm run check   # lint + unit tests (what CI runs first)
 npm run e2e     # Chromium tests against fixture pages on the REA origin (needs playwright)
 npm run coverage   # unit + e2e line coverage
 node test/e2e/screenshots.js   # regenerate docs/screenshots
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for layout and rules of thumb. Screenshots use generated fixture data, not real listings.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for layout, rules of thumb and the CI pipeline (which can also be run on demand from the Actions tab, eg to repeat the browser tests or regenerate screenshots). Screenshots use generated fixture data, not real listings.
 
 ## Disclaimer
 

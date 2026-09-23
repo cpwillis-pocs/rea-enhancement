@@ -7,10 +7,31 @@ Issues and PRs welcome. The script is one file with no dependencies, so the bar 
 ```sh
 git clone <this repo>
 cd rea-enhancement
-npm run check   # syntax check + unit tests, exactly what CI runs first
+npm run lint    # syntax + project invariants (header, changelog, privacy, storage keys)
+npm run check   # lint + unit tests, exactly what CI runs first
 npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js); needs `npm i --no-save playwright` + `npx playwright install chromium`
 npm run coverage   # unit coverage of the pure half, then V8 coverage of the UI half across both e2e files -> coverage-e2e.txt
+npm run ci      # check + e2e, the whole gate locally
 ```
+
+`E2E_ARTIFACTS=dir` makes a failing e2e run save a screenshot and the drawer HTML of every open page, plus the sections that passed. `E2E_TIMEOUT_MS` (default 8 min) fails a hung run with the last passing section named. `COVERAGE_MIN=98` fails `npm run coverage` if UI line coverage drops below it.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every PR and push to `main`, weekly (to catch Chromium or Node changes), and on demand from **Actions → ci → Run workflow**:
+
+| Job | What | When |
+|---|---|---|
+| lint | `npm run lint` | always (first) |
+| unit | unit tests on Node 20, 22, 24, with a JUnit report | PR, push, schedule, on demand `all`/`unit` |
+| e2e | `smoke.js` and `edge.js` in parallel; failure screenshots and logs as artifacts | PR, push, schedule, on demand `all`/`e2e` |
+| coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | push, schedule, on demand `all`/`coverage` |
+| screenshots | regenerates `docs/screenshots` and uploads them (nothing committed) | on demand `screenshots` |
+| version-bump | a script change must raise `@version` | PR, push |
+
+On-demand options: **suite** (all, lint, unit, e2e, coverage, screenshots), **repeat** (run each e2e file 1/3/5/10 times to hunt flaky tests; the run stops at the first failure and says which attempt) and **artifacts** (upload logs and screenshots even when everything passes). A newer push to the same PR cancels the older run. Playwright's version is pinned in the workflow and its browsers are cached.
+
+`npm run lint` (`test/lint.js`) enforces what the tests don't: the userscript header (`@grant none`, `@match` only REA, update URLs on `main`, MIT), a CHANGELOG section for the current `@version`, the README install link, no URLs or network APIs outside realestate.com.au, storage keys built from `TOOL_PREFIX`, and no `eval`-style code. `test/lint.test.js` checks the lint itself catches each of these.
 
 Every line of the userscript should be executed by some test: pure functions by `test/*.test.js`, UI code by `test/e2e/*.js`. `npm run coverage` lists any UI line no e2e run reached; add a scenario for it rather than leaving it unexercised. Tests freeze the clock (`test/clock.js`, `page.clock.install`), so fixture dates keep their meaning on any day.
 
