@@ -338,6 +338,7 @@
     r.lng = typeof o?.lng === 'number' ? o.lng : null;
     r.photos = typeof o?.photos === 'number' ? o.photos : null;
     r.floorplan = typeof o?.floorplan === 'boolean' ? o.floorplan : null;
+    r.amen = amenitiesOf(r);
     return r;
   };
   const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < SEARCH_KEY_MAX;
@@ -628,6 +629,35 @@
     return { photos, floorplan: plans == null ? null : plans > 0 };
   };
 
+  // Amenities from feature labels + description. Negations are checked first, so "no pets"
+  // is 'no' rather than matching "pets". State per amenity: 'yes' | 'no' | null (unknown).
+  const AMENITIES = [
+    { id: 'pets', label: 'Pets', yes: 'Pets OK',
+      neg: /\b(?:strictly )?no (?:pets?|animals)\b|\bpets? (?:are )?not (?:allowed|permitted|considered|accepted)\b|\bnot pet[- ]friendly\b/,
+      pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b/ },
+    { id: 'furnished', label: 'Furnished', yes: 'Furnished', neg: /\bunfurnished\b|\bnot furnished\b/,
+      pos: /\b(?:fully |partly |partially |semi[- ])?furnished\b/ },
+    { id: 'aircon', label: 'Air con', yes: 'Air con', neg: /\bno air[- ]?con/,
+      pos: /\bair[- ]?con(?:ditioning|ditioned|ditioner)?\b|\bsplit[- ]system\b|\breverse[- ]cycle\b|\bducted (?:heating (?:and|&) )?(?:cooling|air)\b|\bclimate control\b/ },
+    { id: 'dishwasher', label: 'Dishwasher', yes: 'Dishwasher', neg: /\bno dish ?washer\b/, pos: /\bdish ?washer\b/ },
+    { id: 'laundry', label: 'Own laundry', yes: 'Own laundry', neg: /\b(?:shared|communal|common) laundry\b/,
+      pos: /\b(?:internal|private|separate|own|european) laundry\b|\blaundry (?:room|in unit|facilities)\b|\bin-unit laundry\b|\bwasher\/dryer\b/ },
+    { id: 'outdoor', label: 'Outdoor space', yes: 'Outdoor', neg: /$^/,
+      pos: /\bbalcon(?:y|ies)\b|\bcourtyard\b|\bterrace\b|\bdeck\b|\bprivate garden\b|\bbackyard\b/ },
+    { id: 'robes', label: 'Built-in robes', yes: 'BIRs', neg: /$^/,
+      pos: /\bbuilt[- ]in (?:robes?|wardrobes?)\b|\bbirs?\b|\bwalk[- ]in (?:robe|wardrobe)\b/ },
+    { id: 'pool', label: 'Pool', yes: 'Pool', neg: /\bno pool\b/, pos: /\b(?:swimming |lap |plunge )?pool\b(?! table)/ },
+  ];
+  const amenitiesOf = (row) => {
+    const text = `${(row.features || []).join(' | ')} | ${row.text || ''}`.toLowerCase();
+    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.neg.test(text) ? 'no' : a.pos.test(text) ? 'yes' : null]));
+  };
+  // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
+  const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
+    .filter(([id, st]) => AMENITIES.some((a) => a.id === id) && (st === 'yes' || st === 'no')));
+  const amenCfgString = (o) => Object.entries(o).map(([id, st]) => `${id}:${st}`).join(',');
+  const amenityTags = (r) => AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.yes);
+
   const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
 
   // One malformed listing must not sink a page: rows that throw are dropped.
@@ -676,6 +706,7 @@
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
     row.text = [row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' ').toLowerCase();
+    row.amen = amenitiesOf(row);
     return row;
   };
 
@@ -755,7 +786,7 @@
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
-    type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, sort: 'avail',
+    type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
     remember: true, newOnly: false, showGone: false,
   };
@@ -769,9 +800,9 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'staleOnly'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'staleOnly', 'amenities'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'showGone', 'staleOnly'];
+    'onlyStarred', 'showHidden', 'newOnly', 'showGone', 'staleOnly', 'amenities'];
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember'];
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -884,6 +915,7 @@
     const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax), upMax = num(cfg.upfrontMax);
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
+    const amenReq = Object.entries(parseAmenCfg(cfg.amenities));
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
     const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
     return dedupe(rows)
@@ -892,6 +924,7 @@
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
       .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
+      .filter((r) => amenReq.every(([id, st]) => (st === 'yes' ? r.amen?.[id] === 'yes' : r.amen?.[id] !== 'yes')))
       .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
@@ -908,14 +941,14 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['agency', 'agency'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
-    const v = k === 'availDate' ? r.avail : r[k];
+    const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -1005,7 +1038,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1130,6 +1163,13 @@
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-warn{color:#b45309;font-weight:600}
+  .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
+    font:500 12px system-ui,sans-serif;cursor:pointer}
+  .rf-chip[data-state=yes]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
+  .rf-chip[data-state=no]{background:var(--rf-sec);text-decoration:line-through;color:var(--rf-muted)}
+  .rf-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+  .rf-tags span{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--rf-hover);color:var(--rf-muted)}
   .rf-med.down{color:var(--rf-accent-fg)}
   .rf-med.up{color:#b45309}
   .rf-app{display:flex;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px;color:var(--rf-muted)}
@@ -1142,6 +1182,7 @@
   .rf-badge{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
     font:600 11px/1 system-ui,-apple-system,sans-serif}
   .rf-badge span{padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;white-space:nowrap}
+  .rf-badge .rf-b-pets{background:#7c3aed}
   .rf-badge .rf-b-now{background:#087a50}
   .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
   .rf-badge .rf-b-star{background:#e6a700;color:#111}
@@ -1247,6 +1288,10 @@
             <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
             <label>Type<select id="rf-type"><option value="">Any</option></select></label>
           </div>
+          <div class="rf-amen" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
+            <input type="hidden" id="rf-amenities">
+            ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
+          </div>
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Listed over 3 weeks ago</label>
@@ -1311,8 +1356,31 @@
     const read = (el) => (el.type === 'checkbox' ? el.checked : el.value);
     const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? ''; };
     for (const [k, el] of fields) write(el, cfg[k]);
+    queueMicrotask(() => ui.paintAmen?.());
     ui.fields = fields;
     ui.type = panel.querySelector('#rf-type');
+    // Amenity chips cycle any -> require -> exclude, writing the hidden rf-amenities field.
+    const amenInput = panel.querySelector('#rf-amenities');
+    const paintAmen = () => {
+      const st = parseAmenCfg(amenInput.value);
+      for (const b of panel.querySelectorAll('[data-amen]')) {
+        const a = AMENITIES.find((x) => x.id === b.dataset.amen), v = st[a.id];
+        b.dataset.state = v || '';
+        b.textContent = v === 'yes' ? `+ ${a.label}` : v === 'no' ? `− ${a.label}` : a.label;
+        b.setAttribute('aria-label', `${a.label}: ${v === 'yes' ? 'required' : v === 'no' ? 'excluded' : 'any'}`);
+      }
+    };
+    ui.paintAmen = paintAmen;
+    panel.querySelector('.rf-amen').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-amen]');
+      if (!b) return;
+      const st = parseAmenCfg(amenInput.value), id = b.dataset.amen;
+      st[id] = !st[id] ? 'yes' : st[id] === 'yes' ? 'no' : undefined;
+      if (!st[id]) delete st[id];
+      amenInput.value = amenCfgString(st);
+      paintAmen();
+      amenInput.dispatchEvent(new Event('change'));
+    });
     ui.annotateBox = panel.querySelector('#rf-annotate');
     ui.more = panel.querySelector('#rf-more');
     ui.more.open = MORE_KEYS.some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
@@ -1340,6 +1408,7 @@
     panel.querySelector('.rf-clear').addEventListener('click', () => {
       // Resets filters only; display preferences (sort, annotate, dim) are kept.
       for (const [k, el] of fields) write(el, DISPLAY_PREFS.includes(k) ? cfg[k] : DEFAULT_CFG[k]);
+      ui.paintAmen();
       onChange();
     });
 
@@ -1595,6 +1664,7 @@
             r.bond ? `bond ${r.bond}` : '',
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
+          ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
           ${isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
           ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
@@ -1750,7 +1820,8 @@
     const star = r.starred ? '<span class="rf-b-star">★ Shortlisted</span>' : '';
     const fresh = isFresh(r) ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${priceDir(r)}">Was ${esc(r.prevPrice)}</span>` : '';
-    return star + fresh + avail + moved + insp + ppb;
+    const pets = r.amen?.pets === 'yes' ? '<span class="rf-b-pets">Pets OK</span>' : '';
+    return star + fresh + avail + moved + pets + insp + ppb;
   };
 
   const filtersActive = () => FILTER_KEYS.some((k) => cfg[k]);

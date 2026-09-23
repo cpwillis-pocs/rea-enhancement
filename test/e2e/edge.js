@@ -235,6 +235,30 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 13. Amenity chips: require / exclude cycle, tags shown, REA badge for pets, Clear resets.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const total = await page.$$eval('.rf-item', (e) => e.length);
+    await page.click('#rf-more summary');
+    await page.click('[data-amen=pets]');
+    assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: required');
+    const withPets = await page.$$eval('.rf-item', (e) => e.length);
+    assert.ok(withPets > 0 && withPets < total, `pets required: ${withPets}/${total}`);
+    assert.ok(await page.$$eval('.rf-item .rf-tags', (e) => e.every((t) => /Pets OK/.test(t.textContent))));
+    await page.click('[data-amen=pets]');
+    assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: excluded');
+    const noPets = await page.$$eval('.rf-item', (e) => e.length);
+    assert.equal(noPets, total - withPets);
+    assert.ok(await page.$('article > .rf-badge .rf-b-pets'), 'Pets OK badge on an REA card');
+    await page.click('.rf-clear');
+    assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: any');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    console.log('amenities:', withPets, 'with pets,', noPets, 'without, of', total);
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
