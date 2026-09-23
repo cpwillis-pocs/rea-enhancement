@@ -160,3 +160,26 @@ test('marksStore: application status set, cleared, backed up, validated', () => 
   assert.equal(c.counts().starred, 0);
   assert.deepEqual(core.APP_STATUSES[0], '');
 });
+
+test('marksStore: hidden agencies filter, normalise, back up, restore', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const A = (id, agency) => Object.assign(row(id), { agency });
+  const rows = [A('146500040', 'Ray White  Bondi'), A('146500041', 'LJ Hooker'), A('146500042', '')];
+  assert.equal(st.toggleAgency('Ray White Bondi'), true);
+  st.decorate(rows);
+  const ids = (cfg) => core.applyFilters(rows, cfg).map((r) => r.id).sort();
+  assert.deepEqual(ids({}), ['146500041', '146500042'], 'normalised name match');
+  assert.equal(ids({ showHidden: true }).length, 3);
+  assert.deepEqual(st.hiddenAgencies(), ['Ray White Bondi']);
+  const b = core.marksStore(mem(), () => t);
+  b.importJson(st.exportJson());
+  assert.deepEqual(b.hiddenAgencies(), ['Ray White Bondi']);
+  assert.equal(st.toggleAgency('ray white bondi'), false, 'toggle off by normalised name');
+  assert.equal(st.toggleAgency(''), false);
+});
+
+test('floorplanOnly requires a known floorplan', () => {
+  const rows = [Object.assign(row('146500050'), { floorplan: true }), Object.assign(row('146500051'), { floorplan: false }), row('146500052')];
+  assert.deepEqual(core.applyFilters(rows, { floorplanOnly: true }).map((r) => r.id), ['146500050']);
+});

@@ -280,6 +280,31 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 15. Agency hide (with undo + unhide chip) and floorplan filter.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const total = await page.$$eval('.rf-item', (e) => e.length);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=ag]');
+    assert.match(await status(page), /Hidden all listings from/);
+    const after = await page.$$eval('.rf-item', (e) => e.length);
+    assert.equal(after, total - 6, 'one of three agencies hidden');
+    await page.click('.rf-status .rf-undo');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=ag]');
+    await page.click('#rf-more summary');
+    assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), false);
+    await page.click('[data-unhide-ag]');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), true);
+    await page.check('#rf-floorplanOnly');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total / 2);
+    assert.match(await page.textContent('.rf-item'), /photos · floorplan/);
+    console.log('agency hide + floorplan: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();

@@ -161,6 +161,7 @@
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
   const keep = (e) => e.s || e.h || e.n || e.as;
+  const agencyKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
@@ -215,6 +216,7 @@
           r.hidden = !!e?.h;
           r.note = e?.n || '';
           r.appStatus = e?.as || '';
+          r.agencyHidden = !!(r.agency && load().ag?.[agencyKey(r.agency)]);
           r.firstSeen = e?.f ? new Date(e.f) : null;
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
@@ -271,7 +273,7 @@
         for (const [id, e] of Object.entries(m)) {
           if (keep(e)) out[id] = { s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, d: e.s ? e.d : undefined };
         }
-        return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out };
+        return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {} };
       },
       exportJson() { return JSON.stringify(this.exportData(), null, 1); },
       // Merges a backup: imported choices win per listing. Untrusted input: ids and
@@ -291,6 +293,11 @@
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           n++;
         }
+        if (src.ag && typeof src.ag === 'object') {
+          const d = load();
+          d.ag = d.ag && typeof d.ag === 'object' ? d.ag : {};
+          for (const name of Object.values(src.ag)) if (typeof name === 'string' && agencyKey(name)) d.ag[agencyKey(name)] = clip(name, 80);
+        }
         save();
         return n;
       },
@@ -299,6 +306,17 @@
         const v = Object.values(m);
         return { starred: v.filter((e) => e.s).length, hidden: v.filter((e) => e.h).length, notes: v.filter((e) => e.n).length };
       },
+      // Hidden agencies live beside the per-listing marks: data.ag = { normalisedName: displayName }.
+      toggleAgency(name) {
+        const k = agencyKey(name);
+        if (!k) return false;
+        const d = fresh();
+        d.ag = d.ag && typeof d.ag === 'object' ? d.ag : {};
+        if (d.ag[k]) delete d.ag[k]; else d.ag[k] = clip(name, 80);
+        save();
+        return !!d.ag[k];
+      },
+      hiddenAgencies: () => Object.values(load().ag || {}),
     };
   };
 
@@ -803,7 +821,7 @@
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
-    type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', sort: 'avail',
+    type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
     remember: true, newOnly: false, showGone: false,
   };
@@ -817,9 +835,9 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'staleOnly', 'amenities', 'maxKm'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'staleOnly', 'amenities', 'maxKm', 'floorplanOnly'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm'];
+    'onlyStarred', 'showHidden', 'newOnly', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -942,7 +960,8 @@
     const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
     return dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
-      .filter((r) => cfg.showHidden || !r.hidden)
+      .filter((r) => cfg.showHidden || (!r.hidden && !r.agencyHidden))
+      .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
       .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
@@ -964,7 +983,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['agency', 'agency'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['km', 'km'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
@@ -1173,7 +1192,7 @@
   .rf-item.rf-hidden .rf-card{opacity:.45}
   .rf-acts{position:absolute;top:8px;right:8px;display:flex;gap:4px;opacity:0;transition:opacity .12s}
   .rf-item:hover .rf-acts,.rf-acts:focus-within,.rf-starred .rf-acts,.rf-hidden .rf-acts{opacity:1}
-  .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n]){display:none}
+  .rf-starred:not(:hover):not(:focus-within) .rf-acts :is([data-act=h],[data-act=n],[data-act=ag]){display:none}
   @media (hover:none){.rf-acts{opacity:1}} /* after the opacity:0 rule so it wins */
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
@@ -1186,6 +1205,9 @@
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-warn{color:#b45309;font-weight:600}
+  .rf-agencies{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .rf-agencies[hidden]{display:none}
+  .rf-agencies .rf-label{margin-right:4px}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
@@ -1328,6 +1350,8 @@
           <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
           <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
           <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
+          <label class="rf-check"><input type="checkbox" id="rf-floorplanOnly">Has a floorplan</label>
+          <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies</span><span class="rf-ag-list"></span></div>
           <label class="rf-check"><input type="checkbox" id="rf-annotate">Show availability on REA's result cards</label>
           <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
@@ -1482,6 +1506,14 @@
       const id = b.closest('.rf-item')?.dataset.id;
       if (!id) return;
       if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
+      if (b.dataset.act === 'ag') {
+        const r = rowById(id);
+        if (!r?.agency) return;
+        marks.toggleAgency(r.agency);
+        refreshMarks();
+        ui.list.focus();
+        return offerUndo(`Hidden all listings from ${r.agency}.`, () => { marks.toggleAgency(r.agency); refreshMarks(); });
+      }
       const act = b.dataset.act;
       const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
       const on = marks.toggle(id, act, rowById(id));
@@ -1503,6 +1535,10 @@
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    panel.querySelector('.rf-agencies').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-unhide-ag]');
+      if (b) { marks.toggleAgency(b.dataset.unhideAg); refreshMarks(); }
+    });
     ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
       const data = marks.exportData();
       if (cfg.remember) data.snapshots = snaps.exportData();
@@ -1582,6 +1618,11 @@
   }
 
   const updateCounts = () => {
+    const ags = marks.hiddenAgencies();
+    const box = ui.panel.querySelector('.rf-agencies');
+    box.hidden = !ags.length;
+    box.querySelector('.rf-ag-list').innerHTML = ags.map((a) =>
+      `<button type="button" class="rf-chip" data-unhide-ag="${esc(a)}" aria-label="Show ${esc(a)} again">${esc(a)} ×</button>`).join('');
     const c = marks.counts();
     ui.slCount.textContent = `(${c.starred})`;
     for (const el of ui.panel.querySelectorAll('[data-count]')) el.textContent = `(${c[el.dataset.count]})`;
@@ -1694,6 +1735,8 @@
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
           ${kmLabel(r) ? `<div class="rf-meta">${esc(kmLabel(r))}</div>` : ''}
+          ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency,
+            r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
           ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
           ${isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
@@ -1710,6 +1753,7 @@
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="s" aria-pressed="${r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★' : '☆'}</button>
         <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+        ${r.agency ? `<button data-act="ag" title="Hide every listing from ${esc(r.agency)}" aria-label="Hide agency ${esc(r.agency)}">Hide agency</button>` : ''}
       </div>
       </div>`).join('');
   }
@@ -1912,7 +1956,7 @@
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
       if (badge.dataset.rfHtml !== html) { badge.innerHTML = html; badge.dataset.rfHtml = html; }
-      const m = r.hidden && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
+      const m = (r.hidden || r.agencyHidden) && !cfg.showHidden ? '0' : matches ? (matches.has(id) ? '1' : '0') : '';
       if ((card.dataset.rfMatch || '') !== m) { if (m) card.dataset.rfMatch = m; else delete card.dataset.rfMatch; }
     }
   }
