@@ -677,3 +677,21 @@ test('lease fit: a lease end already past gives no fit; ties sort by rent; expor
   const cell = (h) => line.split(',')[head.split(',').indexOf(h)];
   assert.deepEqual([cell('lease'), cell('apply_via'), cell('lease_fit')], ['Lease 6–12 mo', 'Snug', '9 nights gap']);
 });
+
+test('2.17 fixes: fortnightly and nightly rents, yearless d/m dates, inspection labels in the listing zone, tracker export columns', () => {
+  assert.equal(core.parsePrice('$1,200 per fortnight'), 600);
+  assert.equal(core.parsePrice('$1200 pf'), 600);
+  assert.equal(core.parsePrice('$180 per night'), 1260);
+  assert.equal(core.parsePrice('$650 per week ($1,300 per fortnight)'), 650, 'the first figure decides');
+  const now = new Date(2026, 8, 23);
+  assert.equal(+core.parseAvail('Available 1/11', now), +new Date(2026, 10, 1));
+  assert.equal(+core.parseAvail('Available 5/1', now), +new Date(2027, 0, 5), 'rolls to next year');
+  assert.equal(core.parseAvail('Available 30/2', now), null);
+  assert.equal(core.availFromText('Gym available 24/7 for residents.', now), null);
+  const perth = core.toRow(listing({ address: { suburb: 'Perth', display: { fullAddress: '1 Hay St, Perth WA 6000' } }, inspections: [{ startTime: '2026-09-26T02:00:00Z' }] }), false);
+  assert.match(perth.inspections[0].label, /10:00\s?am/, 'Perth time, whatever the runner zone');
+  const [head, line] = core.toCsv([{ id: '1', url: 'u', appStatus: 'applied', appAt: new Date(2026, 8, 20).getTime(), checks: { Noise: 'n', Light: 'y' }, hideReason: '' }]).split('\n');
+  const cell = (h) => line.split(',')[head.split(',').indexOf(h)];
+  assert.equal(cell('application_date'), '2026-09-20');
+  assert.equal(cell('checklist'), '✗ Noise; ✓ Light');
+});

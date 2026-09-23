@@ -183,6 +183,14 @@
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
+  // Summary fields a search result always carries in full (empty means none, not unknown).
+  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am'];
+  // Label of an upcoming stored inspection missing from the fresh list ('' if none went).
+  const cancelledInspection = (old, next, t) => {
+    const keep = new Set((next || []).map((i) => i.at ?? i.label));
+    return (Array.isArray(old) ? old : []).find((i) => typeof i?.at === 'number' && i.at > t && !keep.has(i.at))?.label || '';
+  };
+  const CANCEL_SHOW_MS = 7 * DAY_MS;
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
   const CHECKLIST_DEFAULT = 'Damp or mould, Water pressure, Phone signal, Natural light, Noise, Storage';
   const checklistItems = (v) => [...new Set(String(v || CHECKLIST_DEFAULT).split(/[,\n]/).map((x) => clip(x.trim(), 30)).filter(Boolean))].slice(0, CHECK_MAX);
@@ -329,7 +337,14 @@
           delete e.x; // seen again, so not gone
           if (e.s) {
             const li = Math.max(e.li || 0, lastPast(e.d?.in, t)); // REA drops an inspection once it's over
-            e.d = mergeSummary(e.d, summary(r)); // keep the shortlist's copy current, never poorer
+            const next = summary(r);
+            if (features) {
+              // Search results are complete for these, so an empty value is news: a cancelled
+              // inspection or a dropped clause leaves the shortlist too. (Property pages merge.)
+              const gone = cancelledInspection(e.d?.in, next.in, t);
+              if (gone) e.ic = [t, gone];
+              e.d = { ...mergeSummary(e.d, next), ...Object.fromEntries(SEARCH_COMPLETE.map((k) => [k, next[k]])) };
+            } else e.d = mergeSummary(e.d, next); // keep the shortlist's copy current, never poorer
             if (li) e.li = li;
           }
           if (Number.isFinite(r.priceNum)) {
@@ -486,6 +501,7 @@
               // The latest inspection that has already happened (the display list drops past ones).
               lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
               inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
+              inspectCancelled: Array.isArray(e.ic) && now() - e.ic[0] < CANCEL_SHOW_MS ? clip(e.ic[1], 80) : '',
             };
           });
       },
@@ -494,7 +510,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, nd: e.nd, li: e.li, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, nd: e.nd, li: e.li, ic: e.ic, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -518,6 +534,7 @@
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
           for (const k of ['nd', 'li']) if (typeof e[k] === 'number') cur[k] = Math.max(cur[k] || 0, e[k]);
+          if (Array.isArray(e.ic) && typeof e.ic[0] === 'number' && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80)];
           n++;
         }
         for (const f of Object.keys(NAMED)) {
@@ -828,6 +845,14 @@
   // Parsed by hand: Date() on "Mon 12th Oct" is engine-specific and, lacking a year,
   // Chrome yields 2001. A year-less date more than ~2 months past rolls to next year.
   // A date already past means "available now", so it is clamped to today and treated alike.
+  // A day and month with no year: this year, next if it's well past, last if it's far ahead.
+  const yearless = (day, month, today, clamp) => {
+    if (month < 0 || month > 11) return null;
+    let year = today.getFullYear(), d = new Date(year, month, day);
+    if (today - d > YEARLESS_ROLL_MS) d = new Date(++year, month, day);
+    else if (d - today > YEARLESS_BACK_MS) d = new Date(--year, month, day); // "20 Dec" read on 5 Jan: last month
+    return d.getDate() !== day ? null : clamp(d); // 31 Feb, 29 Feb in a non-leap year
+  };
   const parseAvail = (display, now = new Date()) => {
     if (!display) return null;
     const today = startOfDay(now);
@@ -839,6 +864,9 @@
       const d = new Date(+num[3] < 100 ? 2000 + +num[3] : +num[3], +num[2] - 1, +num[1]);
       return isNaN(d) || d.getDate() !== +num[1] || d.getMonth() !== +num[2] - 1 ? null : clamp(d); // 31/13 is not 31 Jan
     }
+    // Yearless "1/11" (d/m, slash only: "6-12" is a lease and "1.5" a bathroom count).
+    const dm = display.match(/\b(\d{1,2})\/(\d{1,2})\b(?![/.-]?\d)/);
+    if (dm && dm[0] !== '24/7') return yearless(+dm[1], +dm[2] - 1, today, clamp); // "available 24/7" is not 24 July
     // "12th Oct 2026", "1st of December", "October 12, 2026". Every candidate is tried so
     // words like "Available" (-> "ava") or weekdays don't shadow the real month.
     const cands = [
@@ -849,12 +877,9 @@
       const w = word.toLowerCase();
       const month = MONTH_NAMES.findIndex((n) => n.startsWith(w));
       if (month < 0) continue;
-      let year = yr ? +yr : today.getFullYear();
-      let d = new Date(year, month, +day);
-      if (!yr && today - d > YEARLESS_ROLL_MS) d = new Date(++year, month, +day);
-      else if (!yr && d - today > YEARLESS_BACK_MS) d = new Date(--year, month, +day); // "20 Dec" read on 5 Jan: last month
-      if (d.getDate() !== +day) return null; // 31 Feb, 29 Feb in a non-leap year
-      return clamp(d);
+      if (!yr) return yearless(+day, month, today, clamp);
+      const d = new Date(+yr, month, +day);
+      return d.getDate() !== +day ? null : clamp(d); // 31 Feb, 29 Feb in a non-leap year
     }
     return null;
   };
@@ -873,6 +898,8 @@
     if (!weekly) {
       if (/\b(per\s*(?:calendar\s*)?month|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
       else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(ea)?r\b/i.test(tail)) v /= 52;
+      else if (/\b(per\s*fortnight|p\.?\s*f\.?|pf|fortnightly|a\s*fortnight)\b|\/\s*f(ort)?n(igh)?t\b/i.test(tail)) v /= 2;
+      else if (/\b(per\s*night|p\.?\s*n\.?|pn|nightly|a\s*night)\b|\/\s*n(igh)?t\b/i.test(tail)) v *= 7; // short stays
     }
     return Math.round(v);
   };
@@ -966,7 +993,8 @@
   const fmts = new Map();
   const dtf = (opts) => { const k = JSON.stringify(opts); let f = fmts.get(k); if (!f) fmts.set(k, (f = new Intl.DateTimeFormat('en-AU', opts))); return f; };
   const DT_FMT = { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' };
-  const fmtWhen = (d) => dtf(DT_FMT).format(d).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
+  // In the listing's zone when known: a Perth open home reads 10:00am from Sydney too.
+  const fmtWhen = (d, tz) => dtf(tz ? { ...DT_FMT, timeZone: tz } : DT_FMT).format(d).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
 
   // Field discovery: when none of the known spellings exist, walk the listing (breadth-first,
   // bounded) for a key matching `keyRe` whose value passes `ok`. Returns { path, value } or
@@ -1027,7 +1055,7 @@
   const startOf = (it) => toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt);
   const inspectionList = (src) => (Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : null);
 
-  function extractInspections(listing, now = new Date()) {
+  function extractInspections(listing, now = new Date(), tz = null) {
     let src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
     // A discovered list must look like times, not eg "Book an inspection" options.
     if (!inspectionList(src)) src = find('inspections', listing, /inspection|openhome|open_home/i,
@@ -1037,7 +1065,7 @@
     return list
       .map((it) => {
         const at = startOf(it);
-        const label = str(it?.display?.shortLabel) || str(it?.display?.longLabel) || str(it?.display) || str(it?.label) || (at ? fmtWhen(at) : '');
+        const label = str(it?.display?.shortLabel) || str(it?.display?.longLabel) || str(it?.display) || str(it?.label) || (at ? fmtWhen(at, tz) : '');
         return { at: at ? at.getTime() : null, label };
       })
       .filter((i) => i.label && (i.at == null || i.at >= cutoff))
@@ -1292,13 +1320,14 @@
   const toRow = (listing, surrounding) => {
     const display = str(listing.availableDate);
     const price = str(listing.price);
+    const address = str(listing.address?.display?.fullAddress) || str(listing.address?.display?.shortAddress);
     const row = {
       avail: parseAvail(display),
       available: /^\s*(available\s+)?now\b/i.test(display) ? 'Available now' : display.replace(/^Available\s*/i, '') || '-',
       price,
       priceNum: parsePrice(price),
       bond: str(listing.bond),
-      address: str(listing.address?.display?.fullAddress) || str(listing.address?.display?.shortAddress),
+      address,
       suburb: str(listing.address?.suburb),
       beds: scalar(listing.generalFeatures?.bedrooms?.value),
       baths: scalar(listing.generalFeatures?.bathrooms?.value),
@@ -1310,7 +1339,7 @@
       headline: str(listing.title) || str(listing.headline) || '',
       // Cards are matched by the id in their href, so prefer the URL-derived id.
       id: listingId(str(listing._links?.canonical?.href)) || String(listing.id ?? ''),
-      inspections: extractInspections(listing),
+      inspections: extractInspections(listing, new Date(), tzOf({ address, state: str(listing.address?.state) })),
       listed: extractListed(listing),
       agency: extractAgency(listing),
       features: extractFeatures(listing),
@@ -1771,13 +1800,13 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
+      : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -3105,7 +3134,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   async function recheckShortlist(btn) {
     if (busy) return;
-    const rows = shortlistRows().slice(0, RECHECK_MAX);
+    // Least recently seen first, so repeated runs work through a long shortlist.
+    const all = shortlistRows().sort((a, b) => (a.lastSeen || 0) - (b.lastSeen || 0));
+    const rows = all.slice(0, RECHECK_MAX);
     if (!rows.length) return setStatus('Nothing on the shortlist to re-check.', true);
     const ctrl = startJob(btn);
     const tally = { ok: 0, gone: 0, unknown: 0 };
@@ -3127,7 +3158,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (i < rows.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
       }
       refreshMarks();
-      setStatus(`Re-checked ${rows.length}: ${tally.ok} updated, ${tally.gone} no longer listed${tally.unknown ? `, ${tally.unknown} couldn't be read` : ''}.`);
+      setStatus(`Re-checked ${rows.length < all.length ? `${rows.length} of ${all.length} (least recently seen)` : rows.length}: ${tally.ok} updated, ${tally.gone} no longer listed${tally.unknown ? `, ${tally.unknown} couldn't be read` : ''}.${rows.length < all.length ? ' Run again for the rest.' : ''}`);
     } catch {
       setStatus('Re-check stopped.');
     } finally {
@@ -3478,6 +3509,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ${moneyLine(r, inc, med)}
           ${metaLine([
             r.lastSeen && sl ? `seen ${ago(now - r.lastSeen)}` : '',
+            r.inspectCancelled && sl ? `Inspection ${r.inspectCancelled} cancelled` : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
             r.listed ? `Listed ${ago(now - r.listed)}` : '',
             r.openedAt ? `opened ${ago(now - r.openedAt)}` : '',
@@ -3708,7 +3740,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const avail = r.avail
       ? r.avail <= today ? '<span class="rf-b-now">Available now</span>' : `<span>Avail ${esc(r.available.replace(/^(from\s+)/i, ''))}</span>`
       : '<span class="rf-b-none">No date</span>';
-    const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
+    const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect, tzOf(r)))}</span>` : '';
     const ppb = ppbLabel(r) ? `<span>${ppbLabel(r)}</span>` : '';
     // Shortlisted cards show where you're up to (applied, inspected...) and your note on hover.
     const star = r.starred ? `<span class="rf-b-star"${r.note ? ` title="${esc(r.note)}"` : ''}>★ ${r.appStatus ? esc(statusLabel(r.appStatus)) : 'Shortlisted'}${r.note ? ' ✎' : ''}</span>` : '';

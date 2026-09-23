@@ -426,11 +426,26 @@ test('observe keeps richer shortlist summary fields a sparser source lacks', () 
   const st = core.marksStore(m, () => 1e12);
   const rich = Object.assign(row('146500031', '$700 per week'), { agency: 'Harbour Co', inspections: [{ at: 2e12, label: 'Sat' }] });
   st.toggle('146500031', 's', rich);
-  st.observe([Object.assign(row('146500031', '$650 per week'), { agency: '', inspections: [] })]);
+  st.observe([Object.assign(row('146500031', '$650 per week'), { agency: '', inspections: [] })], { features: false }); // a property page
   const d = JSON.parse(m.getItem('rea-avail-filter/marks/v1')).m['146500031'].d;
   assert.equal(d.p, '$650 per week', 'price updated');
   assert.equal(d.ag, 'Harbour Co', 'agency kept');
   assert.equal(d.in.length, 1, 'inspections kept');
+});
+
+test('a search result replaces inspections and clauses: cancelled open homes leave the shortlist and are flagged', () => {
+  const t = Date.now();
+  const m = mem();
+  const st = core.marksStore(m, () => t);
+  const at = t + 2 * 864e5;
+  st.toggle('146500032', 's', Object.assign(row('146500032'), { agency: 'Harbour Co', watch: 'water', inspections: [{ at, label: 'Sat 10:00am' }] }));
+  st.observe([Object.assign(row('146500032'), { agency: '', watch: '', inspections: [] })]); // search rows are complete
+  const s1 = st.shortlist()[0];
+  assert.deepEqual(s1.inspections, []);
+  assert.equal(s1.watch, '');
+  assert.equal(s1.agency, 'Harbour Co', 'agency still merged');
+  assert.equal(s1.inspectCancelled, 'Sat 10:00am');
+  assert.equal(core.needsAction(s1, at + 864e5), '', 'no "did you inspect?" for a cancelled one');
 });
 
 test('marksStore: feature changes between search sightings (not from property pages)', () => {
