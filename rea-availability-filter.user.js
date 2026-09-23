@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      1.1.0
-// @description  Adds available-from/to filtering, availability sorting, cross-page merging and TSV export to realestate.com.au rental searches.
+// @version      2.0.0
+// @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @match        https://www.realestate.com.au/rent/*
 // @run-at       document-idle
 // @grant        none
+// @noframes
 // ==/UserScript==
 
 /*
@@ -16,8 +17,11 @@
  * This script reads that blob for every page of the current search, then filters and
  * sorts client-side.
  *
- * It never mutates REA's own DOM (obfuscated classes, React re-renders); it renders
- * its own drawer instead.
+ * REA's markup uses obfuscated classes and React re-renders, so the script renders its
+ * own drawer and only touches REA's DOM append-only: one badge per <article> result
+ * card plus data-rf-* attributes, re-applied idempotently by a MutationObserver.
+ *
+ * Console: reaFilter.probe() lists which listing fields exist in live data.
  */
 
 (() => {
@@ -419,6 +423,7 @@
   #rf-panel[hidden]{display:none}
   .rf-head{padding:14px 16px;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;gap:8px}
   .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1}
+  .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:#0a6;cursor:pointer;padding:2px 6px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:#666;padding:0 4px}
   .rf-controls{padding:12px 16px;border-bottom:1px solid #e4e4e7;display:grid;gap:10px}
   .rf-dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -508,7 +513,8 @@
     panel.innerHTML = `
       <div class="rf-head">
         <h2>Availability filter</h2>
-        <button class="rf-x" title="Close">&times;</button>
+        <button class="rf-clear" title="Reset all filters">Clear</button>
+        <button class="rf-x" title="Close (Esc)">&times;</button>
       </div>
       <div class="rf-controls">
         <div class="rf-dates">
@@ -582,8 +588,17 @@
     ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
-    launch.addEventListener('click', () => { panel.hidden = false; });
+    launch.addEventListener('click', () => { panel.hidden = false; ui.run.focus(); });
     panel.querySelector('.rf-x').addEventListener('click', () => { panel.hidden = true; });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) { panel.hidden = true; launch.focus(); }
+    });
+    panel.querySelector('.rf-clear').addEventListener('click', () => {
+      // Resets filters only; display preferences (sort, annotate, dim) are kept.
+      const keep = { sort: cfg.sort, annotate: cfg.annotate, dimCards: cfg.dimCards };
+      for (const [k, el] of fields) write(el, k in keep ? keep[k] : DEFAULT_CFG[k]);
+      onChange();
+    });
 
     let t;
     const onChange = (e) => {
@@ -636,6 +651,7 @@
 
   function render(rows) {
     setExport(rows.length === 0);
+    ui.launch.textContent = `Availability filter (${rows.length})`;
     if (!rows.length) {
       ui.list.innerHTML = '<div class="rf-empty">Nothing matches those filters.</div>';
       return;
@@ -829,6 +845,7 @@
       setExport(true);
       if (restore() || !hadState) return;
       ui.list.innerHTML = '<div class="rf-empty">Search changed.</div>';
+      ui.launch.textContent = 'Availability filter';
       setStatus('Search changed - run again to refresh.');
     });
   }

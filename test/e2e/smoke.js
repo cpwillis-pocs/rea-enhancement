@@ -95,6 +95,13 @@ const html = (n) => {
   await page.fill('#rf-keyword', '');
   await page.dispatchEvent('#rf-keyword', 'change');
 
+  await page.click('.rf-clear');
+  assert.equal(await page.inputValue('#rf-from'), '');
+  assert.equal(await page.$$eval('.rf-card', (els) => els.length), PAGES * 2 + 1);
+  assert.match(await page.textContent('#rf-launch'), /\(7\)/);
+  await page.fill('#rf-from', '2026-10-01');
+  await page.dispatchEvent('#rf-from', 'change');
+
   // Export: capture download.
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-export=tsv]')]);
   const body = fs.readFileSync(await dl.path(), 'utf8');
@@ -109,6 +116,10 @@ const html = (n) => {
   await page.addScriptTag({ content: SCRIPT });
   await page.waitForFunction(() => /Cached/.test(document.querySelector('.rf-status')?.textContent || ''), null, { timeout: 5000 });
   assert.equal(hits.length, before + 1, 'only the reloaded document itself was fetched');
+
+  await page.click('#rf-launch');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), true);
 
   const probed = await page.evaluate(() => window.reaFilter.probe());
   assert.equal(probed['availableDate.display'] !== '(missing)', true);
