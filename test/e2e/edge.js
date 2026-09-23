@@ -406,6 +406,14 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.waitForFunction((id) => document.querySelector(`.rf-item[data-id="${id}"] [data-act=s]`)?.getAttribute('aria-pressed') === 'true', first);
     await page.keyboard.press('h');
     await page.waitForFunction((id) => !document.querySelector(`.rf-item[data-id="${id}"]`), first);
+    await page.focus('.rf-list'); await page.keyboard.press('j');
+    await page.keyboard.press('x'); // not a shortcut: no-op
+    await page.keyboard.press('n');
+    assert.ok(await page.$('.rf-note-edit'), 'n opens the note editor');
+    await page.keyboard.press('Escape');
+    await page.focus('.rf-list'); await page.keyboard.press('j');
+    const [pop] = await Promise.all([ctx.waitForEvent('page'), page.keyboard.press('o')]);
+    await pop.close();
     await page.keyboard.press('?');
     assert.equal(await page.$eval('.rf-help', (h) => h.hidden), false);
     await page.keyboard.press('Escape');
@@ -440,6 +448,9 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
     await page.click('.rf-status .rf-undo');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown, 'undo brings them back');
+    await page.selectOption('.rf-sl-bulk', 'unstar');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
+    await page.click('.rf-status .rf-undo');
     await page.click('[data-view=results]');
     await page.selectOption('.rf-bulk', 'hide');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
