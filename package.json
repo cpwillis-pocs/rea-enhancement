@@ -4,6 +4,7 @@
   "description": "Tampermonkey userscript enhancing realestate.com.au rental search results",
   "scripts": {
     "check": "node --check rea-availability-filter.user.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "e2e": "node test/e2e/smoke.js"
   }
 }

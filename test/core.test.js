@@ -79,3 +79,25 @@ test('applyFilters: dedupe, bounds, undated handling, sort', () => {
 test('esc', () => {
   assert.equal(core.esc('<a href="x">&\'</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;');
 });
+
+test('applyFilters: price, beds, type, image, keyword, sort', () => {
+  const L = (id, o) => core.toRow(listing({ id, ...o }), false);
+  const rows = [
+    L('a', { price: { display: '$900 per week' }, generalFeatures: { bedrooms: { value: 3 } }, title: 'Sunny pool home' }),
+    L('b', { price: { display: '$500 per week' }, generalFeatures: { bedrooms: { value: 1 } }, propertyType: { display: 'Studio' } }),
+    L('c', { price: { display: 'Contact agent' }, media: {} }),
+    L('d', { price: { display: '$600 per week' }, generalFeatures: { bedrooms: { value: 2 } }, description: 'north facing studio vibe' }),
+  ];
+  const ids = (cfg) => core.applyFilters(rows, cfg).map((r) => r.url.split('-').pop());
+  assert.deepEqual(ids({ priceMin: '550' }), ['d', 'a']);
+  assert.deepEqual(ids({ priceMax: '650' }), ['b', 'd']);
+  assert.deepEqual(ids({ bedsMin: '2' }), ['d', 'a', 'c']);
+  assert.deepEqual(ids({ type: 'Studio' }), ['b']);
+  assert.deepEqual(ids({ hideNoImage: true }).includes('c'), false);
+  assert.deepEqual(ids({ keyword: 'pool' }), ['a']);
+  assert.deepEqual(ids({ keyword: '-studio' }).sort(), ['a', 'c']);
+  assert.deepEqual(ids({ keyword: '"north facing"' }), ['d']);
+  assert.deepEqual(ids({ sort: 'price' }), ['b', 'd', 'a', 'c']);
+  assert.deepEqual(ids({ sort: 'ppb' }), ['a', 'd', 'b', 'c']);
+  assert.deepEqual(ids({ sort: 'beds' })[0], 'a');
+});

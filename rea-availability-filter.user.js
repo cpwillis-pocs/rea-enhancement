@@ -30,6 +30,7 @@
   const RETRIES = 3;
   const RETRY_BASE_MS = 1000;
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
+  const ROWS_VERSION = 2; // bump when toRow() shape changes
   const ROWS_TTL_MS = 10 * 60 * 1000;
 
   // ---------------------------------------------------------------- config
@@ -47,16 +48,17 @@
     get(key) {
       try {
         const v = JSON.parse(storage.getItem(ROWS_PREFIX + key));
-        if (!v || now() - v.at > ROWS_TTL_MS) return null;
+        if (!v || v.v !== ROWS_VERSION || now() - v.at > ROWS_TTL_MS) return null;
         for (const r of v.rows) {
           r.avail = r.avail == null ? null : new Date(r.avail);
           r.priceNum = r.priceNum ?? Infinity;
+          r.ppb = r.ppb ?? Infinity;
         }
         return v;
       } catch { return null; }
     },
     set(key, rows, truncated) {
-      const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ at: now(), truncated, rows }));
+      const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ v: ROWS_VERSION, at: now(), truncated, rows }));
       try {
         for (let i = storage.length - 1; i >= 0; i--) {
           const k = storage.key(i);
@@ -160,7 +162,7 @@
   const toRow = (listing, surrounding) => {
     const display = listing.availableDate?.display || '';
     const price = listing.price?.display || '';
-    return {
+    const row = {
       avail: parseAvail(display),
       available: display.replace(/^Available\s*/i, '') || '-',
       price,
@@ -175,8 +177,15 @@
       img: safeUrl(listing.media?.mainImage?.templatedUrl?.replace('{size}', IMG_SIZE)),
       url: safeUrl(listing._links?.canonical?.href),
       surrounding,
+      headline: str(listing.title) || str(listing.headline) || '',
     };
+    // Studios report 0 beds: price per bed is then the full price.
+    row.ppb = isFinite(row.priceNum) ? Math.round(row.priceNum / Math.max(1, +row.beds || 0)) : Infinity;
+    row.text = [row.headline, str(listing.description), row.address, row.type].filter(Boolean).join(' ').toLowerCase();
+    return row;
   };
+
+  const str = (v) => (typeof v === 'string' ? v : typeof v?.display === 'string' ? v.display : '');
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const jitter = (ms) => Math.round(ms * (0.75 + Math.random() * 0.75));
@@ -229,20 +238,59 @@
 
   // --------------------------------------------------------------- filter
 
+  const DEFAULT_CFG = {
+    from: '', to: '', exactOnly: false,
+    priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
+    type: '', keyword: '', hideNoImage: false, sort: 'avail',
+  };
+
+  const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
+  const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
+  const byPrice = (a, b) => a.priceNum - b.priceNum;
+  const SORTS = {
+    avail: (a, b) => byAvail(a, b) || byPrice(a, b),
+    price: (a, b) => byPrice(a, b) || byAvail(a, b),
+    ppb: (a, b) => a.ppb - b.ppb || byAvail(a, b),
+    beds: (a, b) => (+b.beds || 0) - (+a.beds || 0) || byPrice(a, b),
+  };
+  // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
+
+  // Keyword: space-separated terms, all must match; "-term" excludes; "quoted phrase" kept whole.
+  const keywordTest = (q) => {
+    const terms = (q || '').toLowerCase().match(/-?"[^"]+"|\S+/g) || [];
+    const inc = [], exc = [];
+    for (const t of terms) {
+      const neg = t.startsWith('-') && t.length > 1;
+      const w = (neg ? t.slice(1) : t).replace(/^"|"$/g, '');
+      if (w) (neg ? exc : inc).push(w);
+    }
+    return (text) => inc.every((w) => text.includes(w)) && !exc.some((w) => text.includes(w));
+  };
+
   // Undated listings ("Contact agent") can't satisfy a date bound, but are kept
   // (sorted last) when no bound is set so an empty filter never hides data.
+  // Numeric minimums treat unknown values as failing; maximums likewise.
   function applyFilters(rows, cfg) {
+    cfg = { ...DEFAULT_CFG, ...cfg };
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
     const to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
+    const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax);
+    const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
+    const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const seen = new Set();
     return rows
       .filter((r) => r.url && !seen.has(r.url) && seen.add(r.url))
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
-      .sort((a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity) || a.priceNum - b.priceNum);
+      .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
+      .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
+      .filter((r) => !cfg.type || r.type === cfg.type)
+      .filter((r) => !cfg.hideNoImage || r.img)
+      .filter((r) => !kw || kw(r.text || ''))
+      .sort(SORTS[cfg.sort] || SORTS.avail);
   }
 
-  const TSV_COLS = ['available', 'price', 'bond', 'address', 'suburb', 'beds', 'baths', 'cars', 'type', 'url'];
+  const TSV_COLS = ['available', 'price', 'priceNum', 'ppb', 'bond', 'address', 'suburb', 'beds', 'baths', 'cars', 'type', 'headline', 'url'];
   const toTsv = (rows) =>
     [TSV_COLS.join('\t')]
       .concat(rows.map((r) => TSV_COLS.map((c) => String(r[c] ?? '').replace(/\s+/g, ' ')).join('\t')))
@@ -263,7 +311,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
-      fetchResults, fetchAllPages, applyFilters, toTsv, esc, safeUrl, rowStore,
+      fetchResults, fetchAllPages, applyFilters, keywordTest, toTsv, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
   }
@@ -286,7 +334,17 @@
   .rf-dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .rf-controls label{display:grid;gap:4px;font-size:11px;font-weight:600;text-transform:uppercase;
     letter-spacing:.04em;color:#666}
-  .rf-controls input[type=date]{padding:7px 8px;border:1px solid #cfcfd4;border-radius:6px;font:inherit;color:#111}
+  .rf-controls input:not([type=checkbox]),.rf-controls select{padding:7px 8px;border:1px solid #cfcfd4;border-radius:6px;
+    font:inherit;color:#111;background:#fff;min-width:0;width:100%;box-sizing:border-box}
+  .rf-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
+  .rf-more{display:grid;gap:10px}
+  .rf-more[open]{padding-bottom:2px}
+  .rf-more summary{cursor:pointer;font-size:12px;font-weight:600;color:#0a6;margin-bottom:8px}
+  .rf-more>label,.rf-more>.rf-grid3{margin-top:8px}
+  .rf-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .rf-sort{display:flex !important;align-items:center;gap:6px !important}
+  .rf-sort select{width:auto !important}
+  .rf-type{font-weight:400;color:#767680;font-size:12px}
   .rf-check{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;text-transform:none;
     letter-spacing:0;color:#111}
   .rf-check input{margin:0}
@@ -314,7 +372,7 @@
   .rf-empty{padding:28px 16px;text-align:center;color:#767680}
   `;
 
-  let cfg = Object.assign({ from: '', to: '', exactOnly: false }, loadCfg());
+  let cfg = { ...DEFAULT_CFG, ...loadCfg() };
   let cache = null; // raw rows for the current search URL
   let cacheKey = null; // searchKey() of the cached rows
   let truncated = false;
@@ -356,7 +414,28 @@
           <label>Available from<input type="date" id="rf-from"></label>
           <label>Available to<input type="date" id="rf-to"></label>
         </div>
-        <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
+        <details class="rf-more" id="rf-more">
+          <summary>More filters</summary>
+          <div class="rf-grid3">
+            <label>Min $/wk<input type="number" min="0" step="25" id="rf-priceMin" inputmode="numeric"></label>
+            <label>Max $/wk<input type="number" min="0" step="25" id="rf-priceMax" inputmode="numeric"></label>
+            <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
+            <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
+            <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
+            <label>Type<select id="rf-type"><option value="">Any</option></select></label>
+          </div>
+          <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
+          <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
+        </details>
+        <div class="rf-row">
+          <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
+          <label class="rf-sort">Sort<select id="rf-sort">
+            <option value="avail">Available date</option>
+            <option value="price">Price</option>
+            <option value="ppb">Price per bed</option>
+            <option value="beds">Most beds</option>
+          </select></label>
+        </div>
         <div class="rf-actions">
           <button class="rf-btn" id="rf-run">Search all pages</button>
           <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
@@ -380,21 +459,33 @@
       list: panel.querySelector('.rf-list'),
     };
 
-    ui.from.value = cfg.from;
-    ui.to.value = cfg.to;
-    ui.exact.checked = !!cfg.exactOnly;
+    // Inputs map 1:1 to cfg keys via their id (rf-<key>); exactOnly keeps its legacy id.
+    const fields = Object.keys(DEFAULT_CFG).map((k) => [k, panel.querySelector(`#rf-${k === 'exactOnly' ? 'exact' : k}`)]);
+    const read = (el) => (el.type === 'checkbox' ? el.checked : el.value);
+    const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? ''; };
+    for (const [k, el] of fields) write(el, cfg[k]);
+    ui.fields = fields;
+    ui.type = panel.querySelector('#rf-type');
+    ui.more = panel.querySelector('#rf-more');
+    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage']
+      .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
     launch.addEventListener('click', () => { panel.hidden = false; });
     panel.querySelector('.rf-x').addEventListener('click', () => { panel.hidden = true; });
 
-    const onChange = () => {
-      cfg = { from: ui.from.value, to: ui.to.value, exactOnly: ui.exact.checked };
+    let t;
+    const onChange = (e) => {
+      cfg = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
       saveCfg(cfg);
-      if (cache) showResults(); // re-filter without refetching
+      clearTimeout(t);
+      if (!cache) return;
+      if (e?.type === 'input') t = setTimeout(showResults, 200); // debounce typing
+      else showResults(); // re-filter without refetching
     };
-    ui.from.addEventListener('change', onChange);
-    ui.to.addEventListener('change', onChange);
-    ui.exact.addEventListener('change', onChange);
+    for (const [, el] of fields) {
+      el.addEventListener('change', onChange);
+      if (el.type === 'text' || el.type === 'number') el.addEventListener('input', onChange);
+    }
 
     ui.run.addEventListener('click', () => run());
     ui.refresh.addEventListener('click', () => run(true));
@@ -419,7 +510,7 @@
   function render(rows) {
     ui.exportBtn.disabled = rows.length === 0;
     if (!rows.length) {
-      ui.list.innerHTML = '<div class="rf-empty">Nothing matches those dates.</div>';
+      ui.list.innerHTML = '<div class="rf-empty">Nothing matches those filters.</div>';
       return;
     }
     ui.list.innerHTML = rows.map((r) => `
@@ -427,13 +518,14 @@
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
           <div class="rf-avail">${esc(r.available)}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
-          <div class="rf-price">${esc(r.price)}</div>
+          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
             r.beds !== '' ? `${r.beds} bed` : '',
             r.baths !== '' ? `${r.baths} bath` : '',
             r.cars !== '' ? `${r.cars} car` : '',
             r.bond ? `bond ${r.bond}` : '',
+            +r.beds > 1 && isFinite(r.ppb) ? `$${r.ppb}/bed` : '',
           ].filter(Boolean).join(' · '))}</div>
         </div>
       </a>`).join('');
@@ -442,7 +534,16 @@
 
   const ago = (ms) => (ms < 60e3 ? 'just now' : `${Math.round(ms / 60e3)} min ago`);
 
+  function fillTypes(rows) {
+    const types = [...new Set(rows.map((r) => r.type).filter(Boolean))].sort();
+    if (cfg.type && !types.includes(cfg.type)) types.unshift(cfg.type);
+    ui.type.innerHTML = '<option value="">Any</option>' +
+      types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+    ui.type.value = cfg.type;
+  }
+
   function adopt(key, rows, trunc, note) {
+    fillTypes(rows);
     cache = rows;
     truncated = trunc;
     cacheKey = key;
