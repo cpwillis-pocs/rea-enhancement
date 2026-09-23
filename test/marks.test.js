@@ -127,3 +127,16 @@ test('marksStore: "was $X" expires after 14 days', () => {
   st.decorate(r);
   assert.equal(r[0].prevPrice, '');
 });
+
+test('marksStore: caps entries at MARKS_MAX, keeping shortlisted/hidden', () => {
+  let t = 1e12;
+  const storage = mem();
+  const st = core.marksStore(storage, () => t);
+  st.toggle('100000001', 's');
+  const rows = [];
+  for (let i = 0; i < 5005; i++) rows.push({ id: String(200000000 + i), priceNum: Infinity });
+  st.observe(rows);
+  const m = JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m;
+  assert.equal(Object.keys(m).length, 5000);
+  assert.equal(m['100000001'].s, 1, 'shortlisted survives the cap');
+});

@@ -74,3 +74,20 @@ test('applyFilters: newOnly and showGone', () => {
   assert.deepEqual(ids({ newOnly: true }), ['146500002']);
   assert.equal(ids({ showGone: true }).length, 3);
 });
+
+test('snapshotStore: quota falls back to newest search, then drops gone lists', () => {
+  let t = 1e12, quota = Infinity;
+  const m = new Map();
+  const storage = { getItem: (k) => m.get(k) ?? null, removeItem: (k) => m.delete(k),
+    setItem: (k, v) => { if (v.length > quota) throw new Error('QuotaExceededError'); m.set(k, v); } };
+  const st = core.snapshotStore(storage, () => t);
+  st.save(KEY, [row('146500001'), row('146500002')], false);
+  t += 2 * H;
+  const other = 'https://www.realestate.com.au/rent/in-manly/list-1';
+  st.save(other, [row('146500009')], false);
+  quota = m.get('rea-avail-filter/snapshots/v1').length - 1; // next write of both no longer fits
+  t += 2 * H;
+  st.save(KEY, [row('146500003')], false);
+  assert.ok(st.get(KEY), 'current search kept');
+  assert.equal(st.get(other), null, 'older search dropped to fit');
+});

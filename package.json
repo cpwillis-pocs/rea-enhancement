@@ -5,7 +5,8 @@
   "scripts": {
     "check": "node --check rea-availability-filter.user.js && node --test test/*.test.js",
     "test": "node --test test/*.test.js",
-    "e2e": "node test/e2e/smoke.js"
+    "e2e": "node test/e2e/smoke.js && node test/e2e/edge.js",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=rea-availability-filter.user.js test/*.test.js && COVERAGE=1 node test/e2e/smoke.js && COVERAGE=1 COVERAGE_APPEND=1 node test/e2e/edge.js"
   },
   "license": "MIT",
   "engines": {

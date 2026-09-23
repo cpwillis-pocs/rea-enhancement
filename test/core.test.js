@@ -231,3 +231,9 @@ test('dedupe / windowEnd', () => {
   assert.equal(core.windowEnd('14', new Date(2026, 8, 23)), '2026-10-07');
   assert.equal(core.windowEnd('', new Date(2026, 8, 23)), '');
 });
+
+test('parseExchange: cache without rentSearch throws a clear error', () => {
+  const ex = { 'resi-property_listing-experience-web': { urqlClientCache: JSON.stringify({ 1: { data: '{"other":1}' } }) } };
+  assert.throws(() => core.parseExchange(ex), /No rentSearch results/);
+  assert.throws(() => core.parseExchange({}), /Listing cache missing/);
+});

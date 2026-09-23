@@ -87,3 +87,12 @@ test('fetchAllPages: abort mid-crawl stops further fetches', async () => {
   await assert.rejects(core.fetchAllPages(BASE, () => {}, { fetchImpl, wait: noWait, signal: ctrl.signal }));
   assert.equal(urls.length, 2);
 });
+
+test('sleep: aborts early and when already aborted', async () => {
+  const ctrl = new AbortController();
+  const p = core.sleep(10000, ctrl.signal);
+  ctrl.abort(new Error('stop'));
+  await assert.rejects(p, /stop/);
+  await assert.rejects(core.sleep(1, ctrl.signal), /stop/);
+  await core.sleep(1); // no signal resolves
+});

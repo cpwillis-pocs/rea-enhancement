@@ -9,8 +9,10 @@ const { execSync } = require('child_process');
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { listing, results, exchange } = require('../helpers');
+const cov = require('./coverage');
 
 const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filter.user.js'), 'utf8');
+const BIGSCRIPT = SCRIPT.replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;');
 const ORIGIN = 'https://www.realestate.com.au';
 const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 const PAGES = 3;
@@ -42,6 +44,7 @@ const html = (n) => {
   const browser = await pw.chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const page = await browser.newPage();
   await page.clock.install({ time: FIXED });
+  await cov.track(page);
   const hits = [];
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -234,6 +237,7 @@ const html = (n) => {
   {
     const slow = await browser.newPage();
     await slow.clock.install({ time: FIXED });
+    await cov.track(slow);
     const got = [];
     await slow.route('**/*', async (route) => {
       const u = new URL(route.request().url());
@@ -255,6 +259,7 @@ const html = (n) => {
     console.log('fetches after nav-abort:', got.length - at, '| status:', await slow.textContent('.rf-status'));
     assert.ok(got.length - at <= 2, 'crawl stopped (annotation may fetch the new page once)');
     assert.notEqual(await slow.getAttribute('#rf-run', 'aria-disabled'), 'true');
+    await cov.collect(slow, SCRIPT);
     await slow.close();
   }
 
@@ -273,15 +278,18 @@ const html = (n) => {
     });
     const p1 = await ctx.newPage();
     await p1.clock.install({ time: new Date('2026-09-23T10:00:00+10:00') });
+    await cov.track(p1);
     await p1.goto(SEARCH);
     await p1.addScriptTag({ content: SCRIPT });
     await p1.click('#rf-launch');
     await p1.click('#rf-run');
     await p1.waitForFunction(() => /2 of 2 listings match/.test(document.querySelector('.rf-status').textContent));
+    await cov.collect(p1, SCRIPT);
     await p1.close();
 
     const p2 = await ctx.newPage();
     await p2.clock.install({ time: new Date('2026-09-24T10:00:00+10:00') });
+    await cov.track(p2);
     await p2.goto(SEARCH);
     const before = fetched;
     await p2.addScriptTag({ content: SCRIPT });
@@ -303,6 +311,7 @@ const html = (n) => {
     assert.match(await p2.textContent('.rf-item[data-id="148000001"] .rf-avail'), /no longer listed/);
     await p2.uncheck('#rf-remember');
     assert.equal(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'opt-out clears');
+    await cov.collect(p2, SCRIPT);
     await ctx.close();
   }
 
@@ -310,9 +319,10 @@ const html = (n) => {
   {
     const big = await browser.newPage();
     await big.clock.install({ time: FIXED });
+    await cov.track(big);
     await big.route('**/*', require('./fixtures').serve([], { pages: 6, perPage: 25 }));
     await big.goto(SEARCH);
-    await big.addScriptTag({ content: SCRIPT.replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;') });
+    await big.addScriptTag({ content: BIGSCRIPT });
     await big.click('#rf-launch');
     await big.click('#rf-run');
     await big.waitForFunction(() => /150 of 150/.test(document.querySelector('.rf-status').textContent), null, { timeout: 20000 });
@@ -320,10 +330,13 @@ const html = (n) => {
     await big.click('.rf-more-btn');
     assert.equal(await big.$$eval('.rf-item', (e) => e.length), 150);
     assert.equal(await big.$('.rf-more-btn'), null);
+    await cov.collect(big, BIGSCRIPT);
     await big.close();
   }
 
   assert.deepEqual(errors, [], 'no page errors');
+  await cov.collect(page, SCRIPT);
+  cov.report(SCRIPT);
   await browser.close();
   console.log('e2e smoke: ok');
 })().catch((e) => { console.error(e); process.exit(1); });
