@@ -47,6 +47,7 @@
   const ANNOTATE_MAX_WAIT_MS = 500;
   const KNOWN_MAX = 2000;
   const RENDER_CHUNK = 100;
+  const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
   const ROWS_VERSION = 7; // bump when toRow() shape changes
@@ -160,6 +161,8 @@
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
     in: cleanInspections(r.inspections),
+    bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
+    am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
   const keep = (e) => e.s || e.h || e.n || e.as;
@@ -174,7 +177,8 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: d.in,
+    inspections: d.in, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   const marksStore = (storage, now = () => Date.now()) => {
     let data = null;
@@ -286,7 +290,8 @@
             const d = e.d, priceNum = parsePrice(d.p);
             return {
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
-              beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: '', ppb: perBed(priceNum, d.b),
+              beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
+              ...moveIn(d.bo, priceNum), agency: d.ag || '',
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', listed: null,
               inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
@@ -1209,7 +1214,8 @@
   .rf-tabs button{border:0;background:none;padding:8px 10px;font:600 12px system-ui,sans-serif;color:var(--rf-muted);
     cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .rf-tabs button[aria-selected=true]{color:var(--rf-fg);border-bottom-color:var(--rf-accent)}
-  .rf-sl-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
+  .rf-sl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
+  .rf-sl-bar .rf-label{flex-basis:100%}
   .rf-sl-bar[hidden],.rf-controls[hidden]{display:none}
   .rf-sl-bar .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-note{margin:-2px 9px 8px 124px;padding:6px 8px;border-radius:6px;background:var(--rf-hover);font-size:12px;
@@ -1236,6 +1242,16 @@
   .rf-agencies{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
   .rf-agencies[hidden]{display:none}
   .rf-agencies .rf-label{margin-right:4px}
+  .rf-compare{overflow-x:auto;padding:4px}
+  #rf-panel.rf-wide{width:min(960px,100vw)}
+  .rf-btn.sec[aria-pressed=true]{background:var(--rf-accent);color:#fff}
+  .rf-compare table{border-collapse:collapse;font-size:12px;min-width:100%}
+  .rf-compare th,.rf-compare td{border-bottom:1px solid var(--rf-line);padding:6px 8px;text-align:left;vertical-align:top;min-width:110px}
+  .rf-compare tbody th{color:var(--rf-muted);font-weight:600;white-space:nowrap;min-width:0;position:sticky;left:0;background:var(--rf-bg)}
+  .rf-compare thead a{color:inherit;text-decoration:none;display:grid;gap:4px;font-weight:600}
+  .rf-compare thead img{width:100%;height:64px;object-fit:cover;border-radius:6px}
+  .rf-compare .rf-best{background:rgba(8,122,80,.12);color:var(--rf-accent-fg);font-weight:700}
+  .rf-na{color:var(--rf-soft)}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
@@ -1340,6 +1356,7 @@
         <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+        <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
         <input type="file" accept="application/json,.json" hidden>
       </div>
       <div class="rf-controls">
@@ -1573,6 +1590,12 @@
       download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
     });
     ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
+    ui.slBar.querySelector('[data-sl=compare]').addEventListener('click', (e) => {
+      ui.compare = !ui.compare;
+      e.currentTarget.setAttribute('aria-pressed', String(ui.compare));
+      ui.panel.classList.toggle('rf-wide', ui.compare);
+      renderShortlist();
+    });
     ui.slFile.addEventListener('change', async () => {
       const f = ui.slFile.files?.[0];
       ui.slFile.value = '';
@@ -1625,6 +1648,7 @@
     ui.controls.hidden = sl;
     ui.slBar.hidden = !sl;
     ui.panel.querySelector('.rf-clear').hidden = sl; // filters don't apply to the shortlist
+    ui.panel.classList.toggle('rf-wide', sl && !!ui.compare);
     if (sl) renderShortlist();
     else if (cache) showResults();
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
@@ -1637,11 +1661,14 @@
 
   function renderShortlist() {
     const rows = shortlistRows();
+    // Distance for the shortlist too (applyFilters isn't run over it).
+    const anchor = parseAnchor(cfg.anchor);
+    for (const r of rows) r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
     ui.rows = rows;
     setExport(rows.length === 0);
-    ui.list.innerHTML = rows.length
-      ? itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK)
-      : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>';
+    ui.list.innerHTML = !rows.length ? '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>'
+      : ui.compare ? compareHtml(rows.slice(0, COMPARE_MAX))
+      : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
@@ -1736,6 +1763,36 @@
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     ui.list.innerHTML = itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     ui.list.scrollTop = 0;
+  }
+
+  // Side-by-side comparison: one column per listing, best value per row highlighted.
+  const COMPARE_ROWS = [
+    ['Rent', (r) => r.price, (r) => r.priceNum, 'min'],
+    ['Per bed', (r) => ppbLabel(r) || (isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
+    ['Move-in', (r) => (isFinite(r.upfront) ? `$${r.upfront.toLocaleString('en-AU')}` : ''), (r) => r.upfront, 'min'],
+    ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
+    ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
+    ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
+    ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
+    ['Amenities', (r) => amenityTags(r).join(', '), null],
+    ['Agency', (r) => r.agency || '', null],
+    ['Status', (r) => (r.appStatus ? r.appStatus[0].toUpperCase() + r.appStatus.slice(1) : 'Not started'), null],
+    ['Note', (r) => r.note || '', null],
+  ];
+  function compareHtml(rows) {
+    const best = (score) => {
+      const vals = rows.map(score).filter((v) => isFinite(v));
+      const min = Math.min(...vals);
+      // Only a "best" when it beats something: ties across every listing highlight nothing.
+      return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
+    };
+    const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
+    const body = COMPARE_ROWS.map(([label, show, score]) => {
+      const b = score ? best(score) : null;
+      return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
+    }).join('');
+    return `<div class="rf-compare"><table><thead><tr><td></td>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
+      (ui.rows.length > rows.length ? `<div class="rf-empty">Comparing the first ${rows.length}; filter by status to pick others.</div>` : '');
   }
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.

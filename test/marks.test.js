@@ -224,3 +224,16 @@ test('marksStore: a genuine relist inherits "hidden" and shows the old price', (
   st.toggle('146500071', 's'); st.decorate(r);
   assert.equal(r[0].hidden, false, 'starring the relist overrides the inherited hide');
 });
+
+test('marksStore: shortlist summary keeps bond, amenities, coords, agency for compare', () => {
+  const st = core.marksStore(mem(), () => 1e12);
+  const r = core.toRow(listing({ id: '146500080', _links: { canonical: { href: 'https://www.realestate.com.au/property-x-146500080' } },
+    description: 'Pets allowed, dishwasher', address: { display: { fullAddress: '1 A St' }, location: { latitude: -33.9, longitude: 151.2 } },
+    listingCompany: { name: 'Acme' } }), false);
+  st.observe([r]); st.toggle(r.id, 's', r);
+  const [s] = st.shortlist();
+  assert.equal(s.upfront, 4500);
+  assert.equal(s.amen.pets, 'yes');
+  assert.equal(s.lat, -33.9);
+  assert.equal(s.agency, 'Acme');
+});

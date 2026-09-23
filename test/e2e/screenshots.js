@@ -54,6 +54,15 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     Object.assign(h.m[146500009], { s: 1, st: new Date('2026-09-23T10:00:00+10:00').getTime() - 864e5, d: { u: `${ORIGIN}/property-apartment-nsw-manly-146500009`, a: '4/21 The Corso, Manly, NSW 2095', p: '$940 per week', v: 'Sat 7th Nov', i: 'https://i2.au.reastatic.net/345x260/fixture/9.svg', t: 'Apartment', b: 2, ba: 2, c: 1 } });
     return h;
   }, act: async (page) => { await page.click('#rf-launch'); await page.click('[data-view=shortlist]'); } });
+  await shot('compare', { act: async (page) => {
+    await search(page);
+    for (const n of [1, 2, 3]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
+    await page.click('#rf-more summary');
+    await page.fill('#rf-anchor', '-33.8915, 151.2767'); await page.dispatchEvent('#rf-anchor', 'change');
+    await page.click('[data-view=shortlist]');
+    await page.selectOption('.rf-item:nth-child(1) select[data-app]', 'applied');
+    await page.click('[data-sl=compare]');
+  } });
   await shot('badges', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
   await shot('drawer', { act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
   await shot('filters', { act: async (page) => {

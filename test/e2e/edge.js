@@ -305,6 +305,28 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 16. Compare table: shortlisted side by side, best values highlighted, toggles back.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 3).map((x) => x.dataset.id));
+    for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.click('#rf-more summary');
+    await page.fill('#rf-anchor', '-33.8915, 151.2767'); await page.dispatchEvent('#rf-anchor', 'change');
+    await page.click('[data-view=shortlist]');
+    await page.click('[data-sl=compare]');
+    assert.equal(await page.getAttribute('[data-sl=compare]', 'aria-pressed'), 'true');
+    assert.equal(await page.$$eval('.rf-compare thead th', (e) => e.length), 3);
+    const rowsLabels = await page.$$eval('.rf-compare tbody th', (e) => e.map((x) => x.textContent));
+    assert.ok(['Rent', 'Move-in', 'Distance', 'Amenities', 'Status'].every((l) => rowsLabels.includes(l)));
+    assert.ok(await page.$$eval('.rf-compare .rf-best', (e) => e.length) >= 3, 'best values highlighted');
+    await page.click('[data-sl=compare]');
+    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 3);
+    console.log('compare table: ok');
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
