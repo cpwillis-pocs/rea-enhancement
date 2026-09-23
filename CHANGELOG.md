@@ -2,6 +2,14 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.10.0
+
+- **Market** view: weekly rent per bed count (median, middle half, range, per bed) and how many listings become available each week, over the listings your filters show; click a week to filter to it.
+- **Saved searches** (next to Settings): your remembered searches with when each was checked; **Check all for new listings** fetches each one politely and counts what's new or gone.
+- **Household income** (optional setting): rent as a share of income on each listing and in Compare, flagged over 30%; sets Best match's budget when there's no max rent.
+- Fixed: one corrupt stored shortlist, snapshot or preset entry could stop saving or searching; restored presets could be dropped when the list was full or bind two presets to one search; a search's "previous filters" were lost on reload and leaked to other searches; field discovery could skip a renamed field on every later listing after one empty one; a connection drop mid-download stopped Re-check; stored inspections could hide upcoming sessions behind past ones; Compare with a filtered-out selection showed nothing.
+- Drawer controls wrap instead of overflowing sideways.
+
 ## 2.9.1
 
 - Fixed: filter chip counts could overwrite Best match scores; bulk Undo restored every listing's marks rather than only the ones it touched.

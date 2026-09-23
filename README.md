@@ -28,6 +28,8 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
+- **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
+- **Household income** (optional): rent as a share of income, flagged over 30%.
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
 - **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
@@ -50,11 +52,14 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
+- **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time).
 - Price changes show "was $X" (hover for the full history). A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
 
 ![Compare shortlisted listings](docs/screenshots/compare.jpg)
+
+![Market view](docs/screenshots/market.jpg)
 
 **Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist. Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and previous price.
 
