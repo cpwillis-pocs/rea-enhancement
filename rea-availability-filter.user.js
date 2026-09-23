@@ -387,7 +387,7 @@
     r.lng = typeof o?.lng === 'number' ? o.lng : null;
     r.photos = typeof o?.photos === 'number' ? o.photos : null;
     r.floorplan = typeof o?.floorplan === 'boolean' ? o.floorplan : null;
-    r.amen = amenitiesOf(r);
+    r.amen = amenitiesOf({ features: r.features, amenText: r.address ? r.text.replace(r.address.toLowerCase(), ' ') : r.text });
     return r;
   };
   const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < SEARCH_KEY_MAX;
@@ -680,26 +680,33 @@
 
   // Amenities from feature labels + description. Negations are checked first, so "no pets"
   // is 'no' rather than matching "pets". State per amenity: 'yes' | 'no' | null (unknown).
+  const AMEN_NO = String.raw`\s*[:?\-]\s*(?:no|none|n)\b`; // key/value style: "Pets allowed: No"
   const AMENITIES = [
     { id: 'pets', label: 'Pets', yes: 'Pets OK',
-      neg: /\b(?:strictly )?no (?:pets?|animals)\b|\bpets? (?:are )?not (?:allowed|permitted|considered|accepted)\b|\bnot pet[- ]friendly\b/,
-      pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b/ },
-    { id: 'furnished', label: 'Furnished', yes: 'Furnished', neg: /\bunfurnished\b|\bnot furnished\b/,
+      neg: /\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
+      pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b|\bpets?\s*:\s*yes\b/ },
+    { id: 'furnished', label: 'Furnished', yes: 'Furnished', neg: /(?<!\bor )\bunfurnished\b(?! or furnished)|\bnot furnished\b/,
       pos: /\b(?:fully |partly |partially |semi[- ])?furnished\b/ },
-    { id: 'aircon', label: 'Air con', yes: 'Air con', neg: /\bno air[- ]?con/,
-      pos: /\bair[- ]?con(?:ditioning|ditioned|ditioner)?\b|\bsplit[- ]system\b|\breverse[- ]cycle\b|\bducted (?:heating (?:and|&) )?(?:cooling|air)\b|\bclimate control\b/ },
+    { id: 'aircon', label: 'Air con', yes: 'Air con', neg: /\bno (?:air[- ]?con|a\/c)/,
+      pos: /\bair[- ]?con(?:ditioning|ditioner)?\b|\bair[- ]conditioned (?!gym|foyer|lobby|common)|\ba\/c\b|\bsplit[- ]system\b|\breverse[- ]cycle\b|\bducted (?:heating (?:and|&) )?(?:cooling|air)\b|\bclimate control\b/ },
     { id: 'dishwasher', label: 'Dishwasher', yes: 'Dishwasher', neg: /\bno dish ?washer\b/, pos: /\bdish ?washer\b/ },
-    { id: 'laundry', label: 'Own laundry', yes: 'Own laundry', neg: /\b(?:shared|communal|common) laundry\b/,
+    { id: 'laundry', label: 'Own laundry', yes: 'Own laundry',
+      neg: /\b(?:shared|communal|common) laundry\b|\blaundry facilities (?:on (?:each|every|the ground) floor|in (?:the )?building|downstairs)\b/,
       pos: /\b(?:internal|private|separate|own|european) laundry\b|\blaundry (?:room|in unit|facilities)\b|\bin-unit laundry\b|\bwasher\/dryer\b/ },
-    { id: 'outdoor', label: 'Outdoor space', yes: 'Outdoor', neg: /$^/,
-      pos: /\bbalcon(?:y|ies)\b|\bcourtyard\b|\bterrace\b|\bdeck\b|\bprivate garden\b|\bbackyard\b/ },
-    { id: 'robes', label: 'Built-in robes', yes: 'BIRs', neg: /$^/,
+    { id: 'outdoor', label: 'Outdoor space', yes: 'Outdoor', neg: /\bno (?:balcony|courtyard|outdoor (?:area|space)|yard)\b/,
+      pos: /\b(?<!(?:shared|communal|common|rooftop) )(?:balcon(?:y|ies)|courtyard|terrace(?! house| home)|deck(?! chair)|private garden|backyard|outdoor (?:area|space))\b/ },
+    { id: 'robes', label: 'Built-in robes', yes: 'BIRs', neg: /\bno (?:built[- ]in )?(?:robes?|wardrobes?|birs?)\b/,
       pos: /\bbuilt[- ]in (?:robes?|wardrobes?)\b|\bbirs?\b|\bwalk[- ]in (?:robe|wardrobe)\b/ },
-    { id: 'pool', label: 'Pool', yes: 'Pool', neg: /\bno pool\b/, pos: /\b(?:swimming |lap |plunge )?pool\b(?! table)/ },
+    { id: 'pool', label: 'Pool', yes: 'Pool', neg: /\bno (?:swimming |lap |plunge )?pool\b/,
+      pos: /\b(?<!(?:car|walk to [\w' ]{0,30}|near(?:by)? [\w' ]{0,20}|close to [\w' ]{0,30}) )(?:swimming |lap |plunge )?pool\b(?! tables?|side)/ },
   ];
+  // "X: No" per amenity, built once.
+  for (const a of AMENITIES) a.kvNo = new RegExp(`(?:${a.pos.source})${AMEN_NO}`);
+  // Only what the listing says about itself (features, headline, description), never the
+  // address or property type ("North Terrace", type "Terrace" are not outdoor space).
   const amenitiesOf = (row) => {
-    const text = `${(row.features || []).join(' | ')} | ${row.text || ''}`.toLowerCase();
-    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.neg.test(text) ? 'no' : a.pos.test(text) ? 'yes' : null]));
+    const text = `${(row.features || []).join(' | ')} | ${row.amenText ?? row.text ?? ''}`.toLowerCase();
+    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.neg.test(text) || a.kvNo.test(text) ? 'no' : a.pos.test(text) ? 'yes' : null]));
   };
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
@@ -772,7 +779,7 @@
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
     row.text = [row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' ').toLowerCase();
-    row.amen = amenitiesOf(row);
+    row.amen = amenitiesOf({ features: row.features, amenText: [row.headline, str(listing.description)].filter(Boolean).join(' ') });
     return row;
   };
 

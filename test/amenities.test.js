@@ -40,3 +40,21 @@ test('amenity cfg parsing and filtering: require vs exclude, unknowns', () => {
   assert.deepEqual(ids('furnished:no'), ['b', 'c'], 'exclude keeps unknowns');
   assert.deepEqual(ids('pets:yes,furnished:no'), []);
 });
+
+test('amenitiesOf: address and property type never count', () => {
+  const r = core.toRow(listing({ propertyType: { display: 'Terrace' }, description: 'Two bedroom home',
+    address: { display: { fullAddress: '12 North Terrace, Adelaide SA 5000' } } }), false);
+  assert.equal(r.amen.outdoor, null);
+});
+
+test('amenitiesOf: adversarial phrases', () => {
+  const T = { pets: [['Pets allowed: No', 'no'], ['Pets will not be considered', 'no'], ['Strata does not allow pets', 'no'], ['Pet-free building', 'no'], ['no-pets policy', 'no'], ['No dogs or cats', 'no'], ['Pets: Yes', 'yes']],
+    furnished: [['Furnished or unfurnished', 'yes'], ['Furnished: No', 'no']],
+    aircon: [['Air-conditioned gym in the building', null], ['Ceiling fans, no A/C', 'no'], ['A/C in bedroom', 'yes'], ['Air Conditioning: No', 'no']],
+    dishwasher: [['Dishwasher: No', 'no']],
+    laundry: [['Laundry facilities on each floor', 'no'], ['Laundry facilities in building', 'no']],
+    outdoor: [['No balcony', 'no'], ['Communal courtyard', null], ['Rooftop terrace for residents', null], ['Deck chairs not included', null], ['Outdoor area', 'yes']],
+    robes: [['no built-in robes', 'no']],
+    pool: [['No swimming pool', 'no'], ['Pool: No', 'no'], ['car pool', null], ['Walk to Bondi Icebergs pool', null], ['close to the Aquatic Centre pool', null], ['heated pool', 'yes']] };
+  for (const [id, cases] of Object.entries(T)) for (const [t, want] of cases) assert.equal(am(t)[id], want, `${id}: ${t}`);
+});
