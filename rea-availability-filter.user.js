@@ -261,7 +261,7 @@
         save();
       },
       decorate(rows) {
-        const { m } = load();
+        const { m, ag, sb } = load();
         const t = now();
         for (const r of rows) {
           const e = m[r.id];
@@ -272,8 +272,8 @@
           r.priceHistory = Array.isArray(e?.ph) ? e.ph : [];
           r.note = e?.n || '';
           r.appStatus = e?.as || '';
-          r.agencyHidden = !!(r.agency && load().ag?.[agencyKey(r.agency)]);
-          r.suburbHidden = !!(r.suburb && load().sb?.[agencyKey(r.suburb)]);
+          r.agencyHidden = !!(r.agency && ag?.[agencyKey(r.agency)]);
+          r.suburbHidden = !!(r.suburb && sb?.[agencyKey(r.suburb)]);
           r.firstSeen = e?.f ? new Date(e.f) : null;
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
@@ -1902,6 +1902,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-nowatch .rf-label{flex:1 1 100%}
+  #rf-lbar.rf-lbar-min{padding:4px;gap:4px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
     font:500 12px system-ui,sans-serif;cursor:pointer}
   .rf-chip[data-state=yes]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
@@ -2903,7 +2904,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   }
 
   function itemsHtml(rows) {
-    return rows.map((r) => `
+    return rows.map((r) => {
+      const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
+      return `
       <div tabindex="-1" class="rf-item${r.gone || r.hidden || r.agencyHidden || r.suburbHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
@@ -2918,13 +2921,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
             r.bond ? `bond ${r.bond}` : '',
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
-          ${kmLabel(r) || r.score != null ? `<div class="rf-meta">${esc(kmLabel(r))}${r.score != null ? `${kmLabel(r) ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
+          ${km || r.score != null ? `<div class="rf-meta">${esc(km)}${r.score != null ? `${km ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency,
             r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
-          ${amenityTags(r).length ? `<div class="rf-tags">${amenityTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
-          ${watchTags(r).length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${watchTags(r).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
-          ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
-          ${incomePct(r, cfg.income) != null ? `<div class="rf-meta${incomePct(r, cfg.income) > RENT_STRESS_PCT ? ' rf-warn-t' : ''}">${incomePct(r, cfg.income)}% of income</div>` : ''}
+          ${am.length ? `<div class="rf-tags">${am.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+          ${wt.length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${wt.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+          ${med ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(med)}</div>` : ''}
+          ${inc != null ? `<div class="rf-meta${inc > RENT_STRESS_PCT ? ' rf-warn-t' : ''}">${inc}% of income</div>` : ''}
           ${Number.isFinite(r.upfront) ? `<div class="rf-meta">Move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
           ${r.inspections?.length || r.listed || r.lastSeen ? `<div class="rf-meta">${esc([
             r.lastSeen && ui.view === 'shortlist' ? `seen ${ago(Date.now() - r.lastSeen)}` : '',
@@ -2946,7 +2949,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
         </div></details>` : ''}
       </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   function fillPresets() {
