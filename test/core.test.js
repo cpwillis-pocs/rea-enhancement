@@ -491,3 +491,16 @@ test('noWatch hides listings that mention a chosen heads-up; one chip per term',
   const chips = core.removedBy(rows, cfg);
   assert.deepEqual(chips.map((c) => [c.label, c.removes]), [['No short lease', 1], ['No water usage charged', 1]]);
 });
+
+test('keywordTest: required words, -exclusions, "quoted phrases"', () => {
+  const t = core.keywordTest('pool -studio "north facing"');
+  assert.ok(t('a pool, north facing'));
+  assert.ok(!t('studio with pool, north facing'));
+  assert.ok(!t('pool facing north'));
+});
+
+test('findListing: finds the listing by id anywhere in unpacked page data', () => {
+  const data = { a: { b: [{ id: '146500002', price: { display: '$2' } }, { id: '146500001', price: { display: '$1' } }] } };
+  assert.equal(core.findListing(data, '146500001').price.display, '$1');
+  assert.equal(core.findListing(data, '146500009'), null);
+});
