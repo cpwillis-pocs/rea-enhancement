@@ -1,7 +1,7 @@
 {
   "name": "rea-enhancement",
   "private": true,
-  "description": "Tampermonkey userscript enhancing realestate.com.au rental search results",
+  "description": "Tampermonkey userscript for realestate.com.au rentals: available-from filter, all pages in one list, shortlist, alerts and exports. Local-only.",
   "scripts": {
     "check": "node --check rea-availability-filter.user.js && node --test test/*.test.js",
     "test": "node --test test/*.test.js",
