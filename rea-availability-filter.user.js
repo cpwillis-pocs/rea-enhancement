@@ -30,7 +30,8 @@
   const RETRIES = 3;
   const RETRY_BASE_MS = 1000;
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
-  const ROWS_VERSION = 2; // bump when toRow() shape changes
+  const ROWS_VERSION = 3; // bump when toRow() shape changes
+  const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROWS_TTL_MS = 10 * 60 * 1000;
 
   // ---------------------------------------------------------------- config
@@ -50,7 +51,7 @@
         const v = JSON.parse(storage.getItem(ROWS_PREFIX + key));
         if (!v || v.v !== ROWS_VERSION || now() - v.at > ROWS_TTL_MS) return null;
         for (const r of v.rows) {
-          r.avail = r.avail == null ? null : new Date(r.avail);
+          for (const k of ROW_DATES) r[k] = r[k] == null ? null : new Date(r[k]);
           r.priceNum = r.priceNum ?? Infinity;
           r.ppb = r.ppb ?? Infinity;
         }
@@ -159,6 +160,36 @@
   const searchKey = (href) => pageUrl(href, 1);
   const pageNum = (href) => +(new URL(href).pathname.match(/\/(?:list|map)-(\d+)/)?.[1] || 1);
 
+  // Field names below are best-effort: REA's GraphQL shape is undocumented, so several
+  // plausible spellings are tried and anything unrecognised degrades to empty.
+  const toDate = (v) => {
+    if (v == null || v === '') return null;
+    const raw = typeof v === 'object' ? v.value ?? v.iso ?? v.dateTime ?? v.date ?? null : v;
+    if (raw == null) return null;
+    const d = typeof raw === 'number' ? new Date(raw < 1e12 ? raw * 1000 : raw) : new Date(raw);
+    return isNaN(d) || !/\d{4}/.test(String(raw)) && typeof raw !== 'number' ? null : d;
+  };
+
+  const DT_FMT = { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' };
+  const fmtWhen = (d) => d.toLocaleString('en-AU', DT_FMT).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
+
+  function extractInspections(listing, now = new Date()) {
+    const src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
+    const list = Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : [];
+    const cutoff = now.getTime() - 60 * 60 * 1000; // keep one that started <1h ago
+    return list
+      .map((it) => {
+        const at = toDate(it?.startTime ?? it?.startTimeUtc ?? it?.start ?? it?.dateTime ?? it?.startsAt);
+        const label = str(it?.display?.shortLabel) || str(it?.display?.longLabel) || str(it?.display) || str(it?.label) || (at ? fmtWhen(at) : '');
+        return { at: at ? at.getTime() : null, label };
+      })
+      .filter((i) => i.label && (i.at == null || i.at >= cutoff))
+      .sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
+  }
+
+  const extractListed = (listing) =>
+    toDate(listing.dateListed ?? listing.listedDate ?? listing.listingDate ?? listing.dateFirstListed ?? listing.listedAt);
+
   const toRow = (listing, surrounding) => {
     const display = listing.availableDate?.display || '';
     const price = listing.price?.display || '';
@@ -178,7 +209,13 @@
       url: safeUrl(listing._links?.canonical?.href),
       surrounding,
       headline: str(listing.title) || str(listing.headline) || '',
+      id: String(listing.id ?? listing._links?.canonical?.href?.match(/-(\d+)(?:[/?#]|$)/)?.[1] ?? ''),
+      inspections: extractInspections(listing),
+      listed: extractListed(listing),
     };
+    const next = row.inspections.find((i) => i.at != null);
+    row.nextInspect = next ? new Date(next.at) : null;
+    row.inspect = row.inspections.map((i) => i.label).join('; ');
     // Studios report 0 beds: price per bed is then the full price.
     row.ppb = isFinite(row.priceNum) ? Math.round(row.priceNum / Math.max(1, +row.beds || 0)) : Infinity;
     row.text = [row.headline, str(listing.description), row.address, row.type].filter(Boolean).join(' ').toLowerCase();
@@ -241,7 +278,7 @@
   const DEFAULT_CFG = {
     from: '', to: '', exactOnly: false,
     priceMin: '', priceMax: '', bedsMin: '', bathsMin: '', carsMin: '',
-    type: '', keyword: '', hideNoImage: false, sort: 'avail',
+    type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
   };
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -252,6 +289,8 @@
     price: (a, b) => byPrice(a, b) || byAvail(a, b),
     ppb: (a, b) => a.ppb - b.ppb || byAvail(a, b),
     beds: (a, b) => (+b.beds || 0) - (+a.beds || 0) || byPrice(a, b),
+    listed: (a, b) => (b.listed ?? -Infinity) - (a.listed ?? -Infinity) || byAvail(a, b),
+    inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
   };
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
 
@@ -277,6 +316,8 @@
     const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax);
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
+    const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
+    const sameDay = (ms) => { const d = new Date(ms); return d.getFullYear() === insDay.getFullYear() && d.getMonth() === insDay.getMonth() && d.getDate() === insDay.getDate(); };
     const seen = new Set();
     return rows
       .filter((r) => r.url && !seen.has(r.url) && seen.add(r.url))
@@ -287,10 +328,11 @@
       .filter((r) => !cfg.type || r.type === cfg.type)
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !kw || kw(r.text || ''))
+      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at)))
       .sort(SORTS[cfg.sort] || SORTS.avail);
   }
 
-  const TSV_COLS = ['available', 'price', 'priceNum', 'ppb', 'bond', 'address', 'suburb', 'beds', 'baths', 'cars', 'type', 'headline', 'url'];
+  const TSV_COLS = ['available', 'price', 'priceNum', 'ppb', 'bond', 'address', 'suburb', 'beds', 'baths', 'cars', 'type', 'inspect', 'listed', 'headline', 'url'];
   const toTsv = (rows) =>
     [TSV_COLS.join('\t')]
       .concat(rows.map((r) => TSV_COLS.map((c) => String(r[c] ?? '').replace(/\s+/g, ' ')).join('\t')))
@@ -311,7 +353,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
-      fetchResults, fetchAllPages, applyFilters, keywordTest, toTsv, esc, safeUrl, rowStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
   }
@@ -425,6 +467,7 @@
             <label>Type<select id="rf-type"><option value="">Any</option></select></label>
           </div>
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
+          <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
         </details>
         <div class="rf-row">
@@ -434,6 +477,8 @@
             <option value="price">Price</option>
             <option value="ppb">Price per bed</option>
             <option value="beds">Most beds</option>
+            <option value="inspect">Next inspection</option>
+            <option value="listed">Newest listed</option>
           </select></label>
         </div>
         <div class="rf-actions">
@@ -467,7 +512,7 @@
     ui.fields = fields;
     ui.type = panel.querySelector('#rf-type');
     ui.more = panel.querySelector('#rf-more');
-    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage']
+    ui.more.open = ['priceMin', 'priceMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn']
       .some((k) => cfg[k] && cfg[k] !== DEFAULT_CFG[k]);
 
     launch.addEventListener('click', () => { panel.hidden = false; });
@@ -527,12 +572,19 @@
             r.bond ? `bond ${r.bond}` : '',
             +r.beds > 1 && isFinite(r.ppb) ? `$${r.ppb}/bed` : '',
           ].filter(Boolean).join(' · '))}</div>
+          ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
+            r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
+            r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',
+          ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>`).join('');
     ui.list.scrollTop = 0;
   }
 
-  const ago = (ms) => (ms < 60e3 ? 'just now' : `${Math.round(ms / 60e3)} min ago`);
+  const ago = (ms) => {
+    const m = Math.round(ms / 60e3);
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+  };
 
   function fillTypes(rows) {
     const types = [...new Set(rows.map((r) => r.type).filter(Boolean))].sort();

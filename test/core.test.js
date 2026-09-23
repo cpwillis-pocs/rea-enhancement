@@ -101,3 +101,43 @@ test('applyFilters: price, beds, type, image, keyword, sort', () => {
   assert.deepEqual(ids({ sort: 'ppb' }), ['a', 'd', 'b', 'c']);
   assert.deepEqual(ids({ sort: 'beds' })[0], 'a');
 });
+
+test('extractInspections: tolerant of shapes, drops past, sorts', () => {
+  const now = new Date('2026-09-23T09:00:00+10:00');
+  const a = core.extractInspections({ inspections: [
+    { startTime: '2026-09-26T10:00:00+10:00', display: { shortLabel: 'Sat 26 Sep, 10:00am' } },
+    { startTime: '2026-09-24T17:00:00+10:00' },
+    { startTime: '2026-09-20T10:00:00+10:00', display: { shortLabel: 'old' } },
+  ] }, now);
+  assert.equal(a.length, 2);
+  assert.ok(a[0].at < a[1].at);
+  assert.equal(a[1].label, 'Sat 26 Sep, 10:00am');
+  assert.ok(a[0].label.length > 0);
+  assert.equal(core.extractInspections({ inspections: { items: [{ display: 'By appointment' }] } }, now)[0].label, 'By appointment');
+  assert.deepEqual(core.extractInspections({}, now), []);
+});
+
+test('toDate / extractListed', () => {
+  assert.equal(core.toDate('2026-09-01').getUTCDate(), 1);
+  assert.equal(core.toDate({ value: '2026-09-01T00:00:00Z' }).toISOString(), '2026-09-01T00:00:00.000Z');
+  assert.equal(core.toDate(1788220800).toISOString(), '2026-09-01T00:00:00.000Z');
+  assert.equal(core.toDate('New'), null);
+  assert.equal(core.extractListed({}), null);
+  assert.ok(core.extractListed({ dateListed: { value: '2026-09-01' } }) instanceof Date);
+});
+
+test('applyFilters: inspectOn and listed sort', () => {
+  const L = (id, o) => core.toRow(listing({ id, ...o }), false);
+  const soon = new Date(Date.now() + 2 * 864e5); soon.setHours(10, 0, 0, 0);
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const rows = [
+    L('a', { inspections: [{ startTime: soon.toISOString() }], dateListed: '2026-09-01' }),
+    L('b', { dateListed: '2026-09-10' }),
+    L('c', {}),
+  ];
+  const ids = (cfg) => core.applyFilters(rows, cfg).map((r) => r.url.split('-').pop());
+  assert.deepEqual(ids({ inspectOn: iso(soon) }), ['a']);
+  assert.deepEqual(ids({ sort: 'listed' }), ['b', 'a', 'c']);
+  assert.deepEqual(ids({ sort: 'inspect' })[0], 'a');
+  assert.equal(rows[0].id, 'a');
+});
