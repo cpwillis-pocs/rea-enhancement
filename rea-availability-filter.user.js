@@ -130,9 +130,12 @@
     const load = () => {
       if (data) return data;
       try { data = JSON.parse(storage.getItem(MARKS_KEY)); } catch { data = null; }
-      if (!data || typeof data !== 'object' || typeof data.m !== 'object') data = { c: now(), m: {} };
+      if (!data || typeof data !== 'object' || !data.m || typeof data.m !== 'object' || Array.isArray(data.m)) data = { c: now(), m: {} };
       return data;
     };
+    // Writes re-read storage first so another tab's changes aren't overwritten by this
+    // tab's stale in-memory copy (last writer wins per call, not per page lifetime).
+    const fresh = () => { data = null; return load(); };
     const prune = () => {
       const { m } = data;
       for (const [id, e] of Object.entries(m)) if (!keep(e) && now() - (e.l || e.f || 0) > MARKS_TTL_MS) delete m[id];
@@ -144,8 +147,9 @@
     };
     const save = () => { try { prune(); storage.setItem(MARKS_KEY, JSON.stringify(data)); } catch { /* quota/blocked */ } };
     return {
+      invalidate() { data = null; },
       observe(rows) {
-        const { m } = load();
+        const { m } = fresh();
         const t = now();
         for (const r of rows) {
           if (!r.id) continue;
@@ -178,7 +182,7 @@
       },
       // `row` lets a newly shortlisted listing carry its summary for the cross-search view.
       toggle(id, k, row) {
-        const { m } = load();
+        const { m } = fresh();
         const e = m[id] || (m[id] = { f: now(), l: now() });
         e[k] = e[k] ? 0 : 1;
         if (k === 's') {
@@ -189,7 +193,7 @@
       },
       note: (id) => load().m[id]?.n || '',
       setNote(id, text) {
-        const { m } = load();
+        const { m } = fresh();
         const e = m[id] || (m[id] = { f: now(), l: now() });
         const n = clip(String(text ?? '').trim(), NOTE_MAX);
         if (n) e.n = n; else delete e.n;
@@ -226,7 +230,7 @@
         let src;
         try { src = JSON.parse(text); } catch { throw new Error('Not a JSON file.'); }
         if (src?.app !== 'rea-enhancement' || src?.kind !== 'marks' || typeof src.m !== 'object' || !src.m) throw new Error('Not an rea-enhancement backup.');
-        const { m } = load();
+        const { m } = fresh();
         let n = 0;
         for (const [id, e] of Object.entries(src.m)) {
           if (!/^\d{1,15}$/.test(id) || !e || typeof e !== 'object') continue;
@@ -1538,6 +1542,10 @@
     step('boot', () => { if (boot) learn(rowsOf(boot.results)); });
     step('navigation', watchNavigation);
     step('cards', watchCards);
+    step('sync', () => window.addEventListener('storage', (e) => {
+      // Another tab changed the shortlist/hidden/notes: pick it up here.
+      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }
+    }));
     step('restore', restore);
     step('annotate', ensureVisiblePage);
   }

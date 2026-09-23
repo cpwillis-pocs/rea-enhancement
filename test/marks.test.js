@@ -100,3 +100,18 @@ test('marksStore: import rejects junk and sanitises', () => {
   assert.equal(b.note('146500099'), 'ok');
   assert.equal(({}).s, undefined, 'no prototype pollution');
 });
+
+test('marksStore: two tabs do not clobber each other; null m recovers', () => {
+  const storage = mem();
+  const tab1 = core.marksStore(storage), tab2 = core.marksStore(storage);
+  tab2.counts(); // tab2 loads (empty) and keeps it in memory
+  tab1.toggle('146500001', 's');
+  tab2.observe([row('146500002')]); // would previously write back its stale copy
+  assert.equal(core.marksStore(storage).counts().starred, 1);
+  tab2.toggle('146500003', 'h');
+  assert.deepEqual(core.marksStore(storage).counts(), { starred: 1, hidden: 1, notes: 0 });
+
+  const bad = mem(); bad.setItem('rea-avail-filter/marks/v1', '{"c":1,"m":null}');
+  const st = core.marksStore(bad);
+  assert.doesNotThrow(() => st.observe([row('146500004')]));
+});
