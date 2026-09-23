@@ -537,3 +537,26 @@ test('marketStats.bySuburb only for multi-suburb results', () => {
   assert.deepEqual(m.bySuburb.map((g) => [g.suburb, g.n, g.median]), [['Bondi', 5, 520], ['Manly', 1, null]]);
   assert.deepEqual(core.marketStats(rows.slice(0, 5)).bySuburb, []);
 });
+
+test('named places: parse, per-place km, nearest-to-all sort', () => {
+  const places = core.parsePlaces('Work: -33.87, 151.21\n-33.80,151.28\nbad line\nA: -33.9,151.2\nB: -33.9,151.2');
+  assert.deepEqual(places.map((p) => p.label), ['Work', 'Place 2', 'A']);
+  const cfg = { ...core.DEFAULT_CFG, anchor: '-33.89,151.27', places: 'Work: -33.87, 151.21', sort: 'allnear' };
+  const near = { id: '1', url: 'a', lat: -33.88, lng: 151.24 }, far = { id: '2', url: 'b', lat: -33.89, lng: 151.28 };
+  const out = core.applyFilters([far, near], cfg);
+  assert.deepEqual(out.map((r) => r.id), ['1', '2'], 'the one between both places wins');
+  assert.equal(near.placeKm[0].label, 'Work');
+  assert.ok(core.worstKm(near) < core.worstKm(far));
+});
+
+test('withScores: weights change the ranking; Ignore drops a part', () => {
+  const cheapFar = { priceNum: 400, km: 9 }, dearNear = { priceNum: 900, km: 0.5 };
+  const base = { ...core.DEFAULT_CFG, priceMax: '1000', maxKm: '10' };
+  core.withScores([cheapFar, dearNear], { ...base, wRent: '3', wDist: '1' });
+  assert.ok(cheapFar.score > dearNear.score, 'rent matters more');
+  core.withScores([cheapFar, dearNear], { ...base, wRent: '1', wDist: '3' });
+  assert.ok(dearNear.score > cheapFar.score, 'distance matters more');
+  core.withScores([cheapFar], { ...base, wDist: '0' });
+  assert.equal(cheapFar.score, null, 'only one part left: no score');
+  assert.doesNotMatch(core.withScores([dearNear], base)[0].scoreWhy, /×/);
+});

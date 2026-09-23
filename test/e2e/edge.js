@@ -875,6 +875,39 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24k. Named places, Best match weights, inspection checklist.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-anchor', '-33.891, 151.274'); await page.dispatchEvent('#rf-anchor', 'change');
+    await page.fill('#rf-places', 'Work: -33.8688, 151.2093'); await page.dispatchEvent('#rf-places', 'change');
+    await page.waitForFunction(() => /Work \d/.test(document.querySelector('.rf-list').textContent));
+    await page.selectOption('#rf-sort', 'allnear');
+    assert.match(await page.textContent('.rf-item .rf-meta:has-text("Work")'), /km away · Work [\d.]+ (k)?m/);
+    await page.fill('#rf-priceMax', '1500'); await page.dispatchEvent('#rf-priceMax', 'change');
+    await page.selectOption('#rf-sort', 'match');
+    await page.click('.rf-settings summary');
+    await page.selectOption('#rf-wDist', '0');
+    assert.doesNotMatch(await page.getAttribute('.rf-score', 'title'), /distance/, 'ignored part left out');
+    await page.selectOption('#rf-wRent', '3');
+    assert.match(await page.getAttribute('.rf-score', 'title'), /rent vs budget \d+ \(×1.5\)/);
+    const id = await page.getAttribute('.rf-item', 'data-id');
+    await page.click(`.rf-item[data-id="${id}"] [data-act=s]`);
+    await page.click('[data-view=shortlist]');
+    await page.click(`.rf-item[data-id="${id}"] [data-ck="Natural light"]`);
+    await page.click(`.rf-item[data-id="${id}"] [data-ck="Noise"]`); await page.click(`.rf-item[data-id="${id}"] [data-ck="Noise"]`);
+    assert.equal(await page.getAttribute(`.rf-item[data-id="${id}"] [data-ck="Natural light"]`, 'data-state'), 'yes');
+    assert.equal(await page.getAttribute(`.rf-item[data-id="${id}"] [data-ck="Noise"]`, 'data-state'), 'no');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.ck), 'Noise', 'focus kept on the chip');
+    await page.click('[data-sl=compare]');
+    assert.match(await page.textContent('.rf-compare'), /✓ Natural light, ✗ Noise/);
+    assert.match(await page.textContent('.rf-compare'), /Work/);
+    console.log('places / weights / checklist: ok');
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

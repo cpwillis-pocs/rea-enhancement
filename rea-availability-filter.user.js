@@ -172,6 +172,9 @@
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
+  const CHECKLIST_DEFAULT = 'Damp or mould, Water pressure, Phone signal, Natural light, Noise, Storage';
+  const checklistItems = (v) => [...new Set(String(v || CHECKLIST_DEFAULT).split(/[,\n]/).map((x) => clip(x.trim(), 30)).filter(Boolean))].slice(0, CHECK_MAX);
+  const checkSummary = (r, items) => items.filter((k) => r.checks?.[k]).map((k) => `${r.checks[k] === 'y' ? '✓' : '✗'} ${k}`).join(', ');
   const HIDE_REASONS = ['too small', 'location', 'condition', 'price', 'other'];
   const FOLLOW_UP_DAYS = 5; // an application with no answer after this long gets a "follow up?" nudge
   const needsFollowUp = (r, now = Date.now()) => r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
@@ -188,9 +191,12 @@
     return out;
   };
   const recordText = (v) => (v ? `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined` : ''}` : '');
-  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'as', 'ast']; // user choices a bulk action can change
+  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'as', 'ast', 'ck']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const keep = (e) => e.s || e.h || e.n || e.as;
+  // Inspection checklist answers: { label: 'y' | 'n' }, labels clipped, at most CHECK_MAX of them.
+  const CHECK_MAX = 12;
+  const cleanChecks = (o) => (isObj(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => k && (v === 'y' || v === 'n')).slice(0, CHECK_MAX).map(([k, v]) => [clip(k, 30), v])) : {});
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
   const addressKey = (a) => {
     const k = String(a || '').toLowerCase().replace(/[^a-z0-9/]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -329,6 +335,7 @@
           r.firstSeen = e?.f ? new Date(e.f) : null;
           r.openedAt = e?.o ? new Date(e.o) : null;
           r.hideReason = r.hidden && e?.hr ? e.hr : '';
+          r.checks = cleanChecks(e?.ck);
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
           r.prevPrice = e && e.pp != null && e.pp !== e.p && e.pt && t - e.pt < PRICE_CHANGE_MS ? e.pps || `$${e.pp}` : '';
@@ -369,6 +376,17 @@
         save();
       },
       // You opened the listing (from the drawer, a card or its page): "opened 2d ago", Not-opened filter.
+      // Cycle one checklist item: unknown -> yes -> no -> unknown.
+      cycleCheck(id, label) {
+        const { m } = fresh();
+        const e = entry(m, id), k = clip(String(label || ''), 30);
+        if (!k) return '';
+        const ck = cleanChecks(e.ck), next = !ck[k] ? 'y' : ck[k] === 'y' ? 'n' : '';
+        if (next) ck[k] = next; else delete ck[k];
+        if (Object.keys(ck).length) e.ck = ck; else delete e.ck;
+        save();
+        return next;
+      },
       setHideReason(id, reason) {
         const { m } = fresh();
         const e = entry(m, id);
@@ -404,7 +422,7 @@
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
-              gone: !!e.x, goneAt: e.x || null,
+              gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck),
               inspections: cleanInspections(d.in).filter((i) => i.label && (i.at == null || i.at >= now() - INSPECT_GRACE_MS)),
             };
           });
@@ -414,7 +432,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -435,6 +453,7 @@
           if (typeof e.x === 'number') cur.x = e.x;
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
+          const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           n++;
         }
         if (src.sb && typeof src.sb === 'object') {
@@ -1095,6 +1114,23 @@
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
 
+  // Extra named places ("Work: -33.87,151.21", one per line, up to 3) shown beside the main point.
+  const PLACES_MAX = 3;
+  const parsePlaces = (v) => String(v || '').split(/\n+/).map((line, i) => {
+    const m = line.match(/^\s*([^:]{1,24}?)\s*:\s*(.+)$/);
+    const at = parseAnchor(m ? m[2] : line);
+    return at ? { label: (m ? m[1] : `Place ${i + 1}`).trim(), ...at } : null;
+  }).filter(Boolean).slice(0, PLACES_MAX);
+  // Distances for one row: main point (r.km) and each place (r.placeKm), memoised per settings + position.
+  const setDistances = (r, cfg, anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places)) => {
+    const k = `${cfg.anchor}|${cfg.places}|${r.lat}|${r.lng}`;
+    if (r._kmFor === k) return;
+    r.km = kmFrom(anchor, r);
+    r.placeKm = places.map((p) => ({ label: p.label, km: kmFrom(p, r) })).filter((p) => p.km != null);
+    r._kmFor = k;
+  };
+  // Worst of all distances: "nearest to all" means the longest trip is shortest.
+  const worstKm = (r) => { const all = [r.km, ...(r.placeKm || []).map((p) => p.km)].filter((v) => v != null); return all.length ? Math.max(...all) : null; };
   const kmFrom = (anchor, r) => (anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null);
 
   // Distance from a user-chosen point. Accepts "-33.87, 151.21" or a Google Maps URL/text
@@ -1119,6 +1155,8 @@
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
     return 2 * EARTH_KM * Math.asin(Math.sqrt(h));
   };
+  const kmShort = (km) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km} km`);
+  const placesLabel = (r) => (r.placeKm || []).map((p) => `${p.label} ${kmShort(p.km)}`).join(' · ');
   const kmLabel = (r) => (r.km == null ? '' : r.km < 1 ? `${Math.round(r.km * 1000)} m away` : `${r.km} km away`);
 
   const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
@@ -1251,7 +1289,7 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
-    remember: true, enquiry: '', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', showGone: false, income: '',
+    remember: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', showGone: false, income: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1266,7 +1304,7 @@
     'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
     'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'unopenedOnly', 'noWatch', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
-  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'income', 'enquiry']; // Clear keeps your "from" point
+  const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'places', 'checklist', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -1281,6 +1319,7 @@
     inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
     value: (a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b),
     distance: (a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || byAvail(a, b),
+    allnear: (a, b) => (worstKm(a) ?? Infinity) - (worstKm(b) ?? Infinity) || byAvail(a, b),
     match: (a, b) => (b.score ?? -1) - (a.score ?? -1) || byAvail(a, b),
   };
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
@@ -1335,22 +1374,28 @@
   const RENT_STRESS_PCT = 30;
   const incomePct = (r, income) => (num(income) > 0 && Number.isFinite(r.priceNum) ? Math.round((r.priceNum * 52 * 100) / num(income)) : null);
 
+  // Best match weights (0 = ignore, 1-3 = importance), set under Settings.
+  const SCORE_WEIGHTS = [['rent', 'wRent'], ['timing', 'wTiming'], ['distance', 'wDist'], ['move-in', 'wMovein']];
   const withScores = (rows, cfg) => {
     // Budget: your max rent, else what 30% of your income affords.
     const pMax = num(cfg.priceMax) || (num(cfg.income) > 0 ? Math.round((num(cfg.income) * RENT_STRESS_PCT) / 100 / 52) : null), kmMax = num(cfg.maxKm) || SCORE_KM;
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
     const upMed = median(rows.map((r) => r.upfront));
+    const w = Object.fromEntries(SCORE_WEIGHTS.map(([k, key]) => { const v = num(cfg[key]); return [k, v == null ? 2 : Math.max(0, Math.min(3, v))]; }));
     for (const r of rows) {
       const parts = [];
+      const dist = worstKm(r);
       if (Number.isFinite(r.priceNum)) {
-        if (pMax) parts.push(['rent vs budget', clamp01(1 - r.priceNum / pMax + 0.5)]);
-        else if (r.vsMedian != null) parts.push(['rent vs median', clamp01(0.5 - r.vsMedian / 50)]);
+        if (pMax) parts.push(['rent vs budget', clamp01(1 - r.priceNum / pMax + 0.5), w.rent]);
+        else if (r.vsMedian != null) parts.push(['rent vs median', clamp01(0.5 - r.vsMedian / 50), w.rent]);
       }
-      if (from && r.avail) parts.push(['timing', clamp01(1 - Math.abs(r.avail - from) / (SCORE_AVAIL_DAYS * DAY_MS))]);
-      if (r.km != null) parts.push(['distance', clamp01(1 - r.km / kmMax)]);
-      if (upMed && Number.isFinite(r.upfront)) parts.push(['move-in', clamp01(0.5 - (r.upfront - upMed) / (2 * upMed))]);
-      r.score = parts.length >= 2 ? Math.round((parts.reduce((t, [, v]) => t + v, 0) / parts.length) * 100) : null;
-      r.scoreWhy = r.score == null ? '' : parts.map(([k, v]) => `${k} ${Math.round(v * 100)}`).join(', ');
+      if (from && r.avail) parts.push(['timing', clamp01(1 - Math.abs(r.avail - from) / (SCORE_AVAIL_DAYS * DAY_MS)), w.timing]);
+      if (dist != null) parts.push(['distance', clamp01(1 - dist / kmMax), w.distance]);
+      if (upMed && Number.isFinite(r.upfront)) parts.push(['move-in', clamp01(0.5 - (r.upfront - upMed) / (2 * upMed)), w['move-in']]);
+      const used = parts.filter(([, , wt]) => wt > 0);
+      const total = used.reduce((t, [, , wt]) => t + wt, 0);
+      r.score = used.length >= 2 ? Math.round((used.reduce((t, [, v, wt]) => t + v * wt, 0) / total) * 100) : null;
+      r.scoreWhy = r.score == null ? '' : used.map(([k, v, wt]) => `${k} ${Math.round(v * 100)}${wt !== 2 ? ` (×${wt / 2})` : ''}`).join(', ');
     }
     return rows;
   };
@@ -1527,7 +1572,8 @@
     // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
     // Memoised per anchor: removedBy() re-filters once per chip with the same point.
-    for (const r of rows) { const k = `${cfg.anchor}|${r.lat}|${r.lng}`; if (r._kmFor !== k) { r.km = kmFrom(anchor, r); r._kmFor = k; } }
+    const places = parsePlaces(cfg.places);
+    for (const r of rows) setDistances(r, cfg, anchor, places);
     const insDay = !!cfg.inspectOn;
     const sameDay = (ms, r) => ymdIn(ms, tzOf(r)) === cfg.inspectOn; // the listing's calendar day, like the planner
     const kept = dedupe(rows)
@@ -1714,7 +1760,7 @@
   ].filter(Boolean).join('\n');
 
   // Printable shortlist: a standalone HTML document (all text escaped), light theme forced.
-  const printHtml = (rows, now = new Date()) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+  const printHtml = (rows, now = new Date(), checklist = []) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Rental shortlist ${ymdLocal(now)}</title><style>
 body{font:13px/1.45 system-ui,-apple-system,sans-serif;color:#111;background:#fff;margin:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
@@ -1730,7 +1776,7 @@ ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` :
   Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}
-${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
+${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
 </div></div>`).join('')}</body></html>`;
 
   // Drift canary: share of rows with each field, tracked as an average over searches. A field
@@ -1812,7 +1858,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1994,6 +2040,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  .rf-checks{display:flex;flex-wrap:wrap;gap:4px;margin:6px 9px 0 124px}
+  .rf-checks .rf-chip{font-size:11px;padding:2px 7px}
+  .rf-checks .rf-chip[data-state=no]{text-decoration:none;background:transparent;color:var(--rf-err);border-color:var(--rf-err)}
+  @media (max-width:480px){ .rf-checks{margin-left:9px} }
+  .rf-weights{border:1px solid var(--rf-line);border-radius:8px;padding:6px 10px;margin:6px 0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .rf-weights legend{font-size:12px;color:var(--rf-muted);padding:0 4px}
+  @media (max-width:480px){ .rf-weights{grid-template-columns:repeat(2,minmax(0,1fr))} }
   .rf-menu{position:relative}
   .rf-menu>summary{list-style:none;cursor:pointer}
   .rf-menu>summary::-webkit-details-marker{display:none}
@@ -2208,6 +2261,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
             <label>Distance from<input type="text" id="rf-anchor" placeholder="-33.87, 151.21 or a Google Maps link" autocomplete="off"></label>
             <label>Max km<input type="number" min="0" step="1" id="rf-maxKm" inputmode="decimal"></label>
           </div>
+          <label>Other places (optional, one per line)<textarea id="rf-places" rows="2" placeholder="Work: -33.87, 151.21&#10;Uni: Google Maps link"
+            title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
           <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
@@ -2228,6 +2283,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
           <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
             <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
+          <fieldset class="rf-weights"><legend>Best match: how much each counts</legend>
+            ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
+              <option value="0">Ignore</option><option value="1">Less</option><option value="2">Normal</option><option value="3">More</option></select></label>`).join('')}
+          </fieldset>
+          <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
           <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
             title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>
           <label>Household income, $ a year before tax (optional)<input type="number" id="rf-income" min="0" step="1000" inputmode="numeric" placeholder="eg 120000"
@@ -2252,6 +2312,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
             <option value="listed">Newest first</option>
             <option value="value">Best value vs median</option>
             <option value="distance">Nearest</option>
+            <option value="allnear">Nearest to all places</option>
             <option value="match">Best match</option>
           </select></label>
         </div>
@@ -2491,6 +2552,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     // Shortlist / hide / note: one delegated handler; re-render keeps scroll position.
     ui.list.addEventListener('click', (e) => {
       if (e.target.closest('.rf-more-btn')) return renderMore();
+      const ck = e.target.closest('[data-ck]');
+      if (ck) {
+        const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
+        marks.cycleCheck(id, label);
+        refreshMarks();
+        ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] [data-ck="${CSS.escape(label)}"]`)?.focus();
+        return;
+      }
       const drop = e.target.closest('[data-drop-chip]');
       if (drop) return ui.active.querySelector(`[data-chip="${drop.dataset.dropChip}"]`)?.click();
       const b = e.target.closest('.rf-acts button');
@@ -2721,7 +2790,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const w = window.open('', '_blank');
       if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
       w.document.open();
-      w.document.write(printHtml(rows));
+      w.document.write(printHtml(rows, new Date(), checklistItems(cfg.checklist)));
       w.document.close();
       w.addEventListener('load', () => w.print(), { once: true });
     });
@@ -2881,8 +2950,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     const rows = shortlistRows();
     ui.agencyRec = agencyRecord(marks.shortlist()); // over the whole shortlist, not just what the search box shows
     // Distance for the shortlist too (applyFilters isn't run over it).
-    const anchor = parseAnchor(cfg.anchor);
-    for (const r of rows) r.km = kmFrom(anchor, r);
+    for (const r of rows) setDistances(r, cfg);
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
@@ -3087,12 +3155,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
     ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
     ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
+    ['Places', (r) => placesLabel(r), (r) => worstKm(r) ?? Infinity, 'min'],
     ['Of income', (r) => (incomePct(r, cfg.income) != null ? `${incomePct(r, cfg.income)}%` : ''), (r) => incomePct(r, cfg.income) ?? Infinity, 'min'],
     ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
     ['Agency', (r) => r.agency || '', null],
     ['Status', (r) => statusLabel(r.appStatus), null],
+    ['Checklist', (r) => checkSummary(r, checklistItems(cfg.checklist)), (r) => -Object.values(r.checks || {}).filter((v) => v === 'y').length, 'min'],
     ['Note', (r) => r.note || '', null],
   ];
   function compareHtml(rows) {
@@ -3103,7 +3173,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
     };
     const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
-    const body = COMPARE_ROWS.filter(([label]) => label !== 'Of income' || num(cfg.income) > 0).map(([label, show, score]) => {
+    const body = COMPARE_ROWS.filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length)).map(([label, show, score]) => {
       const b = score ? best(score) : null;
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
     }).join('');
@@ -3121,7 +3191,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   function itemsHtml(rows) {
     return rows.map((r) => {
-      const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
+      const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       return `
       <div tabindex="-1" class="rf-item${r.gone || r.hidden || r.agencyHidden || r.suburbHidden ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
@@ -3137,7 +3207,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
             r.bond ? `bond ${r.bond}` : '',
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
-          ${km || r.score != null ? `<div class="rf-meta">${esc(km)}${r.score != null ? `${km ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
+          ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency, ui.view === 'shortlist' && r.agency ? recordText(ui.agencyRec?.get(r.agency.trim().toLowerCase())) : '',
             r.photos != null ? `${r.photos} photo${r.photos === 1 ? '' : 's'}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
           ${am.length ? `<div class="rf-tags">${am.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
@@ -3154,6 +3224,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           ].filter(Boolean).join(' · '))}</div>` : ''}
         </div>
       </a>
+      ${r.starred && ui.view === 'shortlist' ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checklistItems(cfg.checklist).map((k) => {
+        const v = r.checks?.[k];
+        return `<button type="button" class="rf-chip" data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
+      }).join('')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(Date.now() - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
@@ -3546,7 +3620,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         // Anchor the badge without overriding a position REA already set (eg virtualised lists).
         if (statics.has(card)) card.dataset.rfPos = '';
       }
-      r.km = kmFrom(anchor, r);
+      setDistances(r, cfg, anchor);
       const html = badgeHtml(r) + cardActsHtml(r);
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).

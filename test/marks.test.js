@@ -451,3 +451,20 @@ test('marksStore: feature changes between search sightings (not from property pa
   assert.equal(p[0].featChange, '', 'property page text is not compared');
   assert.equal(core.featDiff('1:0:0', core.featSig({ amen: { pets: 'yes' } })), 'now Pets OK');
 });
+
+test('inspection checklist: cycle, summary, backup round-trip', () => {
+  const st = core.marksStore(mem(), () => 1e12);
+  st.toggle('146500051', 's', row('146500051'));
+  assert.equal(st.cycleCheck('146500051', 'Natural light'), 'y');
+  assert.equal(st.cycleCheck('146500051', 'Noise'), 'y');
+  assert.equal(st.cycleCheck('146500051', 'Noise'), 'n');
+  const r = st.shortlist()[0];
+  assert.deepEqual(r.checks, { 'Natural light': 'y', Noise: 'n' });
+  assert.equal(core.checkSummary(r, core.checklistItems('')), '✓ Natural light, ✗ Noise');
+  const st2 = core.marksStore(mem(), () => 1e12);
+  st2.importJson(st.exportJson());
+  assert.deepEqual(st2.shortlist()[0].checks, r.checks);
+  assert.equal(st.cycleCheck('146500051', 'Noise'), '');
+  assert.deepEqual(core.checklistItems('a, b,, a\nc'), ['a', 'b', 'c']);
+  assert.match(core.printHtml([{ ...r, url: 'https://www.realestate.com.au/p-1' }], new Date(), ['Natural light', 'Storage']), /☑ Natural light.*☐ Storage/);
+});
