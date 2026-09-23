@@ -3010,7 +3010,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       : '<span class="rf-b-none">No date</span>';
     const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
     const ppb = ppbLabel(r) ? `<span>${ppbLabel(r)}</span>` : '';
-    const star = r.starred ? '<span class="rf-b-star">★ Shortlisted</span>' : '';
+    // Shortlisted cards show where you're up to (applied, inspected...) and your note on hover.
+    const star = r.starred ? `<span class="rf-b-star"${r.note ? ` title="${esc(r.note)}"` : ''}>★ ${r.appStatus ? esc(r.appStatus[0].toUpperCase() + r.appStatus.slice(1)) : 'Shortlisted'}${r.note ? ' ✎' : ''}</span>` : '';
     const fresh = isFresh(r) ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${priceDir(r)}">Was ${esc(r.prevPrice)}</span>` : '';
     const pets = r.amen?.pets === 'yes' ? '<span class="rf-b-pets">Pets OK</span>' : '';

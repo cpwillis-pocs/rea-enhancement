@@ -202,6 +202,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
     await page.selectOption(`.rf-item[data-id="${ids[0]}"] select[data-app]`, 'applied');
     assert.equal(await page.evaluate(() => document.activeElement.matches('select[data-app]')), true, 'focus kept on the select');
+    await page.waitForFunction(() => [...document.querySelectorAll('.rf-b-star')].some((b) => /Applied/.test(b.textContent)), null, { timeout: 5000 });
     await page.click('[data-view=shortlist]');
     await page.selectOption('.rf-sl-filter', 'applied');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), [ids[0]]);
