@@ -50,9 +50,9 @@
   // and is correctly excluded by a future from-date.
   // Parsed by hand: Date() on "Mon 12th Oct" is engine-specific and, lacking a year,
   // Chrome yields 2001. A year-less date more than ~2 months past rolls to next year.
-  const parseAvail = (display) => {
+  const parseAvail = (display, now = new Date()) => {
     if (!display) return null;
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
     if (/\bnow\b/i.test(display)) return today;
     // "12th Oct 2026" or "October 12, 2026"
     const dm = display.match(/(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3})[a-z]*\.?(?:,?\s+(\d{4}))?/i);
@@ -162,6 +162,12 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  // Node test harness: expose pure functions, skip all DOM work.
+  if (typeof window === 'undefined') {
+    module.exports = { parseAvail, parsePrice, extractResults, pageUrl, toRow, applyFilters, toTsv, esc, safeUrl };
+    return;
   }
 
   // ------------------------------------------------------------------- ui
