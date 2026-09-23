@@ -299,3 +299,19 @@ test('toIcs: upcoming inspections, escaping, folding, dedupe', () => {
   assert.ok(ics.split('\r\n').every((l) => Buffer.byteLength(l) <= 75), 'folded to 75 octets');
   assert.equal(core.toIcs([{ id: 'x', inspections: [] }], now), '');
 });
+
+test('withMedians / medianLabel / staleOnly / value sort', () => {
+  const now = new Date(2026, 8, 23);
+  const mk = (id, p, beds, o = {}) => core.toRow(listing({ id, price: { display: `$${p} per week` }, generalFeatures: { bedrooms: { value: beds } }, ...o }), false);
+  const rows = [mk('a', 500, 2), mk('b', 600, 2), mk('c', 700, 2), mk('d', 800, 2), mk('e', 900, 2), mk('f', 1500, 3),
+    mk('g', 400, 2, { dateListed: new Date(now - 30 * 864e5).toISOString() })];
+  core.withMedians(rows);
+  assert.equal(rows[0].median, 650); // 400..900 six values -> (600+700)/2
+  assert.equal(rows[0].vsMedian, -23);
+  assert.equal(rows[5].vsMedian, null, 'group too small');
+  assert.match(core.medianLabel(rows[0]), /23% below median 2-bed/);
+  assert.equal(core.medianLabel(rows[5]), '');
+  const ids = (cfg) => core.applyFilters(rows, cfg, now).map((r) => r.url.split('-').pop());
+  assert.deepEqual(ids({ staleOnly: true }), ['g']);
+  assert.deepEqual(ids({ sort: 'value' }).slice(0, 2), ['g', 'a']);
+});

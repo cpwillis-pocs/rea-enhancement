@@ -670,7 +670,7 @@
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
-    type: '', keyword: '', hideNoImage: false, inspectOn: '', sort: 'avail',
+    type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
     remember: true, newOnly: false, showGone: false,
   };
@@ -684,9 +684,9 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'staleOnly'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'showGone'];
+    'onlyStarred', 'showHidden', 'newOnly', 'showGone', 'staleOnly'];
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember'];
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -700,6 +700,7 @@
     // Newest first: REA's listed date when present, else when this browser first saw it.
     listed: (a, b) => (b.listed ?? b.firstSeen ?? -Infinity) - (a.listed ?? a.firstSeen ?? -Infinity) || byAvail(a, b),
     inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
+    value: (a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b),
   };
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
 
@@ -714,6 +715,34 @@
     }
     return (text) => inc.every((w) => text.includes(w)) && !exc.some((w) => text.includes(w));
   };
+
+  // Rent vs the median for the same bed count in these results (exact matches only, groups
+  // of MEDIAN_MIN or more). vsMedian = % above (+) or below (-); null when not comparable.
+  const MEDIAN_MIN = 5;
+  const STALE_MS = 21 * DAY_MS; // listed this long ago: rent may be negotiable
+  const withMedians = (rows) => {
+    const groups = new Map();
+    for (const r of dedupe(rows)) {
+      if (r.surrounding || !isFinite(r.priceNum) || r.beds === '') continue;
+      const k = +r.beds;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r.priceNum);
+    }
+    const med = new Map();
+    for (const [k, v] of groups) {
+      if (v.length < MEDIAN_MIN) continue;
+      v.sort((a, b) => a - b);
+      med.set(k, v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2);
+    }
+    for (const r of rows) {
+      const m = r.beds === '' ? undefined : med.get(+r.beds);
+      r.median = m ?? null;
+      r.vsMedian = m && isFinite(r.priceNum) ? Math.round(((r.priceNum - m) / m) * 100) : null;
+    }
+    return rows;
+  };
+  const medianLabel = (r) => (r.vsMedian == null ? '' : r.vsMedian === 0 ? `at median for ${+r.beds || 'studio'}${+r.beds ? '-bed' : ''}`
+    : `${Math.abs(r.vsMedian)}% ${r.vsMedian < 0 ? 'below' : 'above'} median ${+r.beds ? `${r.beds}-bed` : 'studio'}`);
 
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
   const dedupe = (rows) => {
@@ -777,6 +806,7 @@
       .filter((r) => cfg.showHidden || !r.hidden)
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
+      .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
       .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
@@ -793,7 +823,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['appStatus', 'application'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'],
@@ -882,7 +912,7 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1007,6 +1037,8 @@
   .rf-was.up{color:#c60;background:rgba(204,102,0,.12)}
   .rf-more-btn{display:block;width:calc(100% - 16px);margin:8px}
   .rf-warn{color:#b45309;font-weight:600}
+  .rf-med.down{color:var(--rf-accent-fg)}
+  .rf-med.up{color:#b45309}
   .rf-app{display:flex;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px;color:var(--rf-muted)}
   .rf-app select{font:12px system-ui,sans-serif;padding:3px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-sl-filter{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
@@ -1124,6 +1156,7 @@
           </div>
           <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
+          <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Listed over 3 weeks ago</label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Hide listings without a photo</label>
           <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
           <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
@@ -1142,6 +1175,7 @@
             <option value="beds">Most beds</option>
             <option value="inspect">Next inspection</option>
             <option value="listed">Newest first</option>
+            <option value="value">Best value vs median</option>
           </select></label>
         </div>
         <div class="rf-actions">
@@ -1468,6 +1502,7 @@
             r.bond ? `bond ${r.bond}` : '',
             ppbLabel(r),
           ].filter(Boolean).join(' · '))}</div>
+          ${medianLabel(r) ? `<div class="rf-meta rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(medianLabel(r))}</div>` : ''}
           ${isFinite(r.upfront) ? `<div class="rf-meta">Move-in $${r.upfront.toLocaleString('en-AU')}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}</div>` : ''}
           ${r.inspections?.length || r.listed ? `<div class="rf-meta">${esc([
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
@@ -1500,6 +1535,7 @@
     fillTypes(rows);
     cache = rows;
     applySnap(snap);
+    withMedians(rows);
     truncated = trunc;
     cacheKey = key;
     ui.refresh.hidden = false;

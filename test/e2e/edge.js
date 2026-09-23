@@ -183,6 +183,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const capped = await page.$$eval('.rf-item', (e) => e.length);
     assert.ok(capped < total, `move-in cap filters (${capped} < ${total})`);
     console.log('move-in cost:', capped, 'of', total, 'under $3000');
+    await page.fill('#rf-upfrontMax', ''); await page.dispatchEvent('#rf-upfrontMax', 'change');
+    const med = await page.$$eval('.rf-med', (e) => e.map((x) => x.textContent));
+    assert.ok(med.length > 0 && med.every((t) => /median/.test(t)), 'median comparisons shown');
+    await page.selectOption('#rf-sort', 'value');
+    const first = await page.textContent('.rf-item .rf-med');
+    assert.match(first, /below median/, 'best value first');
+    console.log('median:', med.length, 'listings compared; first by value:', first);
     await done(page); await ctx.close();
   }
 
