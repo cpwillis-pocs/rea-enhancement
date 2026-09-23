@@ -400,7 +400,7 @@
           r.prevPrice = e && e.pp != null && e.pp !== e.p && e.pt && t - e.pt < PRICE_CHANGE_MS ? e.pps || `$${e.pp}` : '';
           r.priceDelta = r.prevPrice ? e.p - e.pp : 0;
           const availMoved = e && e.pav != null && e.avt && t - e.avt < PRICE_CHANGE_MS && e.pav !== e.av;
-          r.prevAvail = availMoved ? (e.pav === 0 ? 'now' : new Date(e.pav * DAY_MS).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' })) : '';
+          r.prevAvail = availMoved ? (e.pav === 0 ? 'now' : dtf({ day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(e.pav * DAY_MS))) : '';
           r.availDir = availMoved ? e.avd || ((e.av || 0) > (e.pav || 0) ? 'later' : 'sooner') : '';
           r.featChange = e?.pfs && e.fs && e.fst && t - e.fst < PRICE_CHANGE_MS ? featDiff(e.pfs, e.fs) : '';
         }
@@ -962,8 +962,11 @@
     return isNaN(d) || !/\d{4}/.test(String(raw)) && typeof raw !== 'number' ? null : d;
   };
 
+  // Intl formatters are costly to build (~0.1 ms each); toLocale*(…, opts) builds one per call.
+  const fmts = new Map();
+  const dtf = (opts) => { const k = JSON.stringify(opts); let f = fmts.get(k); if (!f) fmts.set(k, (f = new Intl.DateTimeFormat('en-AU', opts))); return f; };
   const DT_FMT = { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' };
-  const fmtWhen = (d) => d.toLocaleString('en-AU', DT_FMT).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
+  const fmtWhen = (d) => dtf(DT_FMT).format(d).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
 
   // Field discovery: when none of the known spellings exist, walk the listing (breadth-first,
   // bounded) for a key matching `keyRe` whose value passes `ok`. Returns { path, value } or
@@ -1116,7 +1119,8 @@
       pos: /\bbuilt[- ]in (?:robes?|wardrobes?)\b|\bbirs?\b|\bwalk[- ]in (?:robe|wardrobe)\b/ },
     // gate: every pool pattern contains the word, so the costly lookbehind is skipped when it's absent.
     { id: 'pool', label: 'Pool', yes: 'Pool', gate: 'pool', neg: /\bno (?:swimming |lap |plunge )?pool\b/,
-      pos: /\b(?<!(?:car|walk to [\w' ]{0,30}|near(?:by)? [\w' ]{0,20}|close to [\w' ]{0,30}) )(?:swimming |lap |plunge )?pool\b(?! tables?|side)/ },
+      // The lookahead first: the costly lookbehind then only runs where a pool actually starts.
+      pos: /\b(?=(?:swimming |lap |plunge )?pool\b)(?<!(?:car|walk to [\w' ]{0,30}|near(?:by)? [\w' ]{0,20}|close to [\w' ]{0,30}) )(?:swimming |lap |plunge )?pool\b(?! tables?|side)/ },
     { id: 'study', label: 'Study', yes: 'Study', neg: /\bno (?:study|home office)\b/,
       pos: /\b(?<!\b(?:to|and|or|while you|students who) )(?:study(?: room| nook| area)?|home office)\b(?! (?:at|nearby|precinct|centre))/ },
     { id: 'ensuite', label: 'Ensuite', yes: 'Ensuite', neg: /\bno en[- ]?suite\b/, pos: /\ben[- ]?suited?\b/ },
@@ -1197,19 +1201,22 @@
     ['tApp', /\btapp\b/],
     ['Inspect Real Estate', /\binspect\s?real\s?estate\b/],
   ];
-  const applyViaOf = (text) => APPLY_VIA.find(([, re]) => re.test(String(text || '').toLowerCase()))?.[0] || '';
+  const applyViaOf = (text) => { const t = String(text || '').toLowerCase(); return APPLY_VIA.find(([, re]) => re.test(t))?.[0] || ''; };
 
   // Lease term in months from the text: { min, max } or { flexible }; null when not stated.
+  // The number must sit next to "lease"/"term": the gap can't cross a comma, a full stop or another number
+  // ("available in 2 months, 12 month lease" is 12; "renovated 3 months ago, lease..." is nothing).
+  const LEASE_RES = (() => {
+    const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)', range = '(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})';
+    return [`\\b${range}${mo}${gap}${word}`, `${word}\\b${gap}\\b${range}${mo}`, `\\b(\\d{1,2})${mo}${gap}${word}`, `${word}\\b${gap}\\b(\\d{1,2})${mo}`].map((p) => new RegExp(p));
+  })();
   const leaseTermOf = (text) => {
     const t = String(text || '').toLowerCase();
     if (/\bflexible (?:lease|term)s?\b|\blease (?:terms?|length) (?:is )?(?:flexible|negotiable)\b/.test(t)) return { flexible: true };
-    // The number must sit next to "lease"/"term": the gap can't cross a comma, a full stop or another number
-    // ("available in 2 months, 12 month lease" is 12; "renovated 3 months ago, lease..." is nothing).
-    const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)';
-    let m = t.match(new RegExp(`\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})${mo}${gap}${word}`))
-      || t.match(new RegExp(`${word}\\b${gap}\\b(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})${mo}`));
+    const [rangeA, rangeB, oneA, oneB] = LEASE_RES;
+    let m = t.match(rangeA) || t.match(rangeB);
     if (m) return { min: Math.min(+m[1], +m[2]), max: Math.max(+m[1], +m[2]) };
-    m = t.match(new RegExp(`\\b(\\d{1,2})${mo}${gap}${word}`)) || t.match(new RegExp(`${word}\\b${gap}\\b(\\d{1,2})${mo}`));
+    m = t.match(oneA) || t.match(oneB);
     if (m && +m[1] >= 1 && +m[1] <= 60) return { min: +m[1], max: +m[1] };
     m = t.match(/\b(\d)\s*-?\s*(?:years?|yrs?)\b[^.;,\d]{0,12}?\b(?:lease|tenancy|term)/) || t.match(/\b(?:lease|tenancy|term)\b[^.;,\d]{0,12}?\b(\d)\s*-?\s*(?:years?|yrs?)\b/);
     return m ? { min: +m[1] * 12, max: +m[1] * 12 } : null;
@@ -1218,6 +1225,7 @@
   const leaseCode = (l) => (!l ? '' : l.flexible ? 'flex' : l.min === l.max ? String(l.min) : `${l.min}-${l.max}`);
   const leaseFromCode = (c) => { const v = String(c || ''); if (v === 'flex') return { flexible: true }; const m = v.match(/^(\d+)(?:-(\d+))?$/); return m ? { min: +m[1], max: +(m[2] || m[1]) } : null; };
   const leaseLabel = (l) => (!l ? '' : l.flexible ? 'Flexible lease' : l.min === l.max ? `Lease ${l.min} mo` : `Lease ${l.min}–${l.max} mo`);
+  const leaseText = (code) => leaseLabel(leaseFromCode(code));
 
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
@@ -1321,7 +1329,7 @@
     row.lease = leaseCode(leaseTermOf(said));
     if (!row.avail) { // REA's field missing or unreadable: the description often says it
       const t = availFromText(said);
-      if (t) { row.avail = t; row.available = `${t.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} (from text)`; row.availFromText = true; }
+      if (t) { row.avail = t; row.available = `${dtf({ day: 'numeric', month: 'short', year: 'numeric' }).format(t)} (from text)`; row.availFromText = true; }
     }
     row.amen = amenitiesOf({ features: row.features, amenText: [row.headline, str(listing.description)].filter(Boolean).join(' ') });
     return row;
@@ -1518,8 +1526,9 @@
 
   // Active filters as removable chips: [{ key, amen?, label }]. `without` gives the cfg with
   // that one chip removed, so the UI can show how many listings each filter is removing.
-  const shortDate = (ymd) => new Date(ymd + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-  const money = (v) => `$${(+v).toLocaleString('en-AU')}`;
+  const shortDate = (ymd) => dtf({ day: 'numeric', month: 'short' }).format(new Date(ymd + 'T00:00:00'));
+  const NUM_FMT = new Intl.NumberFormat('en-AU');
+  const money = (v) => `$${NUM_FMT.format(+v)}`;
   const statusLabel = (v) => (v ? v[0].toUpperCase() + v.slice(1) : 'Not started');
   const statusOptions = (cur) => APP_STATUSES.map((v) => `<option value="${v}"${v === cur ? ' selected' : ''}>${statusLabel(v)}</option>`).join('');
   const CHIP_LABELS = {
@@ -1682,6 +1691,7 @@
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const amenReq = Object.entries(parseAmenCfg(cfg.amenities));
     const noWatch = watchIds(cfg.noWatch);
+    const bKey = cfg.building.split('|')[0], leaseNeed = num(cfg.leaseMin); // building is "key|label" from "N in this building"
     // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
     // Memoised per anchor: removedBy() re-filters once per chip with the same point.
@@ -1710,11 +1720,8 @@
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !kw || kw(r.text || ''))
       .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)))
-      .filter((r) => !cfg.building || buildingKey(r.address) === cfg.building.split('|')[0]) // "key|label" from "N in this building"
-      .filter((r) => { // a stated lease shorter than you need; unstated or flexible passes
-        const need = num(cfg.leaseMin), l = need ? leaseFromCode(r.lease) : null;
-        return !l || l.flexible || l.max >= need;
-      });
+      .filter((r) => !bKey || buildingKey(r.address) === bKey)
+      .filter((r) => { const l = leaseNeed ? leaseFromCode(r.lease) : null; return !l || l.flexible || l.max >= leaseNeed; }); // a stated lease too short; unstated or flexible passes
     return cfg.onePerBuilding && !cfg.building ? onePerBuilding(kept) : kept;
   }
 
@@ -1770,7 +1777,7 @@
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'leaseText' ? leaseLabel(leaseFromCode(r.lease)) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
+      : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -2553,6 +2560,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const read = (el) => (el.type === 'checkbox' ? el.checked : el.value);
     const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else { ensureOption(el, v); el.value = v ?? ''; } };
     for (const [k, el] of fields) write(el, cfg[k]);
+    // Put `next` into the form (only what changed) and apply it as if typed.
+    function applyCfg(next) {
+      for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
+      ui.paintAmen?.();
+      onChange({ type: 'change' });
+    }
     queueMicrotask(() => ui.paintAmen?.());
     ui.fields = fields;
     ui.type = panel.querySelector('#rf-type');
@@ -2699,7 +2712,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const renderNow = (defer) => { if (defer && pressing) renderAfterPress = true; else showResults(); };
     panel.addEventListener('pointerdown', () => { pressing = true; }, true);
     panel.addEventListener('keydown', () => { pressing = false; }, true); // a press that never got its pointerup can't hold renders
-    const endPress = () => setTimeout(() => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } }, 0);
+    const endPress = () => pressing && setTimeout(() => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } }, 0);
     for (const type of ['pointerup', 'pointercancel', 'click']) document.addEventListener(type, endPress, true); // pointerup's timeout runs after its click
     const onChange = (e) => {
       const next = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
@@ -2731,7 +2744,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     for (const [, el] of fields) {
       el.addEventListener('change', onChange);
       // Typed fields (textareas too) apply as you type, so blurring one doesn't re-render mid-click.
-      if (el.type === 'text' || el.type === 'number' || el.tagName === 'TEXTAREA') el.addEventListener('input', onChange);
+      if (typed(el) && el.type !== 'date') el.addEventListener('input', onChange);
     }
 
     // Shortlist / hide / note: one delegated handler; re-render keeps scroll position.
@@ -2771,7 +2784,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (!id) return;
       if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
       if (b.dataset.act === 'anchor' || b.dataset.act === 'place') {
-        const r = rowById(id) || ui.rows?.find((x) => x.id === id);
+        const r = rowOf(id);
         if (r?.lat == null) return;
         const at = `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`;
         let msg = `Measuring from ${r.address}.`;
@@ -2788,30 +2801,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         return setStatus(msg);
       }
       if (b.dataset.act === 'enq') {
-        const r = rowById(id) || ui.rows?.find((x) => x.id === id);
+        const r = rowOf(id);
         if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
         return;
       }
       if (b.dataset.act === 'copy') {
-        const r = rowById(id) || ui.rows?.find((x) => x.id === id);
+        const r = rowOf(id);
         if (r) copyText(summaryText(r)).then((ok) => setStatus(ok ? 'Listing summary copied.' : 'Clipboard blocked.', !ok));
         return;
       }
-      if (b.dataset.act === 'sb') {
-        const r = rowById(id);
-        if (!r?.suburb) return;
-        const on = marks.toggleSuburb(r.suburb);
+      const bulk = BULK_HIDE[b.dataset.act];
+      if (bulk) { // hide a whole suburb or agency
+        const [field, toggle, prep] = bulk, name = rowById(id)?.[field];
+        if (!name) return;
+        const on = toggle(name);
         refreshMarks();
         ui.list.focus();
-        return offerUndo(on ? `Hidden all listings in ${r.suburb}.` : `Showing ${r.suburb} again.`, () => { marks.toggleSuburb(r.suburb); refreshMarks(); });
-      }
-      if (b.dataset.act === 'ag') {
-        const r = rowById(id);
-        if (!r?.agency) return;
-        const on = marks.toggleAgency(r.agency);
-        refreshMarks();
-        ui.list.focus();
-        return offerUndo(on ? `Hidden all listings from ${r.agency}.` : `Showing ${r.agency} again.`, () => { marks.toggleAgency(r.agency); refreshMarks(); });
+        return offerUndo(on ? `Hidden all listings ${prep} ${name}.` : `Showing ${name} again.`, () => { toggle(name); refreshMarks(); });
       }
       const act = b.dataset.act;
       const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
@@ -2926,10 +2932,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       // Narrow within your own dates (a "within" window becomes its end date), never widen them.
       const tos = [range.to, cfg.to, windowEnd(cfg.withinDays)].filter(Boolean).sort();
       const next = { ...cfg, from: [range.from, cfg.from].filter(Boolean).sort().pop() || '', to: tos[0] || '', withinDays: '' };
-      for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
       ui.marketOn = false;
       ui.market.setAttribute('aria-pressed', 'false');
-      onChange({ type: 'change' });
+      applyCfg(next);
       showResults(); // also when the dates didn't change (same week again)
       (ui.list.querySelector('.rf-item') || ui.market).focus();
     });
@@ -2938,9 +2943,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const chip = b && ui.activeChips?.[+b.dataset.chip];
       if (!chip) return;
       const next = without(cfg, chip);
-      for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
-      ui.paintAmen();
-      onChange({ type: 'change' });
+      applyCfg(next);
     });
     panel.querySelector('.rf-agencies').addEventListener('click', (e) => {
       const b = e.target.closest('[data-unhide-ag]');
@@ -3071,6 +3074,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   const rowById = (id) => known.get(id) || cache?.find((r) => r.id === id) || null;
+  const rowOf = (id) => rowById(id) || ui.rows?.find((x) => x.id === id); // also shortlist-only rows
+  const BULK_HIDE = { sb: ['suburb', (n) => marks.toggleSuburb(n), 'in'], ag: ['agency', (n) => marks.toggleAgency(n), 'from'] };
 
   function setView(view) {
     ui.view = view;
@@ -3184,7 +3189,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const rows = shortlistRows(all);
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
     // Distance for the shortlist too (applyFilters isn't run over it).
-    for (const r of rows) { setDistances(r, cfg); r.fit = leaseFit(r, cfg.leaseEnd); }
+    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
+    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, cfg.leaseEnd); }
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
@@ -3205,7 +3211,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
       : slots ? planHtml(slots, ui.planDay)
       : cmp ? compareHtml(cmp)
-      : itemsHtml(rows.slice(0, Math.max(RENDER_CHUNK, ui.keepShown || 0))) + moreHtml(rows.length - Math.max(RENDER_CHUNK, ui.keepShown || 0));
+      : listHtml(rows);
     setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
@@ -3252,9 +3258,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   function refreshMarks() {
     ui.paintStorage?.();
-    if (cache) marks.decorate(cache);
+    marks.decorate([...known.values()]); // cache rows are mostly these same objects (learn)
+    if (cache) marks.decorate(cache.filter((r) => known.get(r.id) !== r));
     if (gone.length) marks.decorate(gone);
-    marks.decorate([...known.values()]);
     if (cache) withBuildings(cache); // hiding one changes "N in this building"
     knownVer++;
     updateCounts();
@@ -3354,15 +3360,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    const n = Math.max(RENDER_CHUNK, ui.keepShown || 0);
-    ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : itemsHtml(rows.slice(0, n)) + moreHtml(rows.length - n);
+    ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : listHtml(rows);
     ui.list.scrollTop = 0;
   }
 
   function planHtml(slots, day) {
     // Zone name only when the listing's clock differs from yours (Melbourne from Sydney doesn't).
-    const clock = (ms, tz) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) });
-    const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }) : clock(ms, tz))
+    const clock = (ms, tz) => dtf({ hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) }).format(ms);
+    const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? dtf({ hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }).format(ms) : clock(ms, tz))
       .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
     const clashes = slots.filter((x) => x.flag).length;
     return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
@@ -3406,7 +3411,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
     ['Agency', (r) => r.agency || '', null],
-    ['Lease', (r) => (r.lease ? leaseLabel(leaseFromCode(r.lease)).replace(/^Lease /, '') : ''), null],
+    ['Lease', (r) => leaseText(r.lease).replace(/^Lease /, ''), null],
     ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
     ['Apply via', (r) => r.applyVia || '', null],
     ['Status', (r) => statusLabel(r.appStatus), null],
@@ -3431,6 +3436,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
   const moreHtml = (left) => (left > 0 ? `<button class="rf-btn sec rf-more-btn">Show ${Math.min(left, RENDER_CHUNK)} more (${left} left)</button>` : '');
+  // First chunk (or as many as were showing, on a re-render) plus the "Show more" button.
+  const listHtml = (rows) => { const n = Math.max(RENDER_CHUNK, ui.keepShown || 0); return itemsHtml(rows.slice(0, n)) + moreHtml(rows.length - n); };
   function renderMore() {
     const shown = ui.list.querySelectorAll('.rf-item').length;
     ui.list.querySelector('.rf-more-btn')?.remove();
@@ -3448,59 +3455,56 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return parts.length ? `<div class="rf-meta">${parts.join(' · ')}</div>` : '';
   }
 
+  const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : '');
+  const metaLine = (parts) => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta">${esc(t)}</div>` : ''; };
   function itemsHtml(rows) {
+    const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist);
     return rows.map((r) => {
       const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
+      const na = sl ? needsAction(r, now) : '';
       return `
       <div tabindex="-1" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}">
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(Date.now() - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
-          <div class="rf-meta">${esc([
-            r.beds !== '' ? `${r.beds} bed` : '',
-            r.baths !== '' ? `${r.baths} bath` : '',
-            r.cars !== '' ? `${r.cars} car` : '',
-            r.bond ? `bond ${r.bond}` : '',
-            ppbLabel(r),
-          ].filter(Boolean).join(' · '))}</div>
+          ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
-          ${r.agency || r.photos != null || r.floorplan ? `<div class="rf-meta">${esc([r.agency, ui.view === 'shortlist' && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '',
-            r.photos != null ? `${plural(r.photos, 'photo')}` : '', r.floorplan ? 'floorplan' : ''].filter(Boolean).join(' · '))}</div>` : ''}
-          ${am.length || r.applyVia || r.lease ? `<div class="rf-tags">${[...am, r.lease ? leaseLabel(leaseFromCode(r.lease)) : '', r.applyVia ? `Apply: ${r.applyVia}` : ''].filter(Boolean).map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
-          ${wt.length ? `<div class="rf-tags rf-watch" title="Mentioned in the listing text: worth asking the agent">${wt.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+          ${metaLine([r.agency, sl && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''])}
+          ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : ''].filter(Boolean))}
+          ${tagsHtml(wt, ' rf-watch', 'Mentioned in the listing text: worth asking the agent')}
           ${moneyLine(r, inc, med)}
-          ${r.inspections?.length || r.listed || r.lastSeen || r.openedAt || r.hideReason ? `<div class="rf-meta">${esc([
-            r.lastSeen && ui.view === 'shortlist' ? `seen ${ago(Date.now() - r.lastSeen)}` : '',
+          ${metaLine([
+            r.lastSeen && sl ? `seen ${ago(now - r.lastSeen)}` : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
-            r.listed ? `Listed ${ago(Date.now() - r.listed)}` : '',
-            r.openedAt ? `opened ${ago(Date.now() - r.openedAt)}` : '',
+            r.listed ? `Listed ${ago(now - r.listed)}` : '',
+            r.openedAt ? `opened ${ago(now - r.openedAt)}` : '',
             r.hideReason ? `hidden: ${r.hideReason}` : '',
-          ].filter(Boolean).join(' · '))}</div>` : ''}
+          ])}
         </div>
       </a>
       ${r.buildingN || r.alsoListed?.length ? `<div class="rf-group">${r.buildingN ? `<button type="button" class="rf-chip" data-act="bldg" title="Show only listings at ${esc(r.buildingAddr)}">${r.buildingN} in this building</button>` : ''}${r.alsoListed?.length
         ? ` <span class="rf-meta">Also listed ${r.alsoListed.map((x) => `${x.agency ? `by ${esc(x.agency)} ` : ''}${x.price ? `at ${esc(x.price)}` : ''}`).join('; ')}</span>` : ''}</div>` : ''}
-      ${ui.view === 'shortlist' && needsAction(r) === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
-      ${ui.view === 'shortlist' && needsAction(r) === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(Date.now() - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
-      ${r.starred && ui.view === 'shortlist' ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checklistItems(cfg.checklist).map((k) => {
+      ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
+      ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
+      ${r.starred && sl ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];
         return `<button type="button" class="rf-chip" data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
       }).join('')}</div>` : ''}
-      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(Date.now() - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
+      ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
         <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
         <button data-act="h" title="${r.hidden ? 'Unhide' : 'Hide this listing'}">${r.hidden ? 'Unhide' : 'Hide'}</button>
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="copy" title="Copy a text summary of this listing" aria-label="Copy summary">Copy</button>
-        ${ui.view === 'shortlist' ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
+        ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
           ${r.lat != null ? `<button data-act="anchor" title="Measure distances from this listing">Measure from here</button><button data-act="place" title="Add this listing's location to Other places">Add as a place</button>` : ''}
-          ${r.suburb && ui.view !== 'shortlist' ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
+          ${r.suburb && !sl ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
           ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
         </div></details>`}
       </div>
@@ -3531,8 +3535,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   };
   function enterSearchPresets(key) {
     const bound = key && presets.forSearch(key);
-    let visited = null;
-    visited = visitKey.get();
+    const visited = visitKey.get();
     if (bound) {
       if (visited === key) return;
       if (!prevStore.get()) prevStore.set(Object.fromEntries(PRESET_KEYS.map((k) => [k, cfg[k]])));
@@ -3889,7 +3892,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   function annotate() {
     if (!isSearchPage(location.href)) return;
     const matches = matchSet();
-    const anchor = parseAnchor(cfg.anchor);
+    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
     const cards = cardsOnPage();
     // Read phase: computed style for newly seen cards, before any writes (avoids layout thrash).
     const statics = new Set();
@@ -3910,7 +3913,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         // Anchor the badge without overriding a position REA already set (eg virtualised lists).
         if (statics.has(card)) card.dataset.rfPos = '';
       }
-      setDistances(r, cfg, anchor);
+      setDistances(r, cfg, anchor, places);
       const html = badgeHtml(r) + cardActsHtml(r);
       if (!badge) { badge = document.createElement('div'); badge.className = 'rf-badge'; card.appendChild(badge); }
       // Compare against what we wrote, not innerHTML (browser re-serialises entities).
@@ -4042,7 +4045,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     step('opens', watchOpens);
     step('sync', () => window.addEventListener('storage', (e) => {
       // Another tab changed the shortlist/hidden/notes: pick it up here.
-      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); refreshMarks(); }
+      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
     }));
     step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
     step('share', () => {
@@ -4058,7 +4061,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     step('listing bar', () => {
       renderListingBar();
       window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
-      window.addEventListener('storage', (e) => { if ((e.key === MARKS_KEY || e.key === null) && document.getElementById('rf-lbar')) { marks.invalidate(); renderListingBar(); } });
     });
     step('saved', renderSaved);
     step('remind', remindSaved);
