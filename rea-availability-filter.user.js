@@ -1663,11 +1663,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
   // Colours are tokens on #rf-panel so the dark scheme only swaps values.
   const css = `
-  #rf-panel,#rf-launch{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#767680;--rf-line:#e4e4e7;--rf-input:#cfcfd4;
+  #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#767680;--rf-line:#e4e4e7;--rf-input:#cfcfd4;
     --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
     --rf-err:#c00;--rf-tag:#eee}
   @media (prefers-color-scheme: dark){
-    #rf-panel,#rf-launch{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#3a3a43;
+    #rf-panel,#rf-launch,#rf-lbar{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#3a3a43;
       --rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b}
   }
   #rf-launch{position:fixed;right:20px;bottom:20px;z-index:2147483000;padding:11px 16px;border:0;border-radius:999px;
@@ -1800,6 +1800,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-plan[hidden]{display:none}
   .rf-planner{padding:8px 12px}
+  #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
+    padding:8px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
+  #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
+  #rf-lbar button[aria-pressed=true]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
+  #rf-lbar button:focus-visible,#rf-lbar select:focus-visible{outline:2px solid var(--rf-accent);outline-offset:2px}
+  .rf-lbar-note,.rf-lbar-info{flex:1 1 100%;font-size:12px;color:var(--rf-muted);white-space:pre-wrap;overflow-wrap:anywhere}
   .rf-warn-t{color:var(--rf-err)}
   .rf-saved-list{list-style:none;margin:6px 0;padding:0;display:grid;gap:6px;font-size:13px}
   .rf-saved-list a{color:inherit;font-weight:600}
@@ -3032,6 +3038,60 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     return star + fresh + avail + availMoved + moved + pets + km + insp + ppb;
   };
 
+  // Listing (property) page: a small bar to shortlist, set status, note or hide this listing
+  // without going back to the results. Same marks store, so everything stays in sync.
+  const isListingPage = (href) => /^\/property-[^/]*-\d{6,}\/?$/.test(new URL(href).pathname);
+  function listingPageRow(id) {
+    if (known.has(id)) return known.get(id);
+    let ex = window.ArgonautExchange;
+    if (!isObj(ex)) {
+      const tag = [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+      ex = tag ? parseListingPage(tag.outerHTML, id).listing ?? null : null;
+      if (ex) return safeRow(ex, false);
+    }
+    const l = ex ? findListing(unpackJson(ex), id) : null;
+    return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: document.title.split(/\s[-|]\s/)[0] || 'This listing', price: '', inspections: [] };
+  }
+  function renderListingBar() {
+    let bar = document.getElementById('rf-lbar');
+    const id = isListingPage(location.href) ? listingId(location.pathname) : '';
+    if (!id) { bar?.remove(); return; }
+    if (!bar) {
+      bar = Object.assign(document.createElement('div'), { id: 'rf-lbar' });
+      bar.setAttribute('role', 'region');
+      bar.setAttribute('aria-label', 'Shortlist this listing');
+      document.body.appendChild(bar);
+      bar.addEventListener('click', onListingBar);
+      bar.addEventListener('change', onListingBar);
+    }
+    const r = listingPageRow(id);
+    marks.decorate([r]);
+    bar.dataset.id = id;
+    bar._row = r;
+    const info = [r.prevPrice && `was ${r.prevPrice}`, r.prevAvail && `available was ${r.prevAvail}`, r.relisted && 'relisted',
+      r.firstSeen && `first seen ${ago(Date.now() - r.firstSeen)}`].filter(Boolean).join(' · ');
+    bar.innerHTML = `<button type="button" data-l="s" aria-pressed="${r.starred}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
+      ${r.starred ? `<select data-l="as" aria-label="Application status">${APP_STATUSES.map((v) => `<option value="${v}"${v === r.appStatus ? ' selected' : ''}>${v ? v[0].toUpperCase() + v.slice(1) : 'Not started'}</option>`).join('')}</select>` : ''}
+      <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
+      <button type="button" data-l="h" aria-pressed="${r.hidden}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+      ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
+  }
+  function onListingBar(e) {
+    const bar = e.currentTarget, id = bar.dataset.id, r = bar._row;
+    const el = e.target.closest('[data-l]');
+    if (!el || (e.type === 'click' && el.tagName === 'SELECT')) return;
+    const k = el.dataset.l;
+    if (k === 's' || k === 'h') marks.toggle(id, k, r);
+    else if (k === 'as') marks.setStatus(id, el.value);
+    else if (k === 'n') {
+      const text = window.prompt('Private note for this listing:', r.note || '');
+      if (text == null) return;
+      marks.setNote(id, text);
+    }
+    renderListingBar();
+    bar.querySelector(`[data-l="${k}"]`)?.focus();
+  }
+
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
   const cardActsHtml = (r) => `<span class="rf-card-acts">` +
@@ -3249,6 +3309,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
     });
     step('restore', restore);
+    step('listing bar', () => {
+      renderListingBar();
+      window.addEventListener('rf:navigate', () => setTimeout(renderListingBar, NAV_SETTLE_MS));
+      window.addEventListener('storage', (e) => { if (e.key === MARKS_KEY && document.getElementById('rf-lbar')) renderListingBar(); });
+    });
     step('saved', renderSaved);
     step('annotate', ensureVisiblePage);
   }

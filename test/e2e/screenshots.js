@@ -15,15 +15,15 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await pw.chromium.launch();
-  const shot = async (name, { dark = false, width = 1280, height = 860, act, seed }) => {
+  const shot = async (name, { dark = false, width = 1280, height = 860, act, seed, url = SEARCH, ready = 'article > .rf-badge' }) => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: dark ? 'dark' : 'light', timezoneId: 'Australia/Sydney', locale: 'en-AU' });
     const page = await ctx.newPage();
     await page.clock.install({ time: new Date('2026-09-23T10:00:00+10:00') }); // fixture dates stay meaningful
     await page.route('**/*', serve());
     if (seed) await page.addInitScript((v) => localStorage.setItem('rea-avail-filter/marks/v1', v), JSON.stringify(seed()));
-    await page.goto(SEARCH);
+    await page.goto(url);
     await page.addScriptTag({ content: SCRIPT });
-    await page.waitForSelector('article > .rf-badge');
+    await page.waitForSelector(ready);
     await act(page);
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(OUT, `${name}.jpg`), type: 'jpeg', quality: 82 });
@@ -65,6 +65,9 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
   } });
   await shot('badges', { seed: history, act: async (page) => { await page.evaluate(() => window.scrollTo(0, 690)); } });
   await shot('drawer', { act: async (page) => { await search(page); await setFrom(page, '2026-10-10'); } });
+  await shot('listing-bar', { url: SEARCH.replace(/\/rent\/.*/, '/property-unit-nsw-bondi-146500101'), ready: '#rf-lbar', width: 900, height: 500,
+    seed: () => ({ c: Date.now(), m: { 146500101: { f: Date.now() - 6 * 864e5, l: Date.now(), s: 1, as: 'inspected', n: 'Great light, ask about parking', pp: 1050, pps: '$1,050 per week', p: 999, pt: Date.now() - 864e5 } } }),
+    act: async () => {} });
   await shot('market', { act: async (page) => { await search(page); await page.click('.rf-market-btn'); await page.waitForSelector('.rf-market table'); } });
   await shot('filters', { act: async (page) => {
     await search(page);

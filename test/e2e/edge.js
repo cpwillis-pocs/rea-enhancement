@@ -689,6 +689,31 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(page); await ctx.close();
   }
 
+  // 24e. Listing page bar: shortlist, status, note and hide from the property page itself.
+  {
+    const ctx = await browser.newContext();
+    const url = `${ORIGIN}/property-unit-nsw-bondi-146500101`;
+    const page = await open(ctx, url);
+    page.on('dialog', (d) => d.accept('ask about parking'));
+    await page.waitForSelector('#rf-lbar');
+    assert.ok(await page.isHidden('#rf-launch'), 'drawer launcher stays off listing pages');
+    await page.click('#rf-lbar [data-l=s]');
+    assert.match(await page.textContent('#rf-lbar [data-l=s]'), /Shortlisted/);
+    await page.selectOption('#rf-lbar [data-l=as]', 'applied');
+    await page.click('#rf-lbar [data-l=n]');
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-note'), /ask about parking/);
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500101']);
+    assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
+    assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
+    // Shows up on the Shortlist tab of a search.
+    await page.goto(SEARCH); await page.addScriptTag({ content: SCRIPT });
+    assert.equal(await page.$('#rf-lbar'), null, 'bar only on listing pages');
+    await page.click('#rf-launch'); await page.click('[data-view=shortlist]');
+    assert.match(await page.textContent('.rf-list'), /ask about parking/);
+    console.log('listing page bar: ok');
+    await done(page); await ctx.close();
+  }
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
