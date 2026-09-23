@@ -2,7 +2,7 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
-## Unreleased
+## 2.2.0
 
 - Rolling "available within 2/4/8/12 weeks" filter.
 - Shortlist tab: starred listings from every search, with a private note per listing.
