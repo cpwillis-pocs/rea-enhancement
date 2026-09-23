@@ -12,6 +12,7 @@ const passed = []; // console.log lines = one per finished section
 const log = console.log.bind(console);
 console.log = (...args) => { passed.push(args.join(' ')); log(...args); };
 
+let section = ''; // the block running now, for the watchdog message
 const browsers = [];
 const watch = (browser) => { browsers.push(browser); return browser; };
 
@@ -45,6 +46,6 @@ async function fail(err) {
 }
 
 const limit = +process.env.E2E_TIMEOUT_MS || 8 * 60e3;
-setTimeout(() => fail(new Error(`${name} timed out after ${limit / 1000}s; last passing section: ${passed.at(-1) || '(none)'}`)), limit).unref();
+setTimeout(() => fail(new Error(`${name} timed out after ${limit / 1000}s${section ? ` in block ${section}` : ''}; last passing section: ${passed.at(-1) || '(none)'}`)), limit).unref();
 
-module.exports = { watch, fail };
+module.exports = { watch, fail, section: (id) => { section = id; } };

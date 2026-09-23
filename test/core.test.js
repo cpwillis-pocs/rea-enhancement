@@ -103,6 +103,9 @@ test('applyFilters: price, beds, type, image, keyword, sort', () => {
   assert.deepEqual(ids({ priceMin: '550' }), ['d', 'a']);
   assert.deepEqual(ids({ priceMax: '650' }), ['b', 'd']);
   assert.deepEqual(ids({ bedsMin: '2' }), ['d', 'a', 'c']);
+  const bc = [L('e', { generalFeatures: { bedrooms: { value: 2 }, bathrooms: { value: 2 }, parkingSpaces: { value: 0 } } }), L('f', { generalFeatures: { bedrooms: { value: 2 }, bathrooms: { value: 1 }, parkingSpaces: { value: 2 } } })];
+  assert.deepEqual(core.applyFilters(bc, { bathsMin: '2' }).map((r) => r.url.split('-').pop()), ['e']);
+  assert.deepEqual(core.applyFilters(bc, { carsMin: '1' }).map((r) => r.url.split('-').pop()), ['f']);
   assert.deepEqual(ids({ type: 'Studio' }), ['b']);
   assert.deepEqual(ids({ hideNoImage: true }).includes('c'), false);
   assert.deepEqual(ids({ keyword: 'pool' }), ['a']);
@@ -514,6 +517,9 @@ test('QA round 8: sort sanitised, yearless dates roll back, month checked, pm re
   for (const t of ['$2,600 pm', '$2,600 p/m', '$2,600 per calendar month', '$2,600/m']) assert.equal(core.parsePrice(t), 600, t);
   assert.equal(core.parsePrice('$600 pw'), 600);
   assert.equal(core.safeUrl('https://www.realestate.com.au/p-1\r\nEND:VEVENT'), '');
+  assert.equal(core.safeUrl('https://www.realestate.com.au/property-unit-nsw-bondi-1?a=1#b'), 'https://www.realestate.com.au/property-unit-nsw-bondi-1?a=1#b');
+  for (const bad of ['http://www.realestate.com.au/p-1', 'javascript:alert(1)', 'https://x/"onmouseover=1', 'https://x/<b>', 'https://x/a b', 'https://x/\ta', 42, null, undefined, { toString: () => 'https://x' }])
+    assert.equal(core.safeUrl(bad), '', String(bad));
   const ics = core.toIcs([{ id: '146500001', url: 'https://www.realestate.com.au/p-1', address: 'A\rB', price: '', inspections: [{ at: Date.now() + 864e5, label: 'x' }] }]);
   assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 1);
   assert.ok(!/A\rB/.test(ics));

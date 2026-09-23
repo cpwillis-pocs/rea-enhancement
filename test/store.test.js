@@ -3,23 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
 const core = require('../rea-availability-filter.user.js');
-const { listing } = require('./helpers');
+const { listing, memStorage } = require('./helpers');
 
-const memStorage = (quota = Infinity) => {
-  const m = new Map();
-  return {
-    get length() { return m.size; },
-    key: (i) => [...m.keys()][i] ?? null,
-    getItem: (k) => (m.has(k) ? m.get(k) : null),
-    setItem: (k, v) => {
-      const size = [...m.entries()].reduce((n, [a, b]) => (a === k ? n : n + b.length), 0) + v.length;
-      if (size > quota) throw new Error('QuotaExceededError');
-      m.set(k, String(v));
-    },
-    removeItem: (k) => m.delete(k),
-    _m: m,
-  };
-};
 
 test('rowStore: round-trips Date and Infinity', () => {
   let t = 1e12;
@@ -80,6 +65,8 @@ test('healthStore: learns usual fill rates, flags a sudden drop, ignores small s
   assert.deepEqual(drops.map((d) => d.field), ['inspections']);
   assert.ok(drops[0].usual > 0.5);
   assert.equal(core.fillRates([]).price, 0);
+  const rates = core.fillRates([{ avail: new Date(), priceNum: 500, inspections: [{}], lat: -33 }, { avail: null, priceNum: NaN, inspections: [], lat: null }, { avail: new Date(), priceNum: 600, inspections: [], lat: -33 }, { avail: new Date(), priceNum: NaN, inspections: [], lat: null }]);
+  assert.deepEqual([rates.availability, rates.price, rates.inspections, rates.coordinates].map((x) => Math.round(x * 100)), [75, 50, 25, 50]);
   assert.deepEqual(st.record(mk(40, 0)).map((d) => d.field), ['inspections'], 'a drop does not lower the baseline');
 });
 

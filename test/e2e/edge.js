@@ -16,42 +16,56 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 const FIXED = new Date('2026-09-23T10:00:00+10:00');
 const status = (p) => p.textContent('.rf-status');
 const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.rf-status').textContent), re.source, { timeout });
+const run = async (p) => { await p.click('#rf-launch'); await p.click('#rf-run'); await waitStatus(p, /listings match/); }; // open the drawer and search
+// Drawer results render synchronously on change; the fixtures (18 rows) stay under one render chunk.
+const count = (p, sel = '.rf-item') => p.$$eval(sel, (e) => e.length);
+const MARKS_KEY = 'rea-avail-filter/marks/v1';
+const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"m":{}}').m, MARKS_KEY);
 
 (async () => {
   const browser = harness.watch(await pw.chromium.launch());
   const errors = [];
-  const open = async (ctx, url = SEARCH, { route = serve() } = {}) => {
+  // `before` runs after the page loads and before the script is added (eg to consume REA's global).
+  const open = async (ctx, url = SEARCH, { route = serve(), before } = {}) => {
     const page = await ctx.newPage();
-    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('pageerror', (e) => errors.push(`[${current}] ${e.message}`));
     await page.clock.install({ time: FIXED });
     await cov.track(page);
     await page.route('**/*', route);
     await page.goto(url);
+    if (before) await before(page);
     await page.addScriptTag({ content: SCRIPT });
     return page;
   };
   const done = async (page) => { await cov.collect(page, SCRIPT); await page.close(); };
 
+  // Each numbered scenario is a block: E2E_ONLY=24l,26 runs just those; a failure (or a page
+  // error it caused) names its block; E2E_TIMES=1 prints each block's duration.
+  const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',').map((x) => x.trim()).filter(Boolean) : null;
+  let current = '', ran = 0;
+  const block = async (id, fn) => {
+    if (only && !only.includes(id)) return;
+    current = id; harness.section(id); ran++;
+    const t = Date.now();
+    try { await fn(); } catch (e) { e.message = `[block ${id}] ${e.message}`; throw e; }
+    assert.deepEqual(errors, [], `no page errors in block ${id}`);
+    if (process.env.E2E_TIMES) console.log(`  block ${id}: ${Date.now() - t}ms`);
+  };
+
   // 1. Boot fallback: global already consumed by the app, data read from the <script> tag.
-  {
+  await block('1', async () => {
     const ctx = await browser.newContext();
-    const page = await ctx.newPage();
-    await cov.track(page);
-    await page.route('**/*', serve());
-    await page.goto(SEARCH);
-    await page.evaluate(() => { delete window.ArgonautExchange; });
-    await page.addScriptTag({ content: SCRIPT });
+    const page = await open(ctx, SEARCH, { before: (p) => p.evaluate(() => { delete window.ArgonautExchange; }) });
     await page.waitForSelector('article > .rf-badge', { timeout: 5000 });
     console.log('boot fallback from <script> tag: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 2. Clipboard: granted -> async API; denied -> execCommand fallback or clear message.
-  {
+  await block('2', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run');
-    await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('.rf-exports [data-export=copy]');
     await waitStatus(page, /Copied \d+ rows/);
     const clip = await page.evaluate(() => navigator.clipboard.readText());
@@ -61,16 +75,15 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const ctx2 = await browser.newContext();
     const p2 = await open(ctx2);
     await p2.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) } }); });
-    await p2.click('#rf-launch'); await p2.click('#rf-run');
-    await waitStatus(p2, /listings match/);
+    await run(p2);
     await p2.click('.rf-exports [data-export=copy]');
-    await waitStatus(p2, /Copied|Clipboard blocked/);
+    await waitStatus(p2, /Copied/); // Chromium still has the execCommand fallback
     console.log('clipboard fallback:', await status(p2));
     await done(p2); await ctx2.close();
-  }
+  });
 
   // 3. Validation messages and the tab switch back with nothing searched.
-  {
+  await block('3', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await page.click('#rf-launch');
@@ -88,10 +101,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(await status(page), /Min \$\/wk is above max/);
     console.log('validation messages: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 4. Crawl failure: page 2 is a bot-check interstitial.
-  {
+  await block('4', async () => {
     const ctx = await browser.newContext();
     const base = serve([], { pages: 3 });
     const page = await open(ctx, SEARCH, { route: (route) => (/list-2/.test(route.request().url())
@@ -102,10 +115,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.notEqual(await page.getAttribute('#rf-run', 'aria-disabled'), 'true', 'usable after failure');
     console.log('crawl failure:', await status(page));
     await done(page); await ctx.close();
-  }
+  });
 
   // 5. Mobile: drawer is modal and Tab wraps inside it.
-  {
+  await block('5', async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await open(ctx);
     await page.click('#rf-launch');
@@ -118,10 +131,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(await page.evaluate(() => document.getElementById('rf-panel').contains(document.activeElement)), 'Tab never leaves');
     console.log('mobile focus trap: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 6. Cross-tab: starring in one tab updates the other's counts via the storage event.
-  {
+  await block('6', async () => {
     const ctx = await browser.newContext();
     const a = await open(ctx), b = await open(ctx);
     for (const p of [a, b]) { await p.click('#rf-launch'); }
@@ -133,57 +146,60 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.deepEqual(await b.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [id]);
     console.log('cross-tab sync: ok');
     await done(a); await done(b); await ctx.close();
-  }
+  });
 
   // 7. Emptying the list via marks must not resurrect stale rows (render([]) keeps ui.rows in sync).
-  {
+  await block('7', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
     await page.click('#rf-more summary'); await page.check('#rf-onlyStarred');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 1);
+    assert.equal(await count(page), 1);
     await page.click('.rf-item >> [data-act=s]'); // unstar the only one
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0, 'no stale rows under the empty message');
+    assert.equal(await count(page), 0, 'no stale rows under the empty message');
     assert.match(await page.textContent('.rf-list'), /Nothing matches/);
     console.log('empty after unstar: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 8. Corrupt saved settings and drifted item shapes don't stop the script.
-  {
+  await block('8', async () => {
     const ctx = await browser.newContext();
     await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ keyword: null, sort: 5, from: 7 })));
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     assert.equal(await page.evaluate(() => typeof window.reaFilter.probe), 'function');
     console.log('corrupt settings tolerated: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 9. Touch screens: action buttons visible without hover.
-  {
+  await block('9', async () => {
     const ctx = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     assert.equal(await page.$eval('.rf-acts', (a) => getComputedStyle(a).opacity), '1');
     console.log('touch actions visible: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 10. Move-in cost shown and filterable; high bond flagged.
-  {
+  await block('10', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const txt = await page.textContent('.rf-list');
     assert.match(txt, /Move-in \$\d/);
-    const total = await page.$$eval('.rf-item', (e) => e.length);
+    const total = await count(page);
+    // A cap at the median move-in cost must keep some listings and drop others.
+    const ups = await page.evaluate(() => window.reaFilter.rows().map((r) => r.upfront).filter(Number.isFinite).sort((a, b) => a - b));
+    const cap = ups[Math.floor(ups.length / 2)];
     await page.click('#rf-more summary');
-    await page.fill('#rf-upfrontMax', '3000'); await page.dispatchEvent('#rf-upfrontMax', 'change');
-    const capped = await page.$$eval('.rf-item', (e) => e.length);
-    assert.ok(capped < total, `move-in cap filters (${capped} < ${total})`);
-    console.log('move-in cost:', capped, 'of', total, 'under $3000');
+    await page.fill('#rf-upfrontMax', String(cap)); await page.dispatchEvent('#rf-upfrontMax', 'change');
+    const capped = await count(page);
+    assert.ok(capped > 0 && capped < total, `move-in cap filters (${capped} of ${total})`);
+    console.log('move-in cost:', capped, 'of', total, `under $${cap}`);
     await page.fill('#rf-upfrontMax', ''); await page.dispatchEvent('#rf-upfrontMax', 'change');
     const med = await page.$$eval('.rf-med', (e) => e.map((x) => x.textContent));
     assert.ok(med.length > 0 && med.every((t) => /median/.test(t)), 'median comparisons shown');
@@ -192,13 +208,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(first, /below median/, 'best value first');
     console.log('median:', med.length, 'listings compared; first by value:', first);
     await done(page); await ctx.close();
-  }
+  });
 
   // 11. Application status on a shortlisted listing; shortlist filter by status; export column.
-  {
+  await block('11', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
     await page.selectOption(`.rf-item[data-id="${ids[0]}"] select[data-app]`, 'applied');
@@ -224,13 +240,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(csv.split('\r\n')[0].includes('application') && csv.includes(',applied,'), 'status in CSV');
     console.log('application tracker: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 12. Calendar export from results and from the shortlist (inspections kept with the star).
-  {
+  await block('12', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-exports [data-export=ics]')]);
     const ics = fs.readFileSync(await dl.path(), 'utf8');
     const n = (ics.match(/BEGIN:VEVENT/g) || []).length;
@@ -243,23 +259,23 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal((ics2.match(/BEGIN:VEVENT/g) || []).length, 1, 'shortlist calendar = the one shortlisted inspection');
     console.log('calendar export:', n, 'events from results, 1 from shortlist');
     await done(page); await ctx.close();
-  }
+  });
 
   // 13. Amenity chips: require / exclude cycle, tags shown, REA badge for pets, Clear resets.
-  {
+  await block('13', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
-    const total = await page.$$eval('.rf-item', (e) => e.length);
+    await run(page);
+    const total = await count(page);
     await page.click('#rf-more summary');
     await page.click('[data-amen=pets]');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: required');
-    const withPets = await page.$$eval('.rf-item', (e) => e.length);
+    const withPets = await count(page);
     assert.ok(withPets > 0 && withPets < total, `pets required: ${withPets}/${total}`);
     assert.ok(await page.$$eval('.rf-item .rf-tags', (e) => e.every((t) => /Pets OK/.test(t.textContent))));
     await page.click('[data-amen=pets]');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: excluded');
-    const noPets = await page.$$eval('.rf-item', (e) => e.length);
+    const noPets = await count(page);
     assert.equal(noPets, total - withPets);
     // Badges are drawn asynchronously (debounced annotate): wait rather than check instantly.
     // On failure, dump what the cards and rows actually hold (CI failed here twice, not locally).
@@ -270,7 +286,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     });
     await page.click('.rf-clear');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: any');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.equal(await count(page), total);
     assert.ok(await page.$('.rf-watch span:has-text("Water usage charged")'), 'heads-up tag from description');
     await page.click('[data-nowatch=water]');
     assert.equal(await page.getAttribute('[data-nowatch=water]', 'aria-pressed'), 'true');
@@ -280,13 +296,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.getAttribute('[data-nowatch=water]', 'aria-pressed'), 'false');
     console.log('amenities:', withPets, 'with pets,', noPets, 'without, of', total);
     await done(page); await ctx.close();
-  }
+  });
 
   // 14. Distance: paste coordinates, see km, cap it, sort nearest; bad input explained.
-  {
+  await block('14', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-anchor', 'Somewhere'); await page.dispatchEvent('#rf-anchor', 'change');
     assert.match(await status(page), /coordinates in Australia/);
@@ -296,7 +312,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const first = await page.textContent('.rf-item .rf-meta:has-text("away")');
     assert.match(first, /^0 m away|^\d+ m away/, `nearest first: ${first}`);
     await page.fill('#rf-maxKm', '2'); await page.dispatchEvent('#rf-maxKm', 'change');
-    const n = await page.$$eval('.rf-item', (e) => e.length);
+    const n = await count(page);
     assert.ok(n > 0 && n < 18, `within 2 km: ${n}`);
     await page.waitForFunction(() => [...document.querySelectorAll('article > .rf-badge')].some((b) => / (k)?m$|\d m|km/.test(b.textContent)), null, { timeout: 3000 });
     console.log('distance:', n, 'within 2 km; nearest', first);
@@ -308,25 +324,25 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(scores.length > 3 && scores.every((v, i) => i === 0 || v <= scores[i - 1]), `best match sorted desc: ${scores.slice(0, 5)}`);
     assert.match(await page.getAttribute('.rf-score', 'title'), /rent vs budget \d+/);
     await done(page); await ctx.close();
-  }
+  });
 
   // 15. Agency hide (with undo + unhide chip) and floorplan filter.
-  {
+  await block('15', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
-    const total = await page.$$eval('.rf-item', (e) => e.length);
+    await run(page);
+    const total = await count(page);
     await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
     assert.match(await status(page), /Hidden all listings from/);
-    const after = await page.$$eval('.rf-item', (e) => e.length);
+    const after = await count(page);
     assert.equal(after, total - 6, 'one of three agencies hidden');
     await page.click('.rf-status .rf-undo');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.equal(await count(page), total);
     await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
     await page.click('#rf-more summary');
     assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), false);
     await page.click('[data-unhide-ag]');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.equal(await count(page), total);
     assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), true);
     // With "Show hidden" on, an agency-hidden row is dimmed and offers "Unhide agency".
     await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
@@ -336,19 +352,19 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await hid.evaluate((b) => b.click());
     assert.match(await status(page), /Showing .* again/);
     await page.uncheck('#rf-showHidden');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.equal(await count(page), total);
     await page.check('#rf-floorplanOnly');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total / 2);
+    assert.equal(await count(page), total / 2);
     assert.match(await page.textContent('.rf-item'), /photos · floorplan/);
     console.log('agency hide + floorplan: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 16. Compare table: shortlisted side by side, best values highlighted, toggles back.
-  {
+  await block('16', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 3).map((x) => x.dataset.id));
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
     await page.click('#rf-more summary');
@@ -361,13 +377,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(['Rent', 'Move-in', 'Distance', 'Amenities', 'Status'].every((l) => rowsLabels.includes(l)));
     assert.ok(await page.$$eval('.rf-compare .rf-best', (e) => e.length) >= 3, 'best values highlighted');
     await page.click('[data-sl=compare]');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 3);
+    assert.equal(await count(page), 3);
     console.log('compare table: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 17. Star / hide on REA's own cards: stored, reflected, card faded, REA's handlers not reached.
-  {
+  await block('17', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await page.waitForSelector('article > .rf-badge [data-card-act=s]');
@@ -376,7 +392,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click(`article > .rf-badge [data-card-act=s][data-id="${id}"]`);
     await page.waitForFunction((i) => document.querySelector(`[data-card-act=s][data-id="${i}"]`)?.getAttribute('aria-pressed') === 'true', id);
     assert.equal(await page.evaluate(() => window.__reaClicks), 0, 'click did not reach REA');
-    assert.equal(await page.evaluate((i) => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m[i].s, id), 1);
+    assert.equal(await marks(page).then((m) => m[id].s), 1);
     await page.click(`article > .rf-badge [data-card-act=h][data-id="${id}"]`);
     await page.waitForFunction((i) => document.querySelector(`article[data-rf-id="${i}"]`)?.dataset.rfMatch === '0', id);
     await page.click('#rf-launch');
@@ -384,13 +400,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(await page.textContent('#rf-launch'), /★1/, 'launcher shows shortlist count');
     console.log('card quick actions: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 18. Active filter chips: counts, click to remove, summary count; Clear offers undo.
-  {
+  await block('18', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.click('[data-amen=pets]');
@@ -398,20 +414,20 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(chips.length, 2);
     assert.match(chips[0], /3\+ bed −\d+ ×/);
     assert.match(await page.textContent('#rf-more summary'), /2 active/);
-    const before = await page.$$eval('.rf-item', (e) => e.length);
+    const before = await count(page);
     await page.click('.rf-achip >> nth=0');
     assert.equal(await page.inputValue('#rf-bedsMin'), '');
-    assert.ok(await page.$$eval('.rf-item', (e) => e.length) > before, 'removing a chip widens results');
+    assert.ok(await count(page) > before, 'removing a chip widens results');
     await page.click('.rf-clear');
     assert.equal(await page.$eval('.rf-active', (b) => b.hidden), true);
     await page.click('.rf-status .rf-undo');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: required', 'undo restores filters');
     console.log('active filter chips + clear undo: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 19. Keyboard: Alt+Shift+F toggles, j/k move, s shortlists, h hides, ? help, / keyword.
-  {
+  await block('19', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await page.keyboard.press('Alt+Shift+F');
@@ -451,44 +467,44 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false);
     console.log('keyboard shortcuts: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 20. Bulk: shortlist all shown / hide all shown with undo; shortlist bulk status + remove declined.
-  {
+  await block('20', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
-    const shown = await page.$$eval('.rf-item', (e) => e.length);
+    const shown = await count(page);
     await page.selectOption('.rf-bulk', 'star');
     assert.match(await status(page), new RegExp(`Shortlisted ${shown}`));
     await page.click('[data-view=shortlist]');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown);
+    assert.equal(await count(page), shown);
     await page.selectOption('.rf-sl-bulk', 'status:declined');
     assert.match(await status(page), /Marked \d+ as declined/);
     await page.selectOption('.rf-sl-bulk', 'unstar-declined');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
+    assert.equal(await count(page), 0);
     await page.click('.rf-status .rf-undo');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown, 'undo brings them back');
+    assert.equal(await count(page), shown, 'undo brings them back');
     await page.selectOption('.rf-sl-bulk', 'unstar');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
+    assert.equal(await count(page), 0);
     await page.click('.rf-status .rf-undo');
     await page.click('[data-view=results]');
     await page.selectOption('.rf-bulk', 'hide');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0);
+    assert.equal(await count(page), 0);
     await page.click('.rf-status .rf-undo');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), shown);
+    assert.equal(await count(page), shown);
     console.log('bulk actions:', shown, 'rows, undo ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 21. Presets: save, apply, bind to a search (auto-applies on SPA navigation back), delete.
-  {
+  await block('21', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'Bondi pets' : '3-bed'));
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.selectOption('.rf-preset', 'c:save');
@@ -508,14 +524,14 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:3-bed'));
     console.log('presets: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 21b. Preset names that look like menu commands, bound type across reload, once per visit.
-  {
+  await block('21b', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'd:x' : '-3-bed'));
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.selectOption('#rf-type', 'Townhouse');
     await page.selectOption('.rf-preset', 'c:save');
@@ -535,15 +551,15 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.inputValue('#rf-type'), '', 'bound preset applies once per visit, not over edits');
     console.log('presets names/type: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 21c. A bound preset's "previous filters" survive a reload, so they don't leak to other searches.
-  {
+  await block('21c', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     page.on('dialog', (d) => d.accept('Bondi pets'));
     const pets = () => page.getAttribute('[data-amen=pets]', 'aria-label');
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.click('[data-amen=pets]');
     await page.selectOption('.rf-preset', 'c:bind');
@@ -557,13 +573,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.doesNotMatch(await pets(), /required/, 'previous filters restored after reload');
     console.log('preset restore after reload: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 22. Print: opens a document with one block per shortlisted listing.
-  {
+  await block('22', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     for (const n of [1, 2]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
     await page.click('[data-view=shortlist]');
     const [pop] = await Promise.all([ctx.waitForEvent('page'), page.click('.rf-menu summary').then(() => page.click('[data-sl=print]'))]);
@@ -573,14 +589,14 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     console.log('print shortlist: ok');
     await pop.close();
     await done(page); await ctx.close();
-  }
+  });
 
   // 23. Share: copy link from one browser profile, open it in another, import.
-  {
+  await block('23', async () => {
     const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     const a = await open(ctxA);
     a.on('dialog', (d) => d.accept());
-    await a.click('#rf-launch'); await a.click('#rf-run'); await waitStatus(a, /listings match/);
+    await run(a);
     for (const n of [1, 2]) { await a.hover(`.rf-item:nth-child(${n})`); await a.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
     await a.hover('.rf-item:nth-child(1)'); await a.click('.rf-item:nth-child(1) >> [data-act=n]');
     await a.fill('.rf-note-edit', 'great light'); await a.keyboard.press('Enter');
@@ -591,11 +607,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(a); await ctxA.close();
 
     const ctxB = await browser.newContext();
-    const b = await ctxB.newPage();
-    await cov.track(b);
-    await b.route('**/*', serve());
-    await b.goto(link);
-    await b.addScriptTag({ content: SCRIPT });
+    const b = await open(ctxB, link);
     await b.waitForSelector('.rf-share-in:not([hidden])');
     assert.match(await b.textContent('.rf-share-msg'), /2 shared listings/);
     await b.evaluate(() => history.pushState({}, '', '/buy/in-bondi/list-1'));
@@ -604,19 +616,25 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await b.click('[data-share=add]');
     assert.equal(await b.$$eval('.rf-item', (e) => e.length), 2);
     assert.match(await b.textContent('.rf-note'), /Shared: great light/);
+    const d = await open(ctxB, link); // the same link again, declined this time
+    await d.waitForSelector('.rf-share-in:not([hidden])');
+    await d.click('[data-share=dismiss]');
+    assert.ok(await d.$('.rf-share-in[hidden]'), 'dismissed');
+    assert.equal((await marks(d).then((m) => Object.values(m).filter((e) => e.s))).length, 2, 'dismiss adds nothing');
+    await done(d);
     const c = await open(ctxB, SEARCH + '#rf-share=eyJhIjoicmVh');
     await waitStatus(c, /incomplete or damaged/, 5000);
     assert.ok(!(await c.evaluate(() => location.hash)), 'broken share stripped from URL');
     await done(c);
     console.log('share link across profiles: ok');
     await done(b); await ctxB.close();
-  }
+  });
 
   // 24. Planner: choose a day, see ordered inspections with clashes flagged; day calendar export.
-  {
+  await block('24', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.selectOption('#rf-sort', 'inspect');
     for (const n of [1, 2, 3, 4]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
@@ -625,24 +643,24 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(days.length >= 1, 'days offered');
     await page.selectOption('.rf-plan', days[0]);
     const n = await page.$$eval('.rf-planner li', (e) => e.length);
-    assert.ok(n >= 1);
-    if (n > 1) assert.ok(await page.$('.rf-planner li.rf-clash'), 'same-time fixtures clash');
+    assert.ok(n > 1, 'several inspections that day');
+    assert.ok(await page.$('.rf-planner li.rf-clash'), 'same-time fixtures clash');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-plan-ics]')]);
     assert.equal((fs.readFileSync(await dl.path(), 'utf8').match(/BEGIN:VEVENT/g) || []).length, n);
     const planned = await page.$$eval('.rf-planner li a', (a) => new Set(a.map((x) => x.href)).size);
     await page.selectOption('.rf-sl-bulk', 'status:applied');
     assert.match(await status(page), new RegExp(`Marked ${planned} as applied`), 'bulk acts on the planned day only');
     await page.selectOption('.rf-plan', '');
-    assert.ok(await page.$$eval('.rf-item', (e) => e.length) === 4);
+    assert.ok(await count(page) === 4);
     console.log('planner:', days.length, 'days;', n, 'on', days[0]);
     await done(page); await ctx.close();
-  }
+  });
 
   // 24b. Market view: rent per bed count and availability by week; clicking a week filters to it.
-  {
+  await block('24b', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('.rf-market-btn');
     await page.waitForSelector('.rf-market table');
     assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'true');
@@ -656,7 +674,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click(`.rf-bars button[data-week="${wk}"]`);
     await page.waitForSelector('.rf-item');
     assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'false');
-    const shown = await page.$$eval('.rf-item', (e) => e.length);
+    const shown = await count(page);
     assert.equal(shown, n, 'week filter shows exactly that bucket');
     assert.ok(await page.inputValue('#rf-from') || await page.inputValue('#rf-to'), 'dates set');
     assert.ok(await page.evaluate(() => document.activeElement.matches('.rf-item, .rf-market-btn')), 'focus kept in the drawer');
@@ -667,16 +685,18 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     // A bar never widens your own window: within 2 weeks + "Later" shows nothing extra.
     await page.click('.rf-clear');
     await page.selectOption('#rf-withinDays', '14');
-    const inWindow = await page.$$eval('.rf-item', (e) => e.length);
+    const inWindow = await count(page);
     await page.click('.rf-market-btn');
-    const laterBtn = await page.$('.rf-bars button[data-week="9"]');
-    if (laterBtn) { await laterBtn.click(); assert.ok((await page.$$eval('.rf-item', (e) => e.length)) <= inWindow); }
+    const last = await page.$$eval('.rf-bars button[data-week]', (b) => b.at(-1).dataset.week); // the latest week in the window
+    await page.click(`.rf-bars button[data-week="${last}"]`);
+    assert.ok((await count(page)) <= inWindow);
+    assert.ok(await page.inputValue('#rf-to') <= await page.evaluate(() => new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10)), 'end date not widened');
     console.log('market view: ok,', bars.length, 'weeks;', n, 'in week', wk);
     await done(page); await ctx.close();
-  }
+  });
 
   // 24c. Saved searches: remembered searches listed; Check all fetches each and counts new.
-  {
+  await block('24c', async () => {
     const ctx = await browser.newContext();
     const other = 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1';
     // Init scripts run before the page's fake clock is installed: stamp from FIXED, not Date.now().
@@ -704,13 +724,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'nothing re-saved after opting out');
     console.log('saved searches: ok,', st.slice(0, 90));
     await done(page); await ctx.close();
-  }
+  });
 
   // 24d. Availability date change: a stored earlier date shows "was <date>" in the drawer and on the card.
-  {
+  await block('24d', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const id = await page.evaluate(() => {
       const it = [...document.querySelectorAll('.rf-item')].find((x) => /\d{4}/.test(x.querySelector('.rf-avail').textContent));
       const key = 'rea-avail-filter/marks/v1';
@@ -727,10 +747,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.waitForFunction(() => [...document.querySelectorAll('.rf-badge span')].some((b) => /^Avail was /.test(b.textContent)), null, { timeout: 5000 });
     console.log('availability change: ok,', await page.textContent(`.rf-item[data-id="${id}"] .rf-avail`));
     await done(page); await ctx.close();
-  }
+  });
 
   // 24e. Listing page bar: shortlist, status, note and hide from the property page itself.
-  {
+  await block('24e', async () => {
     const ctx = await browser.newContext();
     const url = `${ORIGIN}/property-unit-nsw-bondi-146500101`;
     const page = await open(ctx, url);
@@ -742,7 +762,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.selectOption('#rf-lbar [data-l=as]', 'applied');
     await page.click('#rf-lbar [data-l=n]');
     assert.match(await page.textContent('#rf-lbar .rf-lbar-note'), /ask about parking/);
-    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500101']);
+    const stored = await marks(page).then((m) => m['146500101']);
     assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
     await page.click('#rf-lbar [data-l=min]');
@@ -751,14 +771,14 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('#rf-lbar [data-l=min]');
     await page.focus('#rf-lbar [data-l=h]');
     await page.evaluate(() => history.replaceState({}, '', location.pathname + '?gallery=1'));
-    await page.waitForTimeout(600);
+    await page.clock.runFor(600); // past NAV_SETTLE_MS on the page's own clock
     assert.equal(await page.evaluate(() => document.activeElement.dataset.l), 'h', 'focus kept on replaceState');
     // In-app move to another listing: its own page is read for the summary.
     await page.evaluate(() => history.pushState({}, '', '/property-house-nsw-bondi-146500102'));
     await page.waitForFunction(() => document.getElementById('rf-lbar')?.dataset.id === '146500102', null, { timeout: 3000 });
     await page.waitForFunction(() => document.getElementById('rf-lbar')._row && !document.getElementById('rf-lbar')._row.partial, null, { timeout: 12000 });
     await page.click('#rf-lbar [data-l=s]');
-    const second = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m['146500102'].d);
+    const second = await marks(page).then((m) => m['146500102'].d);
     assert.match(second.p, /\$999/); assert.match(second.u, /146500102/, 'summary is this listing');
     // Shows up on the Shortlist tab of a search.
     await page.goto(SEARCH); await page.addScriptTag({ content: SCRIPT });
@@ -767,15 +787,15 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(await page.textContent('.rf-list'), /ask about parking/);
     console.log('listing page bar: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24f. Storage line and "Delete all my data" (tool keys only).
-  {
+  await block('24f', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
     page.on('dialog', (d) => d.accept());
     await page.evaluate(() => localStorage.setItem('reaOwnKey', 'keep me'));
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.hover('.rf-item:nth-child(1)'); await page.click('.rf-item:nth-child(1) >> [data-act=s]');
     await page.click('.rf-settings summary');
     await page.waitForFunction(() => document.querySelector('.rf-storage-n').textContent);
@@ -786,45 +806,40 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.ok(keys.includes('reaOwnKey'), "REA's own data kept");
     console.log('delete all data: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24g. Listing bar when REA's app already consumed the page-data global: read from the <script> tag.
-  {
+  await block('24g', async () => {
     const ctx = await browser.newContext();
-    const page = await ctx.newPage();
-    await cov.track(page);
-    await page.route('**/*', serve());
-    await page.goto(`${ORIGIN}/property-unit-nsw-bondi-146500104`);
-    await page.evaluate(() => { delete window.ArgonautExchange; });
-    await page.addScriptTag({ content: SCRIPT });
+    const page = await open(ctx, `${ORIGIN}/property-unit-nsw-bondi-146500104`, { before: (p) => p.evaluate(() => { delete window.ArgonautExchange; }) });
     await page.waitForSelector('#rf-lbar');
     assert.equal(await page.evaluate(() => document.getElementById('rf-lbar')._row.price), '$999 per week');
     console.log('listing bar from script tag: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24h. Opened tracking: opening from the drawer or REA's card marks it; Not opened yet filters it out.
-  {
+  await block('24h', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const id = await page.getAttribute('.rf-item', 'data-id');
     await page.evaluate(() => window.addEventListener('click', (e) => { if (e.target.closest('a')) e.preventDefault(); })); // no new tab in the test
     await page.click(`.rf-item[data-id="${id}"] .rf-card`);
-    assert.ok(await page.evaluate((i) => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m[i].o, id), 'opened stored');
+    assert.ok(await marks(page).then((m) => m[id].o), 'opened stored');
     await page.click('#rf-more summary'); await page.check('#rf-unopenedOnly');
     assert.equal(await page.$(`.rf-item[data-id="${id}"]`), null, 'opened listing filtered out');
     await page.uncheck('#rf-unopenedOnly');
     assert.match(await page.textContent(`.rf-item[data-id="${id}"]`), /opened just now/);
     console.log('opened tracking: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24i. A11y: Esc in the ⋯ menu closes only the menu; arrow keys switch tabs; phone modal makes the page inert.
-  {
+  await block('24i', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('.rf-item .rf-acts-more summary');
     await page.focus('.rf-item .rf-acts-more[open] [data-act=ag]');
     await page.keyboard.press('Escape');
@@ -842,14 +857,14 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.evaluate(() => [...document.body.children].some((el) => el.inert)), false, 'inert removed on close');
     console.log('a11y keys + inert: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24j. Hide reason, Copy enquiry, "try dropping" suggestions, bulk counts, application follow-up.
-  {
+  await block('24j', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
-    const n = await page.$$eval('.rf-item', (e) => e.length);
+    await run(page);
+    const n = await count(page);
     assert.equal(await page.textContent('.rf-bulk option[value=star]'), `Shortlist all ${n} shown`);
     const id = await page.getAttribute('.rf-item', 'data-id');
     await page.click(`.rf-item[data-id="${id}"] [data-act=h]`);
@@ -866,7 +881,7 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.fill('#rf-bedsMin', '9'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.waitForSelector('[data-drop-chip]');
     await page.click('[data-drop-chip]');
-    assert.ok((await page.$$eval('.rf-item', (e) => e.length)) > 0, 'dropping the suggested filter brings listings back');
+    assert.ok((await count(page)) > 0, 'dropping the suggested filter brings listings back');
     // Applied a week ago: follow-up nudge on the shortlist.
     await page.evaluate((i) => { const k = 'rea-avail-filter/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); Object.assign(d.m[i], { as: 'applied', ast: Date.now() - 7 * 864e5 }); localStorage.setItem(k, JSON.stringify(d)); }, other);
     await page.click(`.rf-item[data-id="${other}"] [data-act=s]`);
@@ -875,13 +890,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(await page.textContent(`.rf-item[data-id="${other}"]`), /you: 1 applied/);
     console.log('hide reason / enquiry / drop suggestions / follow-up: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24k. Named places, Best match weights, inspection checklist.
-  {
+  await block('24k', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-anchor', '-33.891, 151.274'); await page.dispatchEvent('#rf-anchor', 'change');
     await page.fill('#rf-places', 'Work: -33.8688, 151.2093'); await page.dispatchEvent('#rf-places', 'change');
@@ -908,15 +923,15 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(await page.textContent('.rf-compare'), /Work/);
     console.log('places / weights / checklist: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24l. Round 10: text facts (apply portal, lease, availability from text), lease fit, lease/building
   // filters, building + twin listings, measure from a listing, places feedback, inspection prompts,
   // warning banner, saved-search reminder.
-  {
+  await block('24l', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const item = (id) => page.textContent(`.rf-item[data-id="${id}"]`);
     assert.match(await item('146500000'), /Apply: 2Apply/); assert.match(await item('146500000'), /Lease 12 mo/);
     assert.match(await item('146500001'), /\(from text\)/, 'availability read from the description');
@@ -934,16 +949,16 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.$('.rf-item[data-id="146500004"]'), null, '6-month-only lease dropped');
     assert.ok(await page.$('.rf-achip:has-text("Lease 12+ mo")'));
     await page.selectOption('#rf-leaseMin', '');
-    const before = await page.$$eval('.rf-item', (e) => e.length);
+    const before = await count(page);
     await page.check('#rf-onePerBuilding');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), before - 2, 'two extra units in one building collapse');
+    assert.equal(await count(page), before - 2, 'two extra units in one building collapse');
     await page.uncheck('#rf-onePerBuilding');
     await page.click('.rf-item[data-id="146500000"] [data-act=bldg]');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 3, 'only that building');
+    assert.equal(await count(page), 3, 'only that building');
     assert.match(await status(page), /Showing 3 listings at 2 Curlewis St/);
     assert.ok(!('building' in JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1')))), 'the building filter is not stored');
     await page.click('.rf-achip:has-text("Building: 2 Curlewis St")');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), before, 'chip removes the building filter');
+    assert.equal(await count(page), before, 'chip removes the building filter');
     // Measure from a listing; add it as a place (feedback line).
     await page.click('.rf-item[data-id="146500002"] .rf-acts-more summary');
     await page.click('.rf-item[data-id="146500002"] [data-act=anchor]');
@@ -973,10 +988,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('[data-view=results]');
     console.log('round 10 features: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 24m. Saved-search reminder by the launcher (at most daily), Check now runs Check all.
-  {
+  await block('24m', async () => {
     const ctx = await browser.newContext();
     await ctx.addInitScript((at) => {
       if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1': { at, ids: [], rows: [], gone: [] } } }));
@@ -992,17 +1007,23 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.click('#rf-panel .rf-x'); // the prompt sits by the launcher, under the drawer
     await page.evaluate(() => history.pushState(null, '', location.href.replace(/in-[^/]+/, 'in-coogee,+nsw+2034'))); // a different search re-checks
     await page.waitForSelector('#rf-remind');
+    await page.click('#rf-remind [data-r=later]');
+    assert.equal(await page.$('#rf-remind'), null, 'Later closes it');
+    assert.ok(await page.evaluate(() => !document.getElementById('rf-panel') || document.getElementById('rf-panel').hidden), 'Later does not open the drawer');
+    await page.evaluate(() => localStorage.removeItem('rea-avail-filter/remind-at'));
+    await page.evaluate(() => history.pushState(null, '', location.href.replace(/in-[^/]+/, 'in-bronte,+nsw+2024')));
+    await page.waitForSelector('#rf-remind');
     await page.click('#rf-remind [data-r=check]');
     await waitStatus(page, /Checked 1 saved search/, 30000);
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
-    await page.waitForTimeout(300);
+    await page.clock.runFor(300);
     assert.equal(await page.$('#rf-remind'), null, 'not again the same day');
     console.log('saved-search reminder: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
-  {
+  await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/health/v1', JSON.stringify({ n: 5, ema: { inspections: 0.5, availability: 1, price: 0.9 } })));
     const page = await open(ctx, SEARCH, { route: serve([], { pages: 4, perPage: 6, noInspections: true }) });
@@ -1014,13 +1035,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(report, /page: \/rent\//);
     console.log('drift canary + selfcheck: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 26. Re-check: listing pages update price / mark 404s as no longer listed.
-  {
+  await block('26', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     const ids = await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id));
     const pickGone = ids.find((i) => i.endsWith('3')), pickOk = ids.find((i) => !i.endsWith('3'));
     for (const id of [pickGone, pickOk]) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
@@ -1031,21 +1052,21 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(await page.textContent(`.rf-item[data-id="${pickOk}"]`), /\$999 per week/);
     console.log('re-check shortlist: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 27. Copy summary (button + 'c'), hide suburb with undo, compare only ticked listings.
-  {
+  await block('27', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await run(page);
     await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=copy]');
     await waitStatus(page, /summary copied/);
     assert.match(await page.evaluate(() => navigator.clipboard.readText()), /per week - .*\nAvailable|https:\/\/www\.realestate/);
-    const total = await page.$$eval('.rf-item', (e) => e.length);
+    const total = await count(page);
     await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=sb]');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), 0, 'every fixture is in Bondi');
+    assert.equal(await count(page), 0, 'every fixture is in Bondi');
     await page.click('.rf-status .rf-undo');
-    assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
+    assert.equal(await count(page), total);
     const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 3).map((x) => x.dataset.id));
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
     await page.click('[data-view=shortlist]');
@@ -1056,11 +1077,11 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.$$eval('.rf-compare thead th', (e) => e.length), 2, 'only ticked listings compared');
     console.log('copy / hide suburb / compare selection: ok');
     await done(page); await ctx.close();
-  }
+  });
 
   // 28. Enter on a focused button presses it (no listing tab); Esc outside the drawer isn't ours.
-  { const ctx = await browser.newContext(); const page = await open(ctx);
-    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+  await block('28', async () => { const ctx = await browser.newContext(); const page = await open(ctx);
+    await run(page);
     const id = await page.$eval('.rf-item', (e) => e.dataset.id);
     let popups = 0; ctx.on('page', () => popups++);
     await page.focus(`.rf-item[data-id="${id}"] [data-act=s]`);
@@ -1070,10 +1091,10 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.evaluate(() => document.activeElement.blur());
     await page.keyboard.press('Escape');
     assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false, "Esc outside the drawer is REA's");
-    console.log('enter on buttons + esc scope: ok'); await done(page); await ctx.close(); }
+    console.log('enter on buttons + esc scope: ok'); await done(page); await ctx.close(); });
 
-  assert.deepEqual(errors, [], 'no page errors');
-  cov.report(SCRIPT);
+  if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);
+  if (!only) cov.report(SCRIPT); // a partial run would under-report coverage
   await browser.close();
   console.log('e2e edge: ok');
 })().catch(harness.fail);

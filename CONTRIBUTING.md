@@ -16,6 +16,8 @@ npm run ci      # check + e2e, the whole gate locally
 
 `E2E_ARTIFACTS=dir` makes a failing e2e run save a screenshot and the drawer HTML of every open page, plus the sections that passed. `E2E_TIMEOUT_MS` (default 8 min) fails a hung run with the last passing section named. `COVERAGE_MIN=98` fails `npm run coverage` if UI line coverage drops below it.
 
+`test/e2e/edge.js` is a list of numbered blocks (`await block('24l', async () => { ... })`), one per scenario, each in its own browser context. `E2E_ONLY=24l,26 node test/e2e/edge.js` runs just those (coverage isn't reported for a partial run), and `E2E_TIMES=1` prints each block's duration. A failure, or a page error, names its block. Use the helpers at the top (`open`, `run`, `count`, `marks`, `waitStatus`) rather than building pages by hand, so every page gets the fixed clock and the page-error check. Wait on the page's fake clock (`page.clock.runFor(ms)`) rather than `waitForTimeout`. Seed storage from `FIXED`, not `Date.now()`, because init scripts run before the fake clock is installed.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on pull requests and on demand from **Actions → ci → Run workflow**. It deliberately has no push or schedule triggers, to keep within the repo's monthly Actions minutes: run `npm run ci` locally before opening a PR (maintainers: before releasing, or run the workflow on demand).

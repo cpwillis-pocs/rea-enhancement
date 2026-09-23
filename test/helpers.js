@@ -28,4 +28,21 @@ const exchange = (res) => ({
 
 const page = (res) => `<html><script>window.ArgonautExchange=${JSON.stringify(exchange(res))};</script></html>`;
 
-module.exports = { listing, results, exchange, page };
+// localStorage stand-in: string values, length/key/removeItem, and an optional byte quota.
+const memStorage = (quota = Infinity) => {
+  const m = new Map();
+  return {
+    get length() { return m.size; },
+    key: (i) => [...m.keys()][i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => {
+      const size = [...m.entries()].reduce((n, [a, b]) => (a === k ? n : n + b.length), 0) + v.length;
+      if (size > quota) throw new Error('QuotaExceededError');
+      m.set(k, String(v));
+    },
+    removeItem: (k) => m.delete(k),
+    _m: m,
+  };
+};
+
+module.exports = { listing, results, exchange, page, memStorage };

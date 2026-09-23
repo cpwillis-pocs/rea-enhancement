@@ -3,9 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
 const core = require('../rea-availability-filter.user.js');
-const { listing } = require('./helpers');
+const { listing, memStorage: mem } = require('./helpers');
 
-const mem = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), _m: m }; };
 const row = (id, price = '$700 per week') => core.toRow(listing({ id, _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}` } }, price: { display: price } }), false);
 
 test('marksStore: "new" from REA listed date only (per-search newness lives in snapshots)', () => {

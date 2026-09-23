@@ -96,7 +96,7 @@ const html = (n) => {
     const a = document.querySelector('article');
     a.insertAdjacentHTML('afterbegin', '<a href="/agent/jane-smith-1234567">agent</a>');
   });
-  await page.waitForTimeout(700);
+  await page.clock.runFor(700); // past the annotate debounce on the page's clock
   assert.equal(await page.$$eval('article > .rf-badge', (els) => els.length), 2, 'agent link ignored');
 
   // React reusing the <article> and swapping only href: badge follows the new listing.
