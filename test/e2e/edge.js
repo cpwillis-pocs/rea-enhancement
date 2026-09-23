@@ -559,10 +559,16 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await b.addScriptTag({ content: SCRIPT });
     await b.waitForSelector('.rf-share-in:not([hidden])');
     assert.match(await b.textContent('.rf-share-msg'), /2 shared listings/);
+    await b.evaluate(() => history.pushState({}, '', '/buy/in-bondi/list-1'));
+    assert.ok(await b.isVisible('.rf-share-in'), 'pending share offer survives leaving /rent/');
     assert.equal(await b.evaluate(() => location.hash), '', 'fragment stripped');
     await b.click('[data-share=add]');
     assert.equal(await b.$$eval('.rf-item', (e) => e.length), 2);
     assert.match(await b.textContent('.rf-note'), /Shared: great light/);
+    const c = await open(ctxB, SEARCH + '#rf-share=eyJhIjoicmVh');
+    await waitStatus(c, /incomplete or damaged/, 5000);
+    assert.ok(!(await c.evaluate(() => location.hash)), 'broken share stripped from URL');
+    await done(c);
     console.log('share link across profiles: ok');
     await done(b); await ctxB.close();
   }

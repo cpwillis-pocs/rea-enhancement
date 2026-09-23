@@ -2908,8 +2908,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     window.addEventListener('popstate', fire);
     window.addEventListener('rf:navigate', () => {
       const active = isSearchPage(location.href);
-      ui.launch.hidden = !active;
-      if (!active) ui.setOpen(false);
+      ui.launch.hidden = !active && !ui.pendingShare; // an unanswered share offer stays reachable
+      if (!active && !ui.pendingShare) ui.setOpen(false);
       setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
@@ -2985,10 +2985,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     }));
     step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
     step('share', () => {
+      if (!new RegExp(`[#&]${SHARE_PARAM}=`).test(location.hash)) return;
       const rows = shareFromHash(location.hash);
-      if (!rows) return;
       history.replaceState(history.state, '', location.pathname + location.search); // don't keep it in history
-      ui.offerShare(rows);
+      if (rows?.length) { ui.offerShare(rows); return; }
+      ui.launch.hidden = false;
+      ui.setOpen(true);
+      setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
     });
     step('restore', restore);
     step('annotate', ensureVisiblePage);
