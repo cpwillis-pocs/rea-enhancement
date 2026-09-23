@@ -1,0 +1,25 @@
+name: ci
+
+# Runs on PRs so outside contributions get the same gate as `npm run check` locally.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # No dependencies to install for unit tests; playwright only for the browser smoke test.
+      - run: npm run check
+      - run: npx -y playwright@1.56.1 install --with-deps chromium
+      - run: npm install --no-save playwright@1.56.1
+      - run: npm run e2e

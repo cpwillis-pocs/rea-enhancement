@@ -3,8 +3,12 @@
   "private": true,
   "description": "Tampermonkey userscript enhancing realestate.com.au rental search results",
   "scripts": {
-    "check": "node --check rea-availability-filter.user.js",
+    "check": "node --check rea-availability-filter.user.js && node --test test/*.test.js",
     "test": "node --test test/*.test.js",
     "e2e": "node test/e2e/smoke.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
   }
 }
