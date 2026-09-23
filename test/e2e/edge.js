@@ -251,7 +251,13 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: excluded');
     const noPets = await page.$$eval('.rf-item', (e) => e.length);
     assert.equal(noPets, total - withPets);
-    assert.ok(await page.$('article > .rf-badge .rf-b-pets'), 'Pets OK badge on an REA card');
+    // Badges are drawn asynchronously (debounced annotate): wait rather than check instantly.
+    // On failure, dump what the cards and rows actually hold (CI failed here twice, not locally).
+    await page.waitForSelector('article > .rf-badge .rf-b-pets', { timeout: 5000 }).catch(async (e) => {
+      console.log('DIAG badges:', await page.$$eval('article', (a) => a.map((x) => `${x.dataset.rfId}:${x.querySelector('.rf-badge')?.textContent ?? '(none)'}`)));
+      console.log('DIAG rows:', await page.evaluate(() => (window.reaFilter.rows() || []).slice(0, 6).map((r) => `${r.id} pets=${r.amen?.pets} text=${(r.text || '').slice(0, 60)}`)));
+      throw e;
+    });
     await page.click('.rf-clear');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: any');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
