@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.13.1
+
+- Tab-cached results from older versions are refetched so heads-up tags show on them.
+
 ## 2.13.0
 
 - **Hide if mentioned**: exclude listings whose text mentions a heads-up term (short lease, water charged, fees, higher offers, strata approval, lease-break terms); each shows as a removable chip.
