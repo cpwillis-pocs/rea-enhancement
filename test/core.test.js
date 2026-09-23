@@ -19,11 +19,16 @@ test('parseAvail: formats', () => {
   assert.equal(p('Available 05/11/2026'), '2026-11-5');
   assert.equal(p('Available 5-11-26'), '2026-11-5');
   assert.equal(p('Available 31/02/2026'), null);
+  assert.equal(p('Available 1st of December'), '2026-12-1');
+  assert.equal(p('Available 31 Feb 2027'), null);
+  assert.equal(p('Available 29 Feb 2028'), '2028-2-29');
+  assert.equal(p('Available Sept 30'), '2026-9-30');
+  assert.equal(p('Available Mayfair 3'), null);
 });
 
 test('parseAvail: year rollover for year-less dates', () => {
   assert.equal(ymd(core.parseAvail('Available 3 Jan', NOW)), '2027-1-3');
-  assert.equal(ymd(core.parseAvail('Available 1 Sep', NOW)), '2026-9-1');
+  assert.equal(ymd(core.parseAvail('Available 1 Sep', NOW)), '2026-9-23', 'past dates clamp to today');
 });
 
 test('parsePrice', () => {
@@ -35,6 +40,11 @@ test('parsePrice', () => {
   assert.equal(core.parsePrice('$2600 pcm'), 600);
   assert.equal(core.parsePrice('$52,000 p.a.'), 1000);
   assert.equal(core.parsePrice('$52k per annum'), 1000);
+  assert.equal(core.parsePrice('$750 Kensington'), 750);
+  assert.equal(core.parsePrice('$450 keys on request'), 450);
+  assert.equal(core.parsePrice('$800 pw / $3,466 pcm'), 800);
+  assert.equal(core.parsePrice('$700 per week, pa included'), 700);
+  assert.equal(core.parsePrice('$600 per week (a month free)'), 600);
 });
 
 test('extractResults: reads nested cache', () => {
@@ -151,6 +161,9 @@ test('toCsv / toTsv: quoting, formatting, formula guard', () => {
   assert.ok(csv[1].includes('"1 ""The"" Rd, Bondi"'));
   assert.ok(csv[1].includes(`"'=HYPERLINK(""x"")"`));
   assert.ok(csv[1].includes(',yes,'));
+  const inj = core.toRow(listing({ title: '-2+HYPERLINK("http://x","y")', address: { display: { fullAddress: '-1+1' } } }), false);
+  const line = core.toCsv([inj]).split('\r\n')[1];
+  assert.ok(line.includes(`'-1+1`) && line.includes(`"'-2+HYPERLINK`), line);
   const tsv = core.toTsv([r]).split('\n');
   assert.equal(tsv[1].split('\t').length, tsv[0].split('\t').length);
 });
@@ -191,4 +204,11 @@ test('toRow/rowsFrom: reshaped fields degrade instead of throwing', () => {
   assert.equal(r.beds, '');
   const rows = core.rowsFrom({ exact: { items: [{ listing: listing() }, { listing: null }, {}] }, surrounding: null });
   assert.equal(rows.length, 1);
+});
+
+test('applyFilters: dedupe keeps exact copy over surrounding', () => {
+  const near = core.toRow(listing({ id: 'z' }), true);
+  const exact = core.toRow(listing({ id: 'z' }), false);
+  assert.equal(core.applyFilters([near, exact], { exactOnly: true }).length, 1);
+  assert.equal(core.applyFilters([near, exact], {})[0].surrounding, false);
 });

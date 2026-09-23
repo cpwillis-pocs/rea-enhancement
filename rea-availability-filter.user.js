@@ -94,43 +94,58 @@
 
   // ------------------------------------------------------------ extraction
 
-  const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+  const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
   // "Available now" -> today, so it survives a from-date of today or earlier
   // and is correctly excluded by a future from-date.
   // Parsed by hand: Date() on "Mon 12th Oct" is engine-specific and, lacking a year,
   // Chrome yields 2001. A year-less date more than ~2 months past rolls to next year.
+  // A date already past means "available now", so it is clamped to today and treated alike.
   const parseAvail = (display, now = new Date()) => {
     if (!display) return null;
     const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const clamp = (d) => (d < today ? today : d);
     if (/\bnow\b/i.test(display)) return today;
     // AU numeric order: dd/mm/yyyy, dd-mm-yy
     const num = display.match(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})\b/);
     if (num) {
       const d = new Date(+num[3] < 100 ? 2000 + +num[3] : +num[3], +num[2] - 1, +num[1]);
-      return isNaN(d) || d.getDate() !== +num[1] ? null : d;
+      return isNaN(d) || d.getDate() !== +num[1] ? null : clamp(d);
     }
-    // "12th Oct 2026" or "October 12, 2026"
-    const dm = display.match(/(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3})[a-z]*\.?(?:,?\s+(\d{4}))?/i);
-    const md = !dm && display.match(/\b([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?/i);
-    const [day, mon, yr] = dm ? [dm[1], dm[2], dm[3]] : md ? [md[2], md[1], md[3]] : [];
-    if (!mon || !(mon.toLowerCase() in MONTHS)) return null;
-    const month = MONTHS[mon.toLowerCase()];
-    let year = yr ? +yr : today.getFullYear();
-    let d = new Date(year, month, +day);
-    if (!yr && today - d > 60 * 864e5) d = new Date(++year, month, +day);
-    return isNaN(d) ? null : d;
+    // "12th Oct 2026", "1st of December", "October 12, 2026". Every candidate is tried so
+    // words like "Available" (-> "ava") or weekdays don't shadow the real month.
+    const cands = [
+      ...[...display.matchAll(/(\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+([a-z]{3,})\.?(?:,?\s+(\d{4}))?/gi)].map((m) => [m[1], m[2], m[3]]),
+      ...[...display.matchAll(/\b([a-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/gi)].map((m) => [m[2], m[1], m[3]]),
+    ];
+    for (const [day, word, yr] of cands) {
+      const w = word.toLowerCase();
+      const month = MONTH_NAMES.findIndex((n) => n.startsWith(w));
+      if (month < 0) continue;
+      let year = yr ? +yr : today.getFullYear();
+      let d = new Date(year, month, +day);
+      if (!yr && today - d > 60 * 864e5) d = new Date(++year, month, +day);
+      if (d.getDate() !== +day) return null; // 31 Feb, 29 Feb in a non-leap year
+      return clamp(d);
+    }
+    return null;
   };
 
   // Weekly rent as a number. Ranges take the lower bound; monthly/annual figures are
   // converted so mixed listings sort and filter on one scale. Unparseable -> Infinity.
   const parsePrice = (display) => {
     const s = (display || '').replace(/,/g, '');
-    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k)?/i);
+    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k\b)?/i);
     if (!m) return Infinity;
     let v = +m[1] * (m[2] ? 1000 : 1);
-    if (/\b(per\s*month|p\.?\s*c\.?\s*m|pcm|monthly|\/\s*month|a\s*month)\b/i.test(s)) v = (v * 12) / 52;
-    else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|\/\s*year)\b/i.test(s)) v /= 52;
+    // Period is read from the text after this figure, up to the next $ amount, so
+    // "$800 pw / $3,466 pcm" and "$600 per week (a month free)" stay weekly.
+    const tail = s.slice(m.index + m[0].length).split('$')[0];
+    const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
+    if (!weekly) {
+      if (/\b(per\s*month|p\.?\s*c\.?\s*m|pcm|monthly|a\s*month)\b|\/\s*m(on)?th\b/i.test(tail)) v = (v * 12) / 52;
+      else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(ea)?r\b/i.test(tail)) v /= 52;
+    }
     return Math.round(v);
   };
 
@@ -339,9 +354,10 @@
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
     const sameDay = (ms) => { const d = new Date(ms); return d.getFullYear() === insDay.getFullYear() && d.getMonth() === insDay.getMonth() && d.getDate() === insDay.getDate(); };
-    const seen = new Set();
-    return rows
-      .filter((r) => r.url && !seen.has(r.url) && seen.add(r.url))
+    // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
+    const byUrl = new Map();
+    for (const r of rows) if (r.url && (!byUrl.has(r.url) || byUrl.get(r.url).surrounding && !r.surrounding)) byUrl.set(r.url, r);
+    return [...byUrl.values()]
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
@@ -367,8 +383,9 @@
     if (typeof v === 'boolean') return v ? 'yes' : '';
     return String(v ?? '').replace(/\s+/g, ' ').trim();
   };
-  // Spreadsheet formula injection guard (OWASP): neutralise leading = + @ and -<non-numeric>.
-  const safeCell = (v) => (/^[=+@\t\r]|^-(?![\d.]|$)/.test(v) ? `'${v}` : v);
+  // Spreadsheet formula injection guard (OWASP): neutralise leading = + @ tab CR, and any
+  // leading - that isn't a plain negative number ("-1+1" evaluates in Excel/Sheets).
+  const safeCell = (v) => (/^[=+@\t\r]|^-(?!\d+(\.\d+)?$)/.test(v) ? `'${v}` : v);
   const table = (rows) => [EXPORT_COLS.map(([, h]) => h)].concat(rows.map((r) => EXPORT_COLS.map(([k]) => safeCell(cellValue(r, k)))));
 
   const toTsv = (rows) => table(rows).map((cols) => cols.map((c) => c.replace(/\t/g, ' ')).join('\t')).join('\n');
