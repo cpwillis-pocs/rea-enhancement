@@ -29,6 +29,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Rent vs median** for the same bed count in your results (eg "12% below median 2-bed").
 - **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
+- **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval and lease-break terms, picked out of the listing text.
 - **Household income** (optional): rent as a share of income, flagged over 30%.
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.

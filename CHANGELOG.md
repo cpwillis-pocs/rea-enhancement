@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.12.0
+
+- **Heads-up tags** from the listing text: short lease, water usage charged, fees mentioned, invites higher offers, subject to strata approval, lease-break terms. Shown on listings, in Compare and in exports; "no application fee" isn't flagged.
+- **Search the shortlist** by address, note, agency, suburb or status (`/` on the Shortlist tab).
+- Settings shows how much this script stores in your browser, with **Delete all my data** (removes only this script's keys).
+
 ## 2.11.0
 
 - **Listing page bar**: on a property page, shortlist, set the application status, add a note or hide the listing; shows price/date changes and when you first saw it.
