@@ -397,7 +397,7 @@
   // A date already past means "available now", so it is clamped to today and treated alike.
   const parseAvail = (display, now = new Date()) => {
     if (!display) return null;
-    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const today = startOfDay(now);
     const clamp = (d) => (d < today ? today : d);
     if (/\bnow\b/i.test(display)) return today;
     // AU numeric order: dd/mm/yyyy, dd-mm-yy
@@ -670,12 +670,38 @@
     return [...byUrl.values()];
   };
 
-  // Last day a rolling "within N days" window allows, as yyyy-mm-dd (or '').
-  const windowEnd = (days, now = new Date()) => {
+  // End (23:59:59 local) of a rolling "within N days" window, or null; windowEnd as yyyy-mm-dd.
+  const windowEndDate = (days, now = new Date()) => {
     const n = num(days);
-    if (n == null) return '';
-    const w = new Date(now); w.setDate(w.getDate() + n);
-    return ymdLocal(w);
+    if (n == null) return null;
+    const w = new Date(now); w.setHours(23, 59, 59, 0); w.setDate(w.getDate() + n);
+    return w;
+  };
+  const windowEnd = (days, now = new Date()) => { const w = windowEndDate(days, now); return w ? ymdLocal(w) : ''; };
+
+  const startOfDay = (d = new Date()) => { const t = new Date(d); t.setHours(0, 0, 0, 0); return t; };
+  const isFresh = (r) => !!(r.isNew || r.sinceLast); // new: REA-dated recently, or since the last visit
+  const priceDir = (r) => (r.priceDelta < 0 ? 'down' : 'up');
+
+  // Settings that can't match anything, as a message for the status line ('' if fine).
+  const cfgError = (cfg, now = new Date()) => {
+    if (cfg.from && cfg.to && cfg.from > cfg.to) return '"Available from" is after "Available to".';
+    const wEnd = windowEnd(cfg.withinDays, now);
+    if (cfg.from && wEnd && cfg.from > wEnd) return `"Available from" is after the "within" window (ends ${wEnd}).`;
+    if (cfg.priceMin !== '' && cfg.priceMax !== '' && num(cfg.priceMin) != null && num(cfg.priceMax) != null && +cfg.priceMin > +cfg.priceMax) return 'Min $/wk is above max $/wk.';
+    return '';
+  };
+
+  // Counts for the status line over the deduped rows.
+  const diffStats = (rows) => {
+    let fresh = 0, moved = 0, hidden = 0;
+    for (const r of dedupe(rows)) { fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; hidden += r.hidden ? 1 : 0; }
+    return { fresh, moved, hidden };
+  };
+
+  const ago = (ms) => {
+    const m = Math.floor(ms / 60e3); // floor: 30s is "just now", not "1 min ago"
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
   };
 
   // Undated listings ("Contact agent") can't satisfy a date bound, but are kept
@@ -687,21 +713,18 @@
     let to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
     // Rolling window ("within 4 weeks") tightens the upper bound relative to today, so a
     // saved setting never goes stale the way a fixed date does.
-    const within = num(cfg.withinDays);
-    if (within != null) {
-      const w = new Date(now); w.setHours(23, 59, 59, 0); w.setDate(w.getDate() + within);
-      if (!to || w < to) to = w;
-    }
+    const w = windowEndDate(cfg.withinDays, now);
+    if (w && (!to || w < to)) to = w;
     const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax);
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const insDay = cfg.inspectOn ? new Date(cfg.inspectOn + 'T00:00:00') : null;
-    const sameDay = (ms) => { const d = new Date(ms); return d.getFullYear() === insDay.getFullYear() && d.getMonth() === insDay.getMonth() && d.getDate() === insDay.getDate(); };
+    const sameDay = (ms) => startOfDay(new Date(ms)).getTime() === insDay.getTime();
     return dedupe(rows)
       .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
       .filter((r) => cfg.showHidden || !r.hidden)
       .filter((r) => cfg.showGone || !r.gone)
-      .filter((r) => !cfg.newOnly || r.isNew || r.sinceLast)
+      .filter((r) => !cfg.newOnly || isFresh(r))
       .filter((r) => !cfg.onlyStarred || r.starred)
       .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
       .filter((r) => (pMin == null || (isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
@@ -738,20 +761,6 @@
   const toTsv = (rows) => table(rows).map((cols) => cols.map((c) => c.replace(/\t/g, ' ')).join('\t')).join('\n');
   const toCsv = (rows) => table(rows).map((cols) => cols.map((c) => (/[",\n\r]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\r\n');
 
-  function download(name, text, type) {
-    const blob = new Blob([text], { type });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  }
-  const stamp = () => ymdLocal(new Date());
-  // BOM so Excel opens UTF-8 (en dashes, accented suburbs) correctly.
-  const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
-  const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
   // Heuristic drift detection: parsing "worked" but the fields we depend on are gone.
   function schemaWarnings(rows) {
@@ -782,12 +791,27 @@
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG, sanitizeCfg, itemsOf, sampleOf,
+      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, DEFAULT_CFG, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
 
   // ------------------------------------------------------------------- ui
+
+  function download(name, text, type) {
+    const blob = new Blob([text], { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+  const stamp = () => ymdLocal(new Date());
+  // BOM so Excel opens UTF-8 (en dashes, accented suburbs) correctly.
+  const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
+  const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
   // Colours are tokens on #rf-panel so the dark scheme only swaps values.
   const css = `
@@ -1268,27 +1292,14 @@
 
   function showResults(note = '') {
     if (ui.view === 'shortlist') return; // results update in the background; shown on tab switch
-    if (cfg.from && cfg.to && cfg.from > cfg.to) {
-      render([]);
-      return setStatus('"Available from" is after "Available to".', true);
-    }
-    const wEnd = windowEnd(cfg.withinDays);
-    if (cfg.from && wEnd && cfg.from > wEnd) {
-      render([]);
-      return setStatus(`"Available from" is after the "within" window (ends ${wEnd}).`, true);
-    }
-    const priceMin = +cfg.priceMin, priceMax = +cfg.priceMax;
-    if (cfg.priceMin !== '' && cfg.priceMax !== '' && priceMin > priceMax) {
-      render([]);
-      return setStatus('Min $/wk is above max $/wk.', true);
-    }
+    const err = cfgError(cfg);
+    if (err) { render([]); return setStatus(err, true); }
     const rows = applyFilters(pool(), cfg);
     render(rows);
-    let nNew = 0, nMoved = 0, nHidden = 0;
-    for (const r of dedupe(cache)) { nNew += r.isNew || r.sinceLast ? 1 : 0; nMoved += r.prevPrice ? 1 : 0; nHidden += r.hidden ? 1 : 0; }
+    const st = diffStats(cache);
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
-    const extra = [nNew && `${nNew} new${since}`, gone.length && `${gone.length} no longer listed`, nMoved && `${nMoved} price changed`,
-      !cfg.showHidden && nHidden && `${nHidden} hidden`].filter(Boolean).join(' · ');
+    const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`,
+      !cfg.showHidden && st.hidden && `${st.hidden} hidden`].filter(Boolean).join(' · ');
     setStatus(`${rows.length} of ${cache.length} listings match.${extra ? ` ${extra}.` : ''}` +
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : ''));
@@ -1322,8 +1333,8 @@
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.gone ? '<span class="rf-tag rf-gone">no longer listed</span>' : r.isNew || r.sinceLast ? '<span class="rf-tag rf-new">new</span>' : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
-          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${r.priceDelta < 0 ? 'down' : 'up'}">was ${esc(r.prevPrice)}</span>` : ''}</div>
+          <div class="rf-avail">${esc(r.available)}${r.gone ? '<span class="rf-tag rf-gone">no longer listed</span>' : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}</div>
+          <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           <div class="rf-meta">${esc([
             r.beds !== '' ? `${r.beds} bed` : '',
@@ -1346,11 +1357,6 @@
       </div>
       </div>`).join('');
   }
-
-  const ago = (ms) => {
-    const m = Math.round(ms / 60e3);
-    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
-  };
 
   function fillTypes(rows) {
     const types = [...new Set(rows.map((r) => r.type).filter(Boolean))].sort();
@@ -1478,15 +1484,15 @@
   };
 
   const badgeHtml = (r) => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = startOfDay();
     const avail = r.avail
       ? r.avail <= today ? '<span class="rf-b-now">Available now</span>' : `<span>Avail ${esc(r.available.replace(/^(from\s+)/i, ''))}</span>`
       : '<span class="rf-b-none">No date</span>';
     const insp = r.nextInspect ? `<span>Insp ${esc(fmtWhen(r.nextInspect))}</span>` : '';
     const ppb = ppbLabel(r) ? `<span>${ppbLabel(r)}</span>` : '';
     const star = r.starred ? '<span class="rf-b-star">★ Shortlisted</span>' : '';
-    const fresh = r.isNew || r.sinceLast ? '<span class="rf-b-new">New</span>' : '';
-    const moved = r.prevPrice ? `<span class="rf-b-${r.priceDelta < 0 ? 'down' : 'up'}">Was ${esc(r.prevPrice)}</span>` : '';
+    const fresh = isFresh(r) ? '<span class="rf-b-new">New</span>' : '';
+    const moved = r.prevPrice ? `<span class="rf-b-${priceDir(r)}">Was ${esc(r.prevPrice)}</span>` : '';
     return star + fresh + avail + moved + insp + ppb;
   };
 

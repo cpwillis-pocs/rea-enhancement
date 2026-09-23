@@ -251,3 +251,24 @@ test('itemsOf / sampleOf / rowsFrom tolerate non-array items', () => {
   assert.deepEqual(core.rowsFrom({ exact: { items: 5 }, surrounding: { items: null } }), []);
   assert.equal(core.sampleOf({ exact: { items: [{}, { listing: { id: 1 } }] } }).id, 1);
 });
+
+test('cfgError: conflicting settings explained', () => {
+  const now = new Date(2026, 8, 23);
+  const d = (o) => core.cfgError({ ...core.DEFAULT_CFG, ...o }, now);
+  assert.equal(d({}), '');
+  assert.match(d({ from: '2026-11-01', to: '2026-10-01' }), /after "Available to"/);
+  assert.match(d({ from: '2026-12-01', withinDays: '14' }), /within" window \(ends 2026-10-07\)/);
+  assert.match(d({ priceMin: '900', priceMax: '500' }), /Min \$\/wk is above/);
+  assert.equal(d({ priceMin: '500', priceMax: '900' }), '');
+});
+
+test('diffStats / ago / isFresh', () => {
+  const a = core.toRow(listing({ id: 'a' }), false), b = core.toRow(listing({ id: 'b' }), true), b2 = core.toRow(listing({ id: 'b' }), false);
+  a.sinceLast = true; b.hidden = b2.hidden = true; b2.prevPrice = '$1';
+  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 1, hidden: 1 });
+  assert.equal(core.ago(30e3), 'just now');
+  assert.equal(core.ago(5 * 60e3), '5 min ago');
+  assert.equal(core.ago(3 * 36e5), '3h ago');
+  assert.equal(core.ago(2 * 864e5), '2d ago');
+  assert.equal(core.isFresh({ isNew: false, sinceLast: false }), false);
+});
