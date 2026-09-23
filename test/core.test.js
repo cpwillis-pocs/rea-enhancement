@@ -370,3 +370,15 @@ test('share links: round trip, notes opt-in, unicode, hostile input rejected', (
   const many = Array.from({ length: 50 }, (_, i) => ({ ...rows[0], id: String(146500100 + i) }));
   assert.equal(core.decodeShare(core.encodeShare(many)).length, 30, 'capped');
 });
+
+test('planDay / inspectDays: order, clash, tight by distance, ok', () => {
+  const d = (h, m) => new Date(2026, 8, 26, h, m).getTime();
+  const R = (id, at, lat) => ({ id, url: `https://www.realestate.com.au/p-${id}`, address: id, price: '$1', lat, lng: 151.27, inspections: [{ at, label: id }] });
+  const rows = [R('c', d(11, 0), -33.95), R('a', d(10, 0), -33.89), R('b', d(10, 10), -33.891), R('far', d(12, 0), -34.3), R('other', d(9, 0) + 864e5, -33.9)];
+  assert.deepEqual(core.inspectDays(rows).map((x) => [x.day, x.n]), [['2026-09-26', 4], ['2026-09-27', 1]]);
+  const plan = core.planDay(rows, '2026-09-26');
+  assert.deepEqual(plan.map((x) => x.r.id), ['a', 'b', 'c', 'far']);
+  assert.equal(plan[1].flag, 'clash', '10:10 starts before 10:00 + 15 min ends');
+  assert.equal(plan[2].flag, '', '11:00 after 10:25, ~6.6 km: 35 min gap is fine');
+  assert.equal(plan[3].flag, 'tight', '45 min gap but ~39 km away');
+});

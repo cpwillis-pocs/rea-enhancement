@@ -1283,6 +1283,33 @@
   const shareUrl = (rows, opts) => `https://www.realestate.com.au/rent/#${SHARE_PARAM}=${encodeShare(rows, opts)}`;
   const shareFromHash = (hash) => { const m = String(hash || '').match(new RegExp(`[#&]${SHARE_PARAM}=([A-Za-z0-9_-]+)`)); return m ? decodeShare(m[1]) : null; };
 
+  // Inspection planner: one day's shortlisted inspections in order, with clashes and gaps too
+  // short for the straight-line distance flagged. A rough guide, not a route planner.
+  const PLAN_MIN_PER_KM = 2; // ~30 km/h door to door in traffic
+  const PLAN_MIN_GAP = 10; // minutes between inspections below which it's "tight" regardless of distance
+  const inspectDays = (rows) => {
+    const days = new Map();
+    for (const r of rows) for (const i of r.inspections || []) if (typeof i.at === 'number') {
+      const k = ymdLocal(new Date(i.at));
+      days.set(k, (days.get(k) || 0) + 1);
+    }
+    return [...days].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, n]) => ({ day, n }));
+  };
+  const planDay = (rows, day) => {
+    const slots = [];
+    for (const r of rows) for (const i of r.inspections || []) {
+      if (typeof i.at === 'number' && ymdLocal(new Date(i.at)) === day) slots.push({ r, at: i.at, end: i.at + INSPECT_MINUTES * 60e3, label: i.label });
+    }
+    slots.sort((a, b) => a.at - b.at);
+    for (let k = 1; k < slots.length; k++) {
+      const prev = slots[k - 1], cur = slots[k];
+      cur.gapMin = Math.round((cur.at - prev.end) / 60e3);
+      cur.km = prev.r.lat != null && cur.r.lat != null ? Math.round(haversineKm(prev.r, cur.r) * 10) / 10 : null;
+      cur.flag = cur.at < prev.end ? 'clash' : cur.gapMin < Math.max(PLAN_MIN_GAP, (cur.km ?? 0) * PLAN_MIN_PER_KM) ? 'tight' : '';
+    }
+    return slots;
+  };
+
   // Printable shortlist: a standalone HTML document (all text escaped), light theme forced.
   const printHtml = (rows, now = new Date()) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Rental shortlist ${ymdLocal(now)}</title><style>
@@ -1340,7 +1367,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, printHtml, inspectDays, planDay, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -1513,6 +1540,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
   .rf-share-in[hidden]{display:none}
   .rf-share-in .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-share-msg{font-weight:600;margin-right:auto}
+  .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
+  .rf-plan[hidden]{display:none}
+  .rf-planner{padding:8px 12px}
+  .rf-plan-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:600;margin-bottom:6px}
+  .rf-plan-head .rf-btn{flex:0 0 auto;margin-left:auto;padding:5px 10px;font-size:12px}
+  .rf-planner ol{list-style:none;margin:0;padding:0}
+  .rf-planner li{padding:8px 0;border-top:1px solid var(--rf-line)}
+  .rf-planner li a{color:inherit;font-weight:600}
+  .rf-plan-t{display:inline-block;min-width:64px;font-weight:700;color:var(--rf-accent-fg)}
+  .rf-planner li.rf-clash .rf-meta,.rf-planner li.rf-tight .rf-meta{color:#b45309;font-weight:600}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-chip{border:1px solid var(--rf-input);background:var(--rf-bg);color:var(--rf-fg);border-radius:999px;padding:4px 10px;
@@ -1620,6 +1657,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
           <option value="">Bulk…</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="status:${v}">Mark shown: ${v}</option>`).join('')}
           <option value="unstar-declined">Remove declined</option><option value="unstar">Remove all shown</option>
         </select>
+        <select class="rf-plan" aria-label="Plan an inspection day"></select>
         <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
           <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
           <option value="-">Not started</option>
@@ -1740,6 +1778,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       slCount: panel.querySelector('.rf-count'),
       slFile: panel.querySelector('.rf-sl-bar input[type=file]'),
       slFilter: panel.querySelector('.rf-sl-filter'),
+      plan: panel.querySelector('.rf-plan'),
       bulk: panel.querySelector('.rf-bulk'),
       preset: panel.querySelector('.rf-preset'),
       slBulk: panel.querySelector('.rf-sl-bulk'),
@@ -1923,6 +1962,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
 
     for (const tab of ui.tabs) tab.addEventListener('click', () => setView(tab.dataset.view));
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    ui.plan.addEventListener('change', () => {
+      ui.planDay = ui.plan.value || null;
+      if (ui.planDay && ui.compare) ui.slBar.querySelector('[data-sl=compare]').click(); // one view at a time
+      renderShortlist();
+    });
     ui.preset.addEventListener('change', () => {
       const v = ui.preset.value;
       ui.preset.value = '';
@@ -2014,6 +2058,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       shareIn.hidden = true;
       ui.pendingShare = null;
     });
+    ui.list.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-plan-ics]') || !ui.planDay) return;
+      const day = ui.planDay;
+      const rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdLocal(new Date(i.at)) === day) }));
+      downloadIcs(rows);
+    });
     ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
       const rows = shortlistRows();
       if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
@@ -2026,6 +2076,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     });
     ui.slBar.querySelector('[data-sl=compare]').addEventListener('click', (e) => {
       ui.compare = !ui.compare;
+      if (ui.compare) { ui.planDay = null; ui.plan.value = ''; }
       e.currentTarget.setAttribute('aria-pressed', String(ui.compare));
       ui.panel.classList.toggle('rf-wide', ui.compare);
       renderShortlist();
@@ -2093,7 +2144,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     for (const r of rows) r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
     ui.rows = rows;
     setExport(rows.length === 0);
+    const days = inspectDays(rows);
+    ui.plan.innerHTML = `<option value="">Plan a day…</option>` + days.map(({ day, n }) =>
+      `<option value="${day}">${esc(shortDate(day))} (${n} inspection${n === 1 ? '' : 's'})</option>`).join('');
+    if (ui.planDay && !days.some((d) => d.day === ui.planDay)) ui.planDay = null;
+    ui.plan.value = ui.planDay || '';
+    ui.plan.hidden = !days.length;
     ui.list.innerHTML = !rows.length ? '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>'
+      : ui.planDay ? planHtml(planDay(rows, ui.planDay), ui.planDay)
       : ui.compare ? compareHtml(rows.slice(0, COMPARE_MAX))
       : itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     setStatus(rows.length ? `${rows.length} shortlisted across all searches. Details are as last seen.` : '');
@@ -2201,6 +2259,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     ui.list.innerHTML = itemsHtml(rows.slice(0, RENDER_CHUNK)) + moreHtml(rows.length - RENDER_CHUNK);
     ui.list.scrollTop = 0;
+  }
+
+  function planHtml(slots, day) {
+    const t = (ms) => new Date(ms).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
+    const clashes = slots.filter((x) => x.flag).length;
+    return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${slots.length} inspection${slots.length === 1 ? '' : 's'}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
+      <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
+      <ol>${slots.map((x) => `<li class="${x.flag ? `rf-${x.flag}` : ''}"><span class="rf-plan-t">${t(x.at)}</span>
+        <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>
+        ${x.gapMin != null ? `<div class="rf-meta">${x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
+      </li>`).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance.</div></div>`;
   }
 
   // Side-by-side comparison: one column per listing, best value per row highlighted.

@@ -521,6 +521,29 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await done(b); await ctxB.close();
   }
 
+  // 24. Planner: choose a day, see ordered inspections with clashes flagged; day calendar export.
+  {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('#rf-run'); await waitStatus(page, /listings match/);
+    await page.click('#rf-more summary');
+    await page.selectOption('#rf-sort', 'inspect');
+    for (const n of [1, 2, 3, 4]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    const days = await page.$$eval('.rf-plan option', (o) => o.map((x) => x.value).filter(Boolean));
+    assert.ok(days.length >= 1, 'days offered');
+    await page.selectOption('.rf-plan', days[0]);
+    const n = await page.$$eval('.rf-planner li', (e) => e.length);
+    assert.ok(n >= 1);
+    if (n > 1) assert.ok(await page.$('.rf-planner li.rf-clash'), 'same-time fixtures clash');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-plan-ics]')]);
+    assert.equal((fs.readFileSync(await dl.path(), 'utf8').match(/BEGIN:VEVENT/g) || []).length, n);
+    await page.selectOption('.rf-plan', '');
+    assert.ok(await page.$$eval('.rf-item', (e) => e.length) === 4);
+    console.log('planner:', days.length, 'days;', n, 'on', days[0]);
+    await done(page); await ctx.close();
+  }
+
   assert.deepEqual(errors, [], 'no page errors');
   cov.report(SCRIPT);
   await browser.close();
