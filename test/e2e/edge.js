@@ -813,7 +813,8 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
     await page.click('[data-view=shortlist]');
     await page.hover(`.rf-item[data-id="${ids[2]}"]`); await page.check(`input[data-cmp="${ids[2]}"]`);
-    await page.hover(`.rf-item[data-id="${ids[0]}"]`); await page.check(`input[data-cmp="${ids[0]}"]`);
+    await page.focus(`.rf-item[data-id="${ids[0]}"]`); await page.keyboard.press('x');
+    assert.ok(await page.isChecked(`input[data-cmp="${ids[0]}"]`), 'x ticks Compare');
     await page.click('[data-sl=compare]');
     assert.equal(await page.$$eval('.rf-compare thead th', (e) => e.length), 2, 'only ticked listings compared');
     console.log('copy / hide suburb / compare selection: ok');

@@ -2106,7 +2106,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <div class="rf-help" hidden>
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
+        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
         <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
       </div>
       <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
@@ -2209,6 +2209,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         case 'h': act('h'); return true;
         case 'n': act('n'); return true;
         case 'c': act('copy'); return true;
+        case 'x': { const box = (cur || items[0]).querySelector('input[data-cmp]'); box?.click(); return !!box; }
         // Enter opens only when the item itself is focused; on a button it presses the button.
         case 'o': case 'Enter': if (!cur || (e.key === 'Enter' && document.activeElement !== cur)) return false; cur.querySelector('.rf-card')?.click(); return true;
         default: return false;
