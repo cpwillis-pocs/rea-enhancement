@@ -53,7 +53,8 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
 - **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time).
-- Price changes show "was $X" (hover for the full history). A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
+- **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly.
+- Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
 

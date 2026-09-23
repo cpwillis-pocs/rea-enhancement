@@ -2,6 +2,14 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.11.0
+
+- **Listing page bar**: on a property page, shortlist, set the application status, add a note or hide the listing; shows price/date changes and when you first saw it.
+- **Availability date changes** are tracked like price changes: "was 5 Oct" in the drawer, on REA's cards and in exports. A date simply arriving isn't a change. New filter **Price or date changed recently**; the status line counts date changes.
+- REA cards for shortlisted listings show your application status and note.
+- `m` toggles the Market view.
+- Fixed: Check all could re-save results after you turned remembering off, and could count from pages cached minutes earlier; clicking a week bar could widen your own date window, get the Market button out of step, or drop keyboard focus; discovery could skip a field that was nested under an empty branch on the first listing; remembered rows kept stale next-inspection times; a malformed field in a remembered search or shortlist entry could break that search.
+
 ## 2.10.0
 
 - **Market** view: weekly rent per bed count (median, middle half, range, per bed) and how many listings become available each week, over the listings your filters show; click a week to filter to it.
