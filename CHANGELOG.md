@@ -2,6 +2,16 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.16.1
+
+- Fixed: "Inspections available…" or "Parking available now" no longer read as the home's availability date; lease terms need the number next to "lease"/"term" ("renovated 3 months ago, lease…" isn't a 3-month lease; "12-mth lease" is 12); "Shop 3/12 Smith St" and "Suite 1, Level 2, 5 Smith St" group into their building; "Address on request" and number-less streets no longer count as twins.
+- Fixed: the building filter belongs to the search it was set on (not saved, not in presets, cleared when you change search) and overrides One per building; "N in this building" no longer counts listings you hid or that are gone, and the status says how many actually show.
+- Fixed: a lease end already past no longer shows overlap/gap; Least overlap breaks ties by rent.
+- Fixed: "Did you inspect?" still appears after REA drops the finished inspection from the listing; your answer survives a backup and restore.
+- CSV/TSV exports gain lease, apply-via and lease-fit columns; Add as a place won't add the same spot twice; the saved-search reminder counts the searches actually unchecked for a day, shows again on a new search, and goes away when reminders or remembering are turned off, or all data is deleted.
+- Faster: reading a results page is about 45% quicker (date and number formatters built once, lease patterns compiled once, the pool check skips most text), and list rendering does less per listing.
+- Tests: a clock-dependent end-to-end check that would have started failing this week is fixed; the edge suite runs in half the time and can run one scenario (`E2E_ONLY`); unit tests pass in any time zone (CI runs one Node version in Los Angeles time).
+
 ## 2.16.0
 
 - **Lease overlap**: set "My current lease ends" in Settings and each listing shows the overlap you'd pay ("6 days overlap ≈ $600") or the gap to cover ("9 nights gap"); new sort **Least overlap with my lease** and a Compare row.
