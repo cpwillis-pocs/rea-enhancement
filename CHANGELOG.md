@@ -2,6 +2,14 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## Unreleased
+
+- Listing actions now sit in a row under each listing (always visible, keyboard and touch friendly): Shortlist, Hide, Note, Copy; Hide suburb / Hide agency behind "⋯".
+- **Copy** a listing's summary (price, address, availability, beds, move-in, inspections, link) for messaging; `c` key.
+- **Hide suburb** (undo; unhide from More filters), alongside Hide agency.
+- **Compare** only the listings you tick.
+- Price history is stored only after a real change (less storage).
+
 ## 2.8.0
 
 - **Re-check** the shortlist: fetches each shortlisted listing's page (one at a time, polite delay, only when you click) to update price, availability and inspections, and tags listings REA has taken down as "no longer listed".
