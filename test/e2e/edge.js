@@ -271,6 +271,12 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: any');
     assert.equal(await page.$$eval('.rf-item', (e) => e.length), total);
     assert.ok(await page.$('.rf-watch span:has-text("Water usage charged")'), 'heads-up tag from description');
+    await page.click('[data-nowatch=water]');
+    assert.equal(await page.getAttribute('[data-nowatch=water]', 'aria-pressed'), 'true');
+    assert.equal(await page.$('.rf-watch span:has-text("Water usage charged")'), null, 'hidden when excluded');
+    assert.ok(await page.$('.rf-achip:has-text("No water usage charged")'), 'chip shown');
+    await page.click('.rf-achip:has-text("No water usage charged")');
+    assert.equal(await page.getAttribute('[data-nowatch=water]', 'aria-pressed'), 'false');
     console.log('amenities:', withPets, 'with pets,', noPets, 'without, of', total);
     await done(page); await ctx.close();
   }

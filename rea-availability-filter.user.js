@@ -992,6 +992,7 @@
     { id: 'break', label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)? fee|\blease[- ]break (?:fee|cost|clause)/ },
   ];
   const watchOf = (text) => WATCHOUTS.filter((w) => w.re.test(String(text || '').toLowerCase())).map((w) => w.id);
+  const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
 
   // Distance from a user-chosen point. Accepts "-33.87, 151.21" or a Google Maps URL/text
@@ -1149,7 +1150,7 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
-    remember: true, newOnly: false, changedOnly: false, showGone: false, income: '',
+    remember: true, newOnly: false, changedOnly: false, noWatch: '', showGone: false, income: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1161,9 +1162,9 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'staleOnly', 'amenities', 'maxKm', 'floorplanOnly'];
+    'inspectOn', 'hideNoImage', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly'];
   const MORE_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword', 'hideNoImage', 'inspectOn',
-    'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
+    'onlyStarred', 'showHidden', 'newOnly', 'changedOnly', 'noWatch', 'showGone', 'staleOnly', 'amenities', 'anchor', 'maxKm', 'floorplanOnly'];
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'anchor', 'income']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
@@ -1275,11 +1276,14 @@
           const a = AMENITIES.find((x) => x.id === id);
           out.push({ key: k, amen: id, label: `${st === 'yes' ? '+' : '−'} ${a.label}` });
         }
+      } else if (k === 'noWatch') {
+        for (const id of watchIds(v)) out.push({ key: k, watch: id, label: `No ${WATCHOUTS.find((w) => w.id === id).label.toLowerCase()}` });
       } else if (k !== 'maxKm' || parseAnchor(cfg.anchor)) out.push({ key: k, label: CHIP_LABELS[k] ? CHIP_LABELS[k](v) : k });
     }
     return out;
   };
   const without = (cfg, chip) => {
+    if (chip.watch) return { ...cfg, noWatch: watchIds(cfg.noWatch).filter((id) => id !== chip.watch).join(',') };
     if (!chip.amen) return { ...cfg, [chip.key]: DEFAULT_CFG[chip.key] };
     const st = parseAmenCfg(cfg.amenities);
     delete st[chip.amen];
@@ -1399,6 +1403,7 @@
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const amenReq = Object.entries(parseAmenCfg(cfg.amenities));
+    const noWatch = watchIds(cfg.noWatch);
     // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
     for (const r of rows) r.km = anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null;
@@ -1411,6 +1416,7 @@
       .filter((r) => cfg.showGone || !r.gone)
       .filter((r) => !cfg.newOnly || isFresh(r))
       .filter((r) => !cfg.changedOnly || !!(r.prevPrice || r.prevAvail))
+      .filter((r) => !noWatch.length || !String(r.watch || '').split(',').some((id) => noWatch.includes(id)))
       .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
       .filter((r) => kmMax == null || !anchor || (r.km != null && r.km <= kmMax)) // no location fails a distance cap
       .filter((r) => amenReq.every(([id, st]) => (st === 'yes' ? r.amen?.[id] === 'yes' : r.amen?.[id] !== 'yes')))
@@ -2045,6 +2051,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
             <input type="hidden" id="rf-amenities">
             ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
           </div>
+          <div class="rf-amen rf-nowatch" role="group" aria-label="Hide listings whose text mentions">
+            <span class="rf-label">Hide if mentioned</span><input type="hidden" id="rf-noWatch">
+            ${WATCHOUTS.map((w) => `<button type="button" class="rf-chip" data-nowatch="${w.id}" aria-pressed="false">${w.label}</button>`).join('')}
+          </div>
           <div class="rf-dist">
             <label>Distance from<input type="text" id="rf-anchor" placeholder="-33.87, 151.21 or a Google Maps link" autocomplete="off"></label>
             <label>Max km<input type="number" min="0" step="1" id="rf-maxKm" inputmode="decimal"></label>
@@ -2170,7 +2180,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         b.setAttribute('aria-label', `${a.label}: ${v === 'yes' ? 'required' : v === 'no' ? 'excluded' : 'any'}`);
       }
     };
-    ui.paintAmen = paintAmen;
+    const noWatchInput = panel.querySelector('#rf-noWatch');
+    const paintNoWatch = () => {
+      const on = watchIds(noWatchInput.value);
+      for (const b of panel.querySelectorAll('[data-nowatch]')) { b.setAttribute('aria-pressed', String(on.includes(b.dataset.nowatch))); b.dataset.state = on.includes(b.dataset.nowatch) ? 'no' : ''; }
+    };
+    panel.querySelector('.rf-nowatch').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-nowatch]');
+      if (!b) return;
+      const on = watchIds(noWatchInput.value), id = b.dataset.nowatch;
+      noWatchInput.value = (on.includes(id) ? on.filter((x) => x !== id) : [...on, id]).join(',');
+      paintNoWatch();
+      noWatchInput.dispatchEvent(new Event('change'));
+    });
+    ui.paintAmen = () => { paintAmen(); paintNoWatch(); };
     panel.querySelector('.rf-amen').addEventListener('click', (e) => {
       const b = e.target.closest('[data-amen]');
       if (!b) return;

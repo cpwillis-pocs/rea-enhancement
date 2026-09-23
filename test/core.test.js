@@ -483,3 +483,11 @@ test('textMatch: every word, across address/note/agency/suburb/status', () => {
   assert.ok(core.textMatch(r, 'harbour applied'));
   assert.ok(!core.textMatch(r, 'hall pool'));
 });
+
+test('noWatch hides listings that mention a chosen heads-up; one chip per term', () => {
+  const rows = [{ id: '1', url: 'a', watch: 'short,fee' }, { id: '2', url: 'b', watch: 'water' }, { id: '3', url: 'c' }];
+  const cfg = { ...core.DEFAULT_CFG, noWatch: 'short,water,bogus' };
+  assert.deepEqual(core.filterRows(rows, cfg).map((r) => r.id), ['3']);
+  const chips = core.removedBy(rows, cfg);
+  assert.deepEqual(chips.map((c) => [c.label, c.removes]), [['No short lease', 1], ['No water usage charged', 1]]);
+});
