@@ -316,7 +316,7 @@ const html = (n) => {
     await ctx.close();
   }
 
-  // Large result set renders in chunks of 100.
+  // Large result set renders in chunks of 50; more load on scroll or via the button.
   {
     const big = await browser.newPage();
     await big.clock.install({ time: FIXED });
@@ -327,9 +327,14 @@ const html = (n) => {
     await big.click('#rf-launch');
     await big.click('#rf-run');
     await big.waitForFunction(() => /150 of 150/.test(document.querySelector('.rf-status').textContent), null, { timeout: 20000 });
-    assert.equal(await big.$$eval('.rf-item', (e) => e.length), 100);
+    assert.equal(await big.$$eval('.rf-item', (e) => e.length), 50);
     await big.click('.rf-more-btn');
-    assert.equal(await big.$$eval('.rf-item', (e) => e.length), 150);
+    assert.ok((await big.$$eval('.rf-item', (e) => e.length)) >= 100, 'button loads the next chunk');
+    for (let i = 0; i < 5 && await big.$('.rf-more-btn'); i++) {
+      await big.evaluate(() => { const l = document.querySelector('.rf-list'); l.scrollTop = l.scrollHeight; });
+      await big.waitForTimeout(150);
+    }
+    assert.equal(await big.$$eval('.rf-item', (e) => e.length), 150, 'scrolling loads the rest');
     assert.equal(await big.$('.rf-more-btn'), null);
     await cov.collect(big, BIGSCRIPT);
     await big.close();

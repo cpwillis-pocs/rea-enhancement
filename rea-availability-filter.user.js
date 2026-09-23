@@ -46,7 +46,7 @@
   const ANNOTATE_DEBOUNCE_MS = 120;
   const ANNOTATE_MAX_WAIT_MS = 500;
   const KNOWN_MAX = 2000;
-  const RENDER_CHUNK = 100;
+  const RENDER_CHUNK = 50; // items per render; the next chunk loads on scroll
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
@@ -1837,7 +1837,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     white-space:pre-wrap;overflow-wrap:anywhere}
   .rf-note-edit{display:block;width:calc(100% - 133px);margin:-2px 9px 8px 124px;min-height:54px;padding:6px 8px;
     border:1px solid var(--rf-input);border-radius:6px;font:12px/1.4 system-ui,sans-serif;background:var(--rf-bg);color:var(--rf-fg)}
-  .rf-item{position:relative}
+  .rf-item{position:relative;content-visibility:auto;contain-intrinsic-size:auto 220px}
+  .rf-item:has(details[open]),.rf-item:focus-within{content-visibility:visible} /* containment would clip the ⋯ menu */
   .rf-item.rf-hidden .rf-card{opacity:.45}
   /* In the flow under each listing (not overlaid): always visible, so keyboard, touch and new users find them. */
   .rf-acts{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:-4px 9px 8px 124px}
@@ -2389,6 +2390,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       if (act === 'h' && on) offerUndo('Listing hidden.', () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
     });
     ui.list.tabIndex = -1;
+    // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
+    if (typeof IntersectionObserver === 'function') {
+      const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: ui.list, rootMargin: '600px 0px' });
+      new MutationObserver(() => { io.disconnect(); const b = ui.list.querySelector(':scope > .rf-more-btn'); if (b) io.observe(b); }).observe(ui.list, { childList: true });
+    }
     ui.list.addEventListener('change', (e) => {
       const cmp = e.target.closest('input[data-cmp]');
       if (cmp) {
