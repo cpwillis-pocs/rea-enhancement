@@ -459,3 +459,13 @@ test('searchLabel: places and property filters from a search URL', () => {
     'Bondi NSW 2026, Manly NSW 2095 · house, 2 bedrooms');
   assert.equal(core.searchLabel('not a url'), 'not a url');
 });
+
+test('incomePct and income-based budget for Best match', () => {
+  assert.equal(core.incomePct({ priceNum: 600 }, '104000'), 30);
+  assert.equal(core.incomePct({ priceNum: 600 }, ''), null);
+  assert.equal(core.incomePct({ priceNum: NaN }, '104000'), null);
+  const rows = [{ priceNum: 400, km: 1 }, { priceNum: 900, km: 1 }];
+  core.withScores(rows, { ...core.DEFAULT_CFG, income: '104000', maxKm: '10' });
+  assert.match(rows[0].scoreWhy, /rent vs budget/);
+  assert.ok(rows[0].score > rows[1].score);
+});
