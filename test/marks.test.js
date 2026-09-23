@@ -288,3 +288,13 @@ test('marksStore: hidden suburbs are separate from agencies; summaryText', () =>
   const t = core.summaryText({ ...rows[1], price: '$700 per week', address: '1 A St', available: '12 Oct', beds: 2, baths: 1, cars: 1, upfront: 4200, inspections: [{ label: 'Sat 10am' }], url: 'https://x' });
   assert.equal(t, '$700 per week - 1 A St\nAvailable 12 Oct · 2 bed, 1 bath, 1 car · move-in $4,200\nInspections: Sat 10am\nhttps://x');
 });
+
+test('marksStore: no price history stored for listings whose price never changed', () => {
+  const storage = mem();
+  const st = core.marksStore(storage, () => 1e12);
+  st.observe([row('146500300', '$700 per week')]);
+  st.observe([row('146500300', '$700 per week')]);
+  assert.equal(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m['146500300'].ph, undefined);
+  st.observe([row('146500300', '$680 per week')]);
+  assert.deepEqual(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m['146500300'].ph.map((x) => x[1]), ['$700 per week', '$680 per week']);
+});

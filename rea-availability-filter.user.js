@@ -217,8 +217,13 @@
           delete e.x; // seen again, so not gone
           if (e.s) e.d = summary(r); // keep the shortlist's copy current
           if (Number.isFinite(r.priceNum)) {
-            if (e.p != null && e.p !== r.priceNum) { e.pp = e.p; e.pps = e.ps; e.pt = t; }
-            if (e.p !== r.priceNum) e.ph = [...(Array.isArray(e.ph) ? e.ph : []), [t, clip(r.price, 80)]].slice(-PRICE_HISTORY_MAX);
+            if (e.p != null && e.p !== r.priceNum) {
+              // History only once the price actually changes (seeded with the previous price), so
+              // the thousands of listings that never change cost nothing extra in storage.
+              const ph = Array.isArray(e.ph) && e.ph.length ? e.ph : [[e.pt || e.f || t, clip(e.ps, 80)]];
+              e.ph = [...ph, [t, clip(r.price, 80)]].slice(-PRICE_HISTORY_MAX);
+              e.pp = e.p; e.pps = e.ps; e.pt = t;
+            }
             e.p = r.priceNum;
             e.ps = r.price;
           }
