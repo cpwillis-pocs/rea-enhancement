@@ -631,6 +631,9 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     await page.waitForSelector('.rf-market table');
     assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'true');
     assert.ok((await page.$$('.rf-market tbody tr')).length >= 2, 'bed groups');
+    await page.focus('.rf-market-btn'); await page.keyboard.press('m');
+    assert.ok(await page.$('.rf-item'), 'm toggles back to the list');
+    await page.keyboard.press('m'); await page.waitForSelector('.rf-market table');
     const bars = await page.$$eval('.rf-bars button[data-week]', (b) => b.map((x) => [x.dataset.week, +x.querySelector('.rf-bar-n').textContent]));
     assert.ok(bars.length >= 1, 'clickable weeks');
     const [wk, n] = bars.find(([w]) => w !== '0') || bars[0];
@@ -640,6 +643,18 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     const shown = await page.$$eval('.rf-item', (e) => e.length);
     assert.equal(shown, n, 'week filter shows exactly that bucket');
     assert.ok(await page.inputValue('#rf-from') || await page.inputValue('#rf-to'), 'dates set');
+    assert.ok(await page.evaluate(() => document.activeElement.matches('.rf-item, .rf-market-btn')), 'focus kept in the drawer');
+    // Same week again: the button and the view stay in step.
+    await page.click('.rf-market-btn'); await page.click(`.rf-bars button[data-week="${wk}"]`);
+    assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'false');
+    assert.ok(await page.$('.rf-item') && !(await page.$('.rf-market')), 'list shown');
+    // A bar never widens your own window: within 2 weeks + "Later" shows nothing extra.
+    await page.click('.rf-clear');
+    await page.selectOption('#rf-withinDays', '14');
+    const inWindow = await page.$$eval('.rf-item', (e) => e.length);
+    await page.click('.rf-market-btn');
+    const laterBtn = await page.$('.rf-bars button[data-week="9"]');
+    if (laterBtn) { await laterBtn.click(); assert.ok((await page.$$eval('.rf-item', (e) => e.length)) <= inWindow); }
     console.log('market view: ok,', bars.length, 'weeks;', n, 'in week', wk);
     await done(page); await ctx.close();
   }
@@ -665,6 +680,11 @@ const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new Re
     assert.match(st, /Manly NSW 2095: [1-9]\d* new/, 'all listings new for the empty snapshot');
     assert.match(st, /Bondi[^:]*: 0 new/, 'current search unchanged');
     assert.match(await page.textContent('.rf-saved-list'), /\d+ new/);
+    // Opting out mid-check stores nothing more.
+    await page.click('[data-saved-check]');
+    await page.click('.rf-settings summary'); await page.uncheck('#rf-remember');
+    await page.waitForFunction(() => !document.querySelector('[data-saved-check]').hasAttribute('aria-disabled'), null, { timeout: 30000 });
+    assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'nothing re-saved after opting out');
     console.log('saved searches: ok,', st.slice(0, 90));
     await done(page); await ctx.close();
   }

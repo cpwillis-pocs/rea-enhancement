@@ -141,3 +141,33 @@ test('stored inspections: past sessions drop out before the per-row cap', () => 
   marks.toggle('333333', 's', r);
   assert.deepEqual(marks.shortlist()[0].inspections.map((i) => i.label), ['tomorrow']);
 });
+
+test('snapshot load validates fields; restored rows re-derive the next inspection', () => {
+  const m = memStorage();
+  const k = 'https://www.realestate.com.au/rent/in-y/list-1';
+  m.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: 1, rows: 5, ids: 7, gone: [null] }, 'https://evil.example/rent/': { at: 1, rows: [] } } }));
+  const snaps = core.snapshotStore(m);
+  assert.deepEqual(snaps.get(k).rows, []);
+  assert.doesNotThrow(() => snaps.save(k, [], false));
+  assert.deepEqual(Object.keys(snaps.exportData()), [k], 'non-REA key dropped');
+
+  const past = Date.now() - 2 * 864e5;
+  const st2 = core.snapshotStore(memStorage());
+  st2.save(k, [{ id: '146500001', url: 'https://www.realestate.com.au/p-146500001', nextInspect: new Date(past), inspect: 'Sat 10am', inspections: [{ at: past, label: 'Sat 10am' }] }], false);
+  const r = st2.get(k).rows[0];
+  assert.equal(r.nextInspect, null);
+  assert.equal(r.inspect, '');
+});
+
+test('shortlist tolerates non-string summary fields', () => {
+  const m = memStorage();
+  m.setItem('rea-avail-filter/marks/v1', JSON.stringify({ c: 1, m: { 146500001: { s: 1, f: 1, l: 1, d: { u: 'https://www.realestate.com.au/p-146500001', p: 700, a: 5, b: 2 } } } }));
+  const rows = core.marksStore(m).shortlist();
+  assert.equal(rows[0].address, '5');
+  assert.equal(rows[0].beds, 2);
+});
+
+test('discovery: a null/empty branch does not cache a miss for deeper siblings', () => {
+  assert.equal(core.extractCoords({ id: '1', meta: { x: {} }, price: {} }), null);
+  assert.deepEqual(core.extractCoords({ id: '2', meta: { x: { geo: { latitude: -33.8, longitude: 151.2 } } }, price: {} }), { lat: -33.8, lng: 151.2 });
+});

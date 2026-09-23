@@ -321,7 +321,8 @@
         return Object.entries(m).filter(([, e]) => e.s && e.d?.u)
           .sort(([, a], [, b]) => (b.st || 0) - (a.st || 0))
           .map(([id, e]) => {
-            const d = e.d, priceNum = parsePrice(d.p);
+            const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, typeof v === 'number' && !['b', 'ba', 'c', 'la', 'ln'].includes(k) ? String(v) : v]));
+            const priceNum = parsePrice(clip(d.p, 80));
             return {
               ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
@@ -479,6 +480,12 @@
     r.headline = clip(o?.headline, 160);
     r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
     r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
+    // Stored next-inspection time and text go stale as sessions pass: derive them again.
+    if (Array.isArray(o?.inspections)) {
+      const nx = r.inspections.find((i) => i.at != null);
+      r.nextInspect = nx ? new Date(nx.at) : null;
+      r.inspect = r.inspections.map((i) => i.label).join('; ');
+    }
     r.features = (Array.isArray(o?.features) ? o.features : []).filter((f) => typeof f === 'string').slice(0, 40).map((f) => clip(f, 80));
     r.lat = typeof o?.lat === 'number' ? o.lat : null;
     r.lng = typeof o?.lng === 'number' ? o.lng : null;
@@ -508,7 +515,11 @@
       try {
         const d = JSON.parse(storage.getItem(SNAP_KEY));
         if (isObj(d) && isObj(d.s)) {
-          for (const [k, e] of Object.entries(d.s)) if (!isObj(e) || typeof e.at !== 'number') delete d.s[k];
+          for (const [k, e] of Object.entries(d.s)) {
+            if (!isSearchKey(k) || !isObj(e) || typeof e.at !== 'number') { delete d.s[k]; continue; }
+            for (const f of ['rows', 'gone']) e[f] = Array.isArray(e[f]) ? e[f].filter(isObj) : [];
+            for (const f of ['ids', 'baseIds']) if (e[f] != null && !Array.isArray(e[f])) e[f] = f === 'ids' ? [] : null;
+          }
           return d;
         }
       } catch { /* corrupt */ }
@@ -811,9 +822,12 @@
           if (ok(v)) return { path: p, value: v };
           if (stats) stats.keyed = true; // the key is there, just empty on this listing
         }
+        // A null or empty branch may hold the field on a sibling listing of the same shape.
+        if (stats && !skip.test(k) && (v == null || (typeof v === 'object' && !Object.keys(v).length))) stats.empty = true;
         if (v && typeof v === 'object' && depth + 1 < DISCOVER_DEPTH && !skip.test(k)) queue.push([v, p, depth + 1]);
       }
     }
+    if (stats && seen >= DISCOVER_NODES) stats.partial = true;
     return null;
   };
   const found = {}; // field -> discovered path, for probe()
@@ -836,7 +850,7 @@
     const hit = discover(obj, keyRe, ok, skip, stats);
     if (hit) { pathHint[field] = hit.path; if (!found[field]) found[field] = hit.path; return hit.value; }
     // Only a shape with no matching key at all is a reliable miss for its siblings.
-    if (!stats.keyed && miss.size < MISS_SHAPES_MAX) miss.add(shape);
+    if (!stats.keyed && !stats.empty && !stats.partial && miss.size < MISS_SHAPES_MAX) miss.add(shape);
     misses.set(field, miss);
     return undefined;
   };
@@ -2053,7 +2067,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       <div class="rf-help" hidden>
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
+        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter</dd>
         <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
       </div>
       <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
@@ -2176,6 +2190,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const inPanel = panel.contains(document.activeElement);
       if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+        if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
         if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
         if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
           if (listKeys(e)) { e.preventDefault(); return; }
@@ -2218,6 +2233,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       cfg = next;
       saveCfg(cfg);
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
+        ui.savedCtrl?.abort();
         snaps.clear();
         applySnap(null);
         renderSaved();
@@ -2346,11 +2362,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       const w = marketStats(ui.rows).byWeek[+b.dataset.week];
       const later = new Date(); later.setDate(later.getDate() + 1 + MARKET_WEEKS * 7);
       const range = w.label === 'Now' ? { from: '', to: ymdLocal(new Date()) } : w.label === 'Later' ? { from: ymdLocal(later), to: '' } : { from: w.from, to: w.to };
-      const next = { ...cfg, ...range, withinDays: '' };
+      // Narrow within your own dates (a "within" window becomes its end date), never widen them.
+      const tos = [range.to, cfg.to, windowEnd(cfg.withinDays)].filter(Boolean).sort();
+      const next = { ...cfg, from: [range.from, cfg.from].filter(Boolean).sort().pop() || '', to: tos[0] || '', withinDays: '' };
       for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
       ui.marketOn = false;
       ui.market.setAttribute('aria-pressed', 'false');
       onChange({ type: 'change' });
+      showResults(); // also when the dates didn't change (same week again)
+      (ui.list.querySelector('.rf-item') || ui.market).focus();
     });
     ui.active.addEventListener('click', (e) => {
       const b = e.target.closest('[data-chip]');
@@ -2549,6 +2569,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
     if (!keys.length) return;
     runCtrl?.abort();
     const ctrl = runCtrl = new AbortController();
+    ui.savedCtrl = ctrl;
+    pageMemo.clear(); // "new since" must mean now, not the pages cached a few minutes ago
     setBusy(true);
     btn.setAttribute('aria-disabled', 'true');
     const out = [];
@@ -2561,6 +2583,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
         });
         const ids = new Set(res.rows.map((r) => r.id));
         const found = { added: res.rows.filter((r) => !before.has(r.id)).length, gone: [...before].filter((id) => !ids.has(id)).length };
+        if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
         store.set(key, res.rows, res.truncated);
         const snap = snaps.save(key, res.rows, res.truncated);
         if (key === currentKey()) adopt(key, res.rows, res.truncated, '', snap, true);
@@ -2571,12 +2594,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}<div class="box">Notes at 
       }
       setStatus(`Checked ${keys.length} saved search${keys.length === 1 ? '' : 'es'}. ${out.join(' · ')}.`);
     } catch (err) {
-      setStatus(ctrl.signal.aborted ? 'Check stopped.' : `Check failed: ${err.message}`, !ctrl.signal.aborted);
-      if (!ctrl.signal.aborted) logError(`saved: ${err.message}`);
+      // Aborted by navigation or opting out: whoever aborted has already said why.
+      if (!ctrl.signal.aborted && err?.name !== 'AbortError') { setStatus(`Check failed: ${err.message}`, true); logError(`saved: ${err.message}`); }
     } finally {
       setBusy(false);
       btn.removeAttribute('aria-disabled');
       if (runCtrl === ctrl) runCtrl = null;
+      if (ui.savedCtrl === ctrl) ui.savedCtrl = null;
       renderSaved();
     }
   }
