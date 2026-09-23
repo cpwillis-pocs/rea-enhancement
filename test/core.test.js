@@ -141,3 +141,16 @@ test('applyFilters: inspectOn and listed sort', () => {
   assert.deepEqual(ids({ sort: 'inspect' })[0], 'a');
   assert.equal(rows[0].id, 'a');
 });
+
+test('toCsv / toTsv: quoting, formatting, formula guard', () => {
+  const r = core.toRow(listing({ address: { display: { fullAddress: '1 "The" Rd, Bondi' } }, title: '=HYPERLINK("x")', price: { display: 'Contact agent' } }), true);
+  const csv = core.toCsv([r]).split('\r\n');
+  assert.equal(csv.length, 2);
+  assert.ok(csv[0].startsWith('available_date,available,price,weekly_rent'));
+  assert.ok(csv[1].startsWith('2026-10-12,12 Oct 2026,Contact agent,,'), csv[1]);
+  assert.ok(csv[1].includes('"1 ""The"" Rd, Bondi"'));
+  assert.ok(csv[1].includes(`"'=HYPERLINK(""x"")"`));
+  assert.ok(csv[1].includes(',yes,'));
+  const tsv = core.toTsv([r]).split('\n');
+  assert.equal(tsv[1].split('\t').length, tsv[0].split('\t').length);
+});

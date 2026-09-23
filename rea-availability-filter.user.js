@@ -332,28 +332,47 @@
       .sort(SORTS[cfg.sort] || SORTS.avail);
   }
 
-  const TSV_COLS = ['available', 'price', 'priceNum', 'ppb', 'bond', 'address', 'suburb', 'beds', 'baths', 'cars', 'type', 'inspect', 'listed', 'headline', 'url'];
-  const toTsv = (rows) =>
-    [TSV_COLS.join('\t')]
-      .concat(rows.map((r) => TSV_COLS.map((c) => String(r[c] ?? '').replace(/\s+/g, ' ')).join('\t')))
-      .join('\n');
+  const EXPORT_COLS = [
+    ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
+    ['surrounding', 'nearby'], ['headline', 'headline'], ['url', 'url'],
+  ];
+  const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const cellValue = (r, k) => {
+    const v = k === 'availDate' ? r.avail : r[k];
+    if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
+    if (typeof v === 'number') return isFinite(v) ? String(v) : '';
+    if (typeof v === 'boolean') return v ? 'yes' : '';
+    return String(v ?? '').replace(/\s+/g, ' ').trim();
+  };
+  // Spreadsheet formula injection guard (OWASP): neutralise leading = + @ and -<non-numeric>.
+  const safeCell = (v) => (/^[=+@\t\r]|^-(?![\d.]|$)/.test(v) ? `'${v}` : v);
+  const table = (rows) => [EXPORT_COLS.map(([, h]) => h)].concat(rows.map((r) => EXPORT_COLS.map(([k]) => safeCell(cellValue(r, k)))));
 
-  function downloadTsv(rows) {
-    const blob = new Blob([toTsv(rows)], { type: 'text/tab-separated-values' });
+  const toTsv = (rows) => table(rows).map((cols) => cols.map((c) => c.replace(/\t/g, ' ')).join('\t')).join('\n');
+  const toCsv = (rows) => table(rows).map((cols) => cols.map((c) => (/[",\n\r]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\r\n');
+
+  function download(name, text, type) {
+    const blob = new Blob([text], { type });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `rea-${new Date().toISOString().slice(0, 10)}.tsv`;
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
+  const stamp = () => ymdLocal(new Date());
+  // BOM so Excel opens UTF-8 (en dashes, accented suburbs) correctly.
+  const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
+  const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
   // Node test harness: expose pure functions, skip all DOM work.
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, extractResults, pageUrl, searchKey, pageNum, toRow,
-      fetchResults, fetchAllPages, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, esc, safeUrl, rowStore, DEFAULT_CFG,
+      fetchResults, fetchAllPages, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, esc, safeUrl, rowStore, DEFAULT_CFG,
     };
     return;
   }
@@ -390,7 +409,9 @@
   .rf-check{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;text-transform:none;
     letter-spacing:0;color:#111}
   .rf-check input{margin:0}
-  .rf-actions{display:flex;gap:8px}
+  .rf-actions{display:flex;gap:8px;align-items:center}
+  .rf-exports .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
+  .rf-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#666;margin-right:auto}
   .rf-btn{flex:1;padding:9px 12px;border:0;border-radius:6px;background:#0b7;color:#fff;
     font:600 13px system-ui,sans-serif;cursor:pointer}
   .rf-btn:hover{background:#0a6}
@@ -484,7 +505,12 @@
         <div class="rf-actions">
           <button class="rf-btn" id="rf-run">Search all pages</button>
           <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
-          <button class="rf-btn sec" id="rf-export" disabled>Export TSV</button>
+        </div>
+        <div class="rf-actions rf-exports">
+          <span class="rf-label">Export</span>
+          <button class="rf-btn sec" data-export="csv" disabled>CSV</button>
+          <button class="rf-btn sec" data-export="tsv" disabled>TSV</button>
+          <button class="rf-btn sec" data-export="copy" disabled title="Copy as TSV - pastes into Sheets/Excel">Copy</button>
         </div>
       </div>
       <div class="rf-status"></div>
@@ -499,7 +525,7 @@
       exact: panel.querySelector('#rf-exact'),
       run: panel.querySelector('#rf-run'),
       refresh: panel.querySelector('#rf-refresh'),
-      exportBtn: panel.querySelector('#rf-export'),
+      exports: [...panel.querySelectorAll('[data-export]')],
       status: panel.querySelector('.rf-status'),
       list: panel.querySelector('.rf-list'),
     };
@@ -534,10 +560,21 @@
 
     ui.run.addEventListener('click', () => run());
     ui.refresh.addEventListener('click', () => run(true));
-    ui.exportBtn.addEventListener('click', () => {
-      if (cache) downloadTsv(applyFilters(cache, cfg));
-    });
+    for (const b of ui.exports) {
+      b.addEventListener('click', async () => {
+        if (!cache) return;
+        const rows = applyFilters(cache, cfg);
+        if (b.dataset.export === 'csv') downloadCsv(rows);
+        else if (b.dataset.export === 'tsv') downloadTsv(rows);
+        else {
+          try { await navigator.clipboard.writeText(toTsv(rows)); setStatus(`Copied ${rows.length} rows.`); }
+          catch { setStatus('Clipboard blocked - use TSV download instead.', true); }
+        }
+      });
+    }
   }
+
+  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; };
 
   const setStatus = (msg, isErr) => {
     ui.status.textContent = msg;
@@ -553,7 +590,7 @@
   }
 
   function render(rows) {
-    ui.exportBtn.disabled = rows.length === 0;
+    setExport(rows.length === 0);
     if (!rows.length) {
       ui.list.innerHTML = '<div class="rf-empty">Nothing matches those filters.</div>';
       return;
@@ -617,7 +654,7 @@
     const base = location.href;
     const key = searchKey(base);
     ui.run.disabled = ui.refresh.disabled = true;
-    ui.exportBtn.disabled = true;
+    setExport(true);
     try {
       const res = await fetchAllPages(base, (m) => { if (id === runId) setStatus(m); }, { seed: boot });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
@@ -653,7 +690,7 @@
       cacheKey = null;
       ui.run.disabled = ui.refresh.disabled = false;
       ui.refresh.hidden = true;
-      ui.exportBtn.disabled = true;
+      setExport(true);
       if (restore() || !hadState) return;
       ui.list.innerHTML = '<div class="rf-empty">Search changed.</div>';
       setStatus('Search changed - run again to refresh.');

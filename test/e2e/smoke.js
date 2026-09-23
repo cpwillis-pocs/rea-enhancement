@@ -75,9 +75,12 @@ const html = (n) => {
   await page.dispatchEvent('#rf-keyword', 'change');
 
   // Export: capture download.
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#rf-export')]);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-export=tsv]')]);
   const body = fs.readFileSync(await dl.path(), 'utf8');
   console.log('export:', dl.suggestedFilename(), body.split('\n').length - 1, 'rows');
+  const [csv] = await Promise.all([page.waitForEvent('download'), page.click('[data-export=csv]')]);
+  const csvBody = fs.readFileSync(await csv.path(), 'utf8');
+  assert.ok(csvBody.startsWith('\ufeffavailable_date,'), 'csv has BOM + header');
 
   // Reload: rows restored from session cache without refetching.
   const before = hits.length;
