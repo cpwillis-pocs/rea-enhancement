@@ -49,7 +49,7 @@
   const RENDER_CHUNK = 100;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = 'rea-avail-filter/rows/';
-  const ROWS_VERSION = 6; // bump when toRow() shape changes
+  const ROWS_VERSION = 7; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROWS_TTL_MS = 10 * 60 * 1000;
   const ROWS_KEEP = 2; // searches kept in sessionStorage
@@ -307,7 +307,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'inspect'];
+    'cars', 'type', 'img', 'surrounding', 'inspect', 'agency', 'lat', 'lng', 'photos', 'floorplan'];
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -315,6 +315,7 @@
     o.headline = clip(r.headline, 160);
     o.text = clip(r.text, SNAP_TEXT_MAX);
     o.inspections = cleanInspections(r.inspections);
+    o.features = (Array.isArray(r.features) ? r.features : []).slice(0, 40).map((f) => clip(f, 80));
     return o;
   };
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
@@ -332,6 +333,11 @@
     r.headline = clip(o?.headline, 160);
     r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
     r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
+    r.features = (Array.isArray(o?.features) ? o.features : []).filter((f) => typeof f === 'string').slice(0, 40).map((f) => clip(f, 80));
+    r.lat = typeof o?.lat === 'number' ? o.lat : null;
+    r.lng = typeof o?.lng === 'number' ? o.lng : null;
+    r.photos = typeof o?.photos === 'number' ? o.photos : null;
+    r.floorplan = typeof o?.floorplan === 'boolean' ? o.floorplan : null;
     return r;
   };
   const isSearchKey = (k) => typeof k === 'string' && k.startsWith('https://www.realestate.com.au/rent/') && k.length < SEARCH_KEY_MAX;
@@ -531,9 +537,36 @@
   const DT_FMT = { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' };
   const fmtWhen = (d) => d.toLocaleString('en-AU', DT_FMT).replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
 
+  // Field discovery: when none of the known spellings exist, walk the listing (breadth-first,
+  // bounded) for a key matching `keyRe` whose value passes `ok`. Returns { path, value } or
+  // null. This keeps features working if REA renames a field, and reaFilter.probe() reports
+  // where each one was found.
+  const DISCOVER_DEPTH = 4;
+  const DISCOVER_NODES = 3000;
+  const discover = (obj, keyRe, ok = () => true) => {
+    const queue = [[obj, '']];
+    let seen = 0;
+    while (queue.length && seen < DISCOVER_NODES) {
+      const [node, path] = queue.shift();
+      if (!node || typeof node !== 'object') continue;
+      for (const [k, v] of Object.entries(node)) {
+        seen++;
+        const p = path ? `${path}.${k}` : k;
+        if (keyRe.test(k) && ok(v)) return { path: p, value: v };
+        if (v && typeof v === 'object' && p.split('.').length < DISCOVER_DEPTH) queue.push([v, p]);
+      }
+    }
+    return null;
+  };
+  const found = {}; // field -> discovered path, for probe()
+  const note = (field, hit) => { if (hit && !found[field]) found[field] = hit.path; return hit?.value; };
+
+  const inspectionList = (src) => (Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : null);
+
   function extractInspections(listing, now = new Date()) {
-    const src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
-    const list = Array.isArray(src) ? src : Array.isArray(src?.items) ? src.items : Array.isArray(src?.inspections) ? src.inspections : [];
+    let src = listing.inspections ?? listing.inspectionTimes ?? listing.openHomes ?? listing.inspectionsAndAuctions?.inspections;
+    if (!inspectionList(src)) src = note('inspections', discover(listing, /inspection|openhome|open_home/i, (v) => !!inspectionList(v)?.length));
+    const list = inspectionList(src) || [];
     const cutoff = now.getTime() - INSPECT_GRACE_MS;
     return list
       .map((it) => {
@@ -545,8 +578,55 @@
       .sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
   }
 
+  const LISTED_KEY = /^(date)?(first)?listed(at|date|on)?$|^listing(date|start)$|^datefirstlisted$/i;
   const extractListed = (listing) =>
-    toDate(listing.dateListed ?? listing.listedDate ?? listing.listingDate ?? listing.dateFirstListed ?? listing.listedAt);
+    toDate(listing.dateListed ?? listing.listedDate ?? listing.listingDate ?? listing.dateFirstListed ?? listing.listedAt) ??
+    toDate(note('listed', discover(listing, LISTED_KEY, (v) => !!toDate(v))));
+
+  // Coordinates: an object holding lat + lng within Australia's bounding box.
+  const LAT_KEYS = ['latitude', 'lat'];
+  const LNG_KEYS = ['longitude', 'lng', 'lon', 'long'];
+  const inAu = (lat, lng) => lat <= -9 && lat >= -45 && lng >= 110 && lng <= 155;
+  const coordsOf = (o) => {
+    if (!o || typeof o !== 'object') return null;
+    const lat = +LAT_KEYS.map((k) => o[k]).find((v) => v != null && v !== '');
+    const lng = +LNG_KEYS.map((k) => o[k]).find((v) => v != null && v !== '');
+    return isFinite(lat) && isFinite(lng) && inAu(lat, lng) ? { lat, lng } : null;
+  };
+  const extractCoords = (listing) =>
+    coordsOf(listing.address?.location) || coordsOf(listing.address) || coordsOf(listing.location) ||
+    coordsOf(note('coords', discover(listing, /location|geo|coord|address/i, (v) => !!coordsOf(v)))) || null;
+
+  // Agency name: listingCompany/agency objects, else any *agency*/*company* object with a name.
+  const nameOf = (o) => str(o?.name) || str(o?.displayName) || str(o?.brandName) || (typeof o === 'string' ? o : '');
+  const extractAgency = (listing) => clipText(
+    nameOf(listing.listingCompany) || nameOf(listing.agency) || nameOf(listing.agencies?.[0]) ||
+    nameOf(note('agency', discover(listing, /agenc|listingcompany|company|brand/i, (v) => !!nameOf(v)))), 80);
+
+  // Feature labels (strings) from any features/amenities arrays.
+  const featureLabel = (f) => (typeof f === 'string' ? f : str(f?.displayLabel) || str(f?.label) || str(f?.name) || str(f?.value) || '');
+  const extractFeatures = (listing) => {
+    const srcs = [listing.propertyFeatures, listing.features, listing.generalFeatures?.features, listing.keyFeatures];
+    if (!srcs.some(Array.isArray)) srcs.push(note('features', discover(listing, /feature|amenit/i, (v) => Array.isArray(v) && v.some((x) => featureLabel(x)))));
+    const out = [];
+    for (const a of srcs) {
+      if (!Array.isArray(a)) continue;
+      for (const f of a) {
+        const l = featureLabel(f) || (Array.isArray(f?.features) ? f.features.map(featureLabel).join(', ') : '');
+        if (l) out.push(l.slice(0, 80));
+      }
+    }
+    return [...new Set(out)].slice(0, 40);
+  };
+
+  // Photos / floorplan counts; null when REA doesn't say.
+  const countOf = (v) => (Array.isArray(v) ? v.length : typeof v === 'number' ? v : null);
+  const extractMedia = (listing) => {
+    const m = listing.media || {};
+    const photos = countOf(m.images) ?? countOf(m.photos) ?? countOf(m.imageCount) ?? countOf(listing.imageCount);
+    const plans = countOf(m.floorplans) ?? countOf(m.floorPlans) ?? countOf(listing.floorplans);
+    return { photos, floorplan: plans == null ? null : plans > 0 };
+  };
 
   const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
 
@@ -585,18 +665,23 @@
       id: listingId(str(listing._links?.canonical?.href)) || String(listing.id ?? ''),
       inspections: extractInspections(listing),
       listed: extractListed(listing),
+      agency: extractAgency(listing),
+      features: extractFeatures(listing),
+      ...(extractCoords(listing) || { lat: null, lng: null }),
+      ...extractMedia(listing),
     };
     const next = row.inspections.find((i) => i.at != null);
     row.nextInspect = next ? new Date(next.at) : null;
     row.inspect = row.inspections.map((i) => i.label).join('; ');
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
-    row.text = [row.headline, str(listing.description), row.address, row.type].filter(Boolean).join(' ').toLowerCase();
+    row.text = [row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' ').toLowerCase();
     return row;
   };
 
   // Coercers for fields REA might reshape: anything unexpected becomes ''.
   const str = (v) => (typeof v === 'string' ? v : typeof v?.display === 'string' ? v.display : '');
+  const clipText = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
   const scalar = (v) => (typeof v === 'number' || typeof v === 'string' ? v : '');
 
   const sleep = (ms, signal) => new Promise((resolve, reject) => {
@@ -902,17 +987,25 @@
     'propertyType.display', 'media.mainImage.templatedUrl', '_links.canonical.href', 'title', 'headline', 'description',
     'inspections', 'inspectionTimes', 'openHomes', 'inspectionsAndAuctions.inspections',
     'dateListed', 'listedDate', 'listingDate', 'dateFirstListed', 'listedAt',
+    'address.location', 'listingCompany.name', 'agency.name', 'propertyFeatures', 'features', 'media.images', 'media.floorplans',
   ];
-  const probe = (listing) => Object.fromEntries(PROBE_PATHS.map((p) => {
-    const v = p.split('.').reduce((o, k) => o?.[k], listing);
-    return [p, v === undefined ? '(missing)' : typeof v === 'object' ? JSON.stringify(v).slice(0, 160) : v];
-  }));
+  const probe = (listing) => {
+    const out = Object.fromEntries(PROBE_PATHS.map((p) => {
+      const v = p.split('.').reduce((o, k) => o?.[k], listing);
+      return [p, v === undefined ? '(missing)' : typeof v === 'object' ? JSON.stringify(v).slice(0, 160) : v];
+    }));
+    // What discovery found for *this* listing where the known spellings were missing.
+    for (const k of Object.keys(found)) delete found[k];
+    toRow(listing, false);
+    for (const [field, path] of Object.entries(found)) out[`discovered ${field}`] = path;
+    return out;
+  };
 
   // Node test harness: expose pure functions, skip all DOM work.
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, keywordTest, toTsv, toCsv, toIcs, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, APP_STATUSES, DEFAULT_CFG, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
