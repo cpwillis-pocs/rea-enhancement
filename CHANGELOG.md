@@ -2,6 +2,27 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.20.0
+
+- **Search failures keep what was read**: if REA blocks or errors on a later page, the listings from the pages already read are shown, with "Read 6 of 12 pages; page 7 failed (…)" and **Resume**, which carries on from there without re-reading the rest. A partial search isn't remembered as a saved search (unread listings would look gone). **Check all** carries on past a search that fails and marks it "couldn't be read".
+- **Inspections I can make** (More filters): weekends, after 5pm, or either, in the listing's own time zone.
+- **Keywords**: `pool|balcony` matches either word, accents don't matter ("cafe" finds "café"), and a note says when only the saved, shortened text of remembered results was searched (Refresh searches full descriptions).
+- **New amenities**: Solar, NBN fibre, EV charging and Step-free.
+- **By appointment**: listings with no open-home times whose text says inspections are by appointment are tagged, and Copy enquiry asks to book a private inspection.
+- **What's new** after an update: a one-time note in the drawer (never on a first install).
+- A warning when a change couldn't be saved because this site's browser storage is full.
+- If REA renames the part of its page that holds search results, the script finds them by shape, says so in a banner, and `reaFilter.selfcheck()` reports where.
+- Exports end with id, lat and lng columns, so the file can be plotted in Google My Maps.
+- Fixed:
+  - "Deposit taken" / "Under application" no longer triggered by agent boilerplate ("a holding deposit paid within 24 hours secures…", "pets considered under application"); "Under deposit" and "Application received" headlines now count.
+  - "Inspection … cancelled" no longer appears for a session still listed without a time, or sticks after the session comes back or you re-shortlist; a page where REA sends no inspection times at all leaves stored ones alone.
+  - A pinned saved search is no longer dropped when browser storage is full.
+  - "Professionally cleaned, must be seen" and application/bond processing fees no longer raise heads-up tags.
+  - A day/month like "2/3 bed" no longer beats a written date ("Available 1st Nov 2/3 bed" is 1 Nov), and "7/7" or "1/2 price" aren't dates. "Available immediately", "vacant", "2026-10-12" and "mid November" are.
+  - "$2,600 - $2,800 per month" is read as monthly.
+  - Hide agency works from the shortlist for listings from other searches; a stale "stopped remembering" banner clears when you change search.
+- Faster: the suggested route is worked out about 70× quicker on busy days; amenity and heads-up checks skip text that can't match; one median calculation everywhere (a card's "% below median" can move by a point).
+
 ## 2.19.0
 
 - **Expanded drawer**: the ⤢ button in the header (or e) opens the drawer near full screen, with the filters in a left column and results in a grid of cards, so far more listings are visible while you scroll. Remembered until you shrink it; phones already get a full-screen drawer, so the button is hidden there.

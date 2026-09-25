@@ -21,8 +21,8 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 **Filter and sort across every page**
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
 - Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type, photo required, inspection on a given day, listed over 3 weeks ago.
-- Keywords over headline, description, address and features: `pool -studio "north facing"`.
-- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
+- Keywords over headline, description, address and features: `pool|balcony -studio "north facing"` (`a|b` is either; accents are ignored).
+- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking, solar, NBN fibre, EV charging, step-free. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
 - **Other places**: up to 3 named points (work, school, partner) with km to each and a "Nearest to all places" sort.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
@@ -40,6 +40,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
 - **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
 - **Expand** (⤢ in the drawer's header, or e): near full screen, with the filters in a left column and results in a grid of cards; remembered until you shrink it again.
+- **Inspections I can make**: keep only listings with an open home on a weekend or after 5pm.
 - **Keyboard**: j/k move, s shortlist, h hide, n note, o open, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
