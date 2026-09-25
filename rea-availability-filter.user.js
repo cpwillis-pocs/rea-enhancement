@@ -2211,6 +2211,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.22);color-scheme:light dark;
     font:13px/1.45 system-ui,-apple-system,sans-serif;color:var(--rf-fg)}
   #rf-panel *{box-sizing:border-box}
+  /* Expanded: near full-screen. Filters become a left column and results a grid on the right. */
+  @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
+  @media (min-width:760px){
+    #rf-panel.rf-full{display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);
+      grid-template-rows:auto auto auto auto auto auto minmax(0,1fr);
+      grid-template-areas:"head head" "tabs status" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
+    .rf-full>.rf-head{grid-area:head} .rf-full>.rf-tabs{grid-area:tabs} .rf-full>.rf-sl-bar{grid-area:ctrl;align-self:stretch;align-content:flex-start} /* one of the two shows */
+    .rf-full>.rf-controls{grid-area:ctrl;max-height:none;min-height:0;align-content:start;border-bottom:0;border-right:1px solid var(--rf-line)}
+    .rf-full>.rf-help{grid-area:help} .rf-full>.rf-share-in{grid-area:share} .rf-full>.rf-warnbar{grid-area:warn}
+    .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
+    .rf-full>.rf-tabs,.rf-full>.rf-sl-bar{border-right:1px solid var(--rf-line)}
+    .rf-full .rf-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));align-content:start;gap:4px 12px;padding:8px 12px}
+    .rf-full .rf-list>:not(.rf-item){grid-column:1/-1}
+  }
   .rf-head{padding:14px 16px;border-bottom:1px solid var(--rf-line);display:flex;align-items:center;gap:8px}
   .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1;color:var(--rf-fg)}
   #rf-panel :focus-visible,#rf-launch:focus-visible{outline:2px solid var(--rf-accent-fg);outline-offset:2px}
@@ -2219,7 +2233,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-undo{margin-left:8px;border:0;background:none;padding:0;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);
     text-decoration:underline;cursor:pointer}
   .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
-  .rf-keys{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
+  .rf-keys,.rf-expand{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
     color:var(--rf-muted);cursor:pointer;padding:0}
   .rf-help{padding:10px 16px;border-bottom:1px solid var(--rf-line);font-size:12px;background:var(--rf-hover)}
   .rf-help dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 0}
@@ -2307,7 +2321,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-agencies{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
   .rf-agencies .rf-label{margin-right:4px}
   .rf-compare{overflow-x:auto;padding:4px}
-  #rf-panel.rf-wide{width:min(960px,100vw)}
+  #rf-panel.rf-wide:not(.rf-full){width:min(960px,100vw)} /* Compare */
   .rf-btn.sec[aria-pressed=true]{background:var(--rf-accent);color:#fff}
   .rf-compare table{border-collapse:collapse;font-size:12px;min-width:100%}
   .rf-compare th,.rf-compare td{border-bottom:1px solid var(--rf-line);padding:6px 8px;text-align:left;vertical-align:top;min-width:110px}
@@ -2425,7 +2439,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     .rf-acts,.rf-note,.rf-note-edit,.rf-app{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
     .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px}
     .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1 1 100%}
-    .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} }
+    .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} .rf-expand{display:none} }
   @media (max-height:600px){ .rf-controls{max-height:38vh} } /* short windows / zoomed in: keep room for the list */
   .rf-btn{white-space:nowrap}
   `;
@@ -2497,6 +2511,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <div class="rf-head">
         <h2>Availability filter</h2>
         <button class="rf-clear" title="Reset all filters">Clear</button>
+        <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
         <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
         <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
       </div>
@@ -2647,7 +2662,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
         <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
-        <dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
+        <dt>e</dt><dd>expand / shrink the drawer</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
       </div>
       <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
         <span class="rf-share-msg"></span>
@@ -2764,6 +2779,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
     const help = panel.querySelector('.rf-help'), helpBtn = panel.querySelector('.rf-keys');
     const toggleHelp = () => { help.hidden = !help.hidden; helpBtn.setAttribute('aria-expanded', String(!help.hidden)); };
+    // Expanded drawer, remembered per browser. Phones are already full screen, so the button is hidden there.
+    const expandBtn = panel.querySelector('.rf-expand');
+    const setWide = (on, save = true) => {
+      panel.classList.toggle('rf-full', on);
+      expandBtn.setAttribute('aria-pressed', String(on));
+      expandBtn.setAttribute('aria-label', on ? 'Shrink drawer' : 'Expand drawer');
+      expandBtn.title = on ? 'Back to the side drawer (e)' : 'Expand to near full screen (e)';
+      expandBtn.textContent = on ? '⤡' : '⤢';
+      if (save) { if (on) wideKey.set('1'); else wideKey.clear(); }
+    };
+    setWide(wideKey.get() === '1', false);
+    expandBtn.addEventListener('click', () => setWide(!panel.classList.contains('rf-full')));
     helpBtn.addEventListener('click', toggleHelp);
     const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     // List shortcuts: act on the focused listing (or the first one).
@@ -2805,6 +2832,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const inPanel = panel.contains(document.activeElement);
       if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+        if (e.key === 'e' && !narrow.matches) { e.preventDefault(); expandBtn.click(); return; }
         if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
         if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
         if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
@@ -3900,6 +3928,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
   // Minimised state is remembered: the bar can sit over REA's own buttons on small screens.
   const LBAR_MIN_KEY = `${TOOL_PREFIX}lbar-min`;
+  const WIDE_KEY = `${TOOL_PREFIX}wide`;
+  const wideKey = keyStore(storageOr('localStorage'), WIDE_KEY);
   // Once a day at most, on a search page: saved searches not checked for a day get a small
   // prompt by the launcher. Nothing is fetched unless you click "Check now".
   const REMIND_KEY = `${TOOL_PREFIX}remind-at`;

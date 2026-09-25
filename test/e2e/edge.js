@@ -1067,6 +1067,32 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(later); await ctx.close();
   });
 
+  // 30. Expanded drawer: near full screen with filters on the left and results in columns;
+  // remembered across reloads; e toggles it; hidden on phones (already full screen).
+  await block('30', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await open(ctx);
+    await run(page);
+    const narrowW = await page.$eval('#rf-panel', (p) => p.getBoundingClientRect().width);
+    await page.click('.rf-expand');
+    assert.equal(await page.getAttribute('.rf-expand', 'aria-pressed'), 'true');
+    const wide = await page.$eval('#rf-panel', (p) => p.getBoundingClientRect().width);
+    assert.ok(wide > 1300 && narrowW < 500, `widened ${narrowW} -> ${wide}`);
+    const cols = await page.$$eval('.rf-item', (items) => new Set(items.slice(0, 4).map((i) => Math.round(i.getBoundingClientRect().left))).size);
+    assert.ok(cols >= 2, 'results in columns');
+    const [ctrlRight, listLeft] = await page.evaluate(() => [document.querySelector('.rf-controls').getBoundingClientRect().right, document.querySelector('.rf-list').getBoundingClientRect().left]);
+    assert.ok(ctrlRight <= listLeft + 1, 'filters beside the results');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.click('#rf-launch');
+    assert.ok(await page.$('#rf-panel.rf-full'), 'remembered');
+    await page.focus('.rf-tabs [data-view=results]'); await page.keyboard.press('e');
+    assert.equal(await page.$('#rf-panel.rf-full'), null, 'e shrinks it');
+    await page.setViewportSize({ width: 390, height: 800 });
+    assert.equal(await page.isVisible('.rf-expand'), false, 'no expand button on phones');
+    console.log('expanded drawer: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
