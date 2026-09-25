@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.19.0
+
+- **Expanded drawer**: the ⤢ button in the header (or e) opens the drawer near full screen, with the filters in a left column and results in a grid of cards, so far more listings are visible while you scroll. Remembered until you shrink it; phones already get a full-screen drawer, so the button is hidden there.
+
 ## 2.18.0
 
 - **Suggested route** in Plan a day: picks one session per listing so you see as many as you can reach in time (15 min each, straight-line travel at about 30 km/h, at least 10 min between), counting listings marked "to inspect" double; route sessions are tagged, the rest marked "skip" or "other time", and **Calendar for the route** exports just those.

@@ -39,7 +39,8 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
 - **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
-- **Keyboard**: j/k move, s shortlist, h hide, n note, o open, / keywords, ? help; Alt+Shift+F toggles the drawer.
+- **Expand** (⤢ in the drawer's header, or e): near full screen, with the filters in a left column and results in a grid of cards; remembered until you shrink it again.
+- **Keyboard**: j/k move, s shortlist, h hide, n note, o open, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
 **On REA's own result cards**
