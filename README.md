@@ -54,7 +54,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; search it, filter by status and export it.
 - **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
 - **Inspection checklist** per shortlisted listing (damp, water pressure, signal, light, noise, storage, or your own), shown in Compare and on the printout.
-- **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, exportable to your calendar.
+- **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, plus a **suggested route** that fits in as many listings as can be reached in time (one session each, "to inspect" ones first), exportable to your calendar as the whole day or just the route.
 - **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
 - **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.

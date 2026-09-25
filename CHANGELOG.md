@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.18.0
+
+- **Suggested route** in Plan a day: picks one session per listing so you see as many as you can reach in time (15 min each, straight-line travel at about 30 km/h, at least 10 min between), counting listings marked "to inspect" double; route sessions are tagged, the rest marked "skip" or "other time", and **Calendar for the route** exports just those.
+
 ## 2.17.0
 
 - **Taken listings**: "Deposit taken", "Under application" and "Leased" (headline only, for Leased) are tagged in the drawer and on REA's cards, with a **Hide listings already taken** filter and an export column.
