@@ -1965,6 +1965,58 @@
     return slots;
   };
 
+  // Suggested route through a day's slots (planDay order): at most one session per listing,
+  // each reachable from the last (its end + max(PLAN_MIN_GAP, km × PLAN_MIN_PER_KM) minutes).
+  // Most listings wins, "to inspect" ones counting double; ties go to less travel, then an
+  // earlier finish. Exact up to ROUTE_EXACT_MAX listings, earliest-finish greedy above.
+  const ROUTE_EXACT_MAX = 16;
+  const reachable = (a, b) => {
+    const km = a.r.lat != null && b.r.lat != null ? haversineKm(a.r, b.r) : 0;
+    return b.at >= a.end + Math.max(PLAN_MIN_GAP, km * PLAN_MIN_PER_KM) * 60e3 ? km : -1;
+  };
+  const bestRoute = (slots) => {
+    const ids = [...new Set(slots.map((x) => x.r.id))];
+    const bit = new Map(ids.map((id, i) => [id, i]));
+    const weight = (x) => (x.r.appStatus === 'to inspect' ? 2 : 1);
+    const better = (a, b) => !b || a.w > b.w || (a.w === b.w && (a.km < b.km - 1e-9 || (Math.abs(a.km - b.km) <= 1e-9 && a.end < b.end)));
+    let best;
+    if (ids.length <= ROUTE_EXACT_MAX) {
+      const memo = new Map();
+      // Best continuation after slot `i` (-1: start of day), having visited `mask`.
+      const go = (i, mask) => {
+        const key = `${i}|${mask}`;
+        if (memo.has(key)) return memo.get(key);
+        let out = { w: 0, km: 0, end: i < 0 ? 0 : slots[i].end, path: [] };
+        for (let j = i + 1; j < slots.length; j++) {
+          const b = 1 << bit.get(slots[j].r.id);
+          if (mask & b) continue;
+          const km = i < 0 ? 0 : reachable(slots[i], slots[j]);
+          if (km < 0) continue;
+          const rest = go(j, mask | b);
+          const cand = { w: rest.w + weight(slots[j]), km: rest.km + km, end: rest.path.length ? rest.end : slots[j].end, path: [j, ...rest.path] };
+          if (better(cand, out)) out = cand;
+        }
+        memo.set(key, out);
+        return out;
+      };
+      best = go(-1, 0);
+    } else {
+      const path = [], seen = new Set();
+      for (;;) {
+        const last = path.length ? slots[path.at(-1)] : null;
+        let pick = -1;
+        for (let j = last ? path.at(-1) + 1 : 0; j < slots.length; j++) {
+          if (seen.has(slots[j].r.id) || (last && reachable(last, slots[j]) < 0)) continue;
+          if (pick < 0 || slots[j].end < slots[pick].end) pick = j;
+        }
+        if (pick < 0) break;
+        path.push(pick); seen.add(slots[pick].r.id);
+      }
+      best = { path };
+    }
+    return { picked: new Set(best.path.map((j) => slots[j])), visits: best.path.length, listings: ids.length };
+  };
+
   const plural = (n, word, suffix = 's') => `${n} ${word}${n === 1 ? '' : suffix}`;
   const ruledOut = (r) => !!(r.hidden || r.agencyHidden || r.suburbHidden); // you hid it, its agency or its suburb
   const orQ = (v) => (v === '' || v == null ? '?' : v);
@@ -2098,7 +2150,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2328,6 +2380,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-planner li a{color:inherit;font-weight:600}
   .rf-plan-t{display:inline-block;min-width:64px;font-weight:700;color:var(--rf-accent-fg)}
   .rf-planner li.rf-clash .rf-meta,.rf-planner li.rf-tight .rf-meta{color:var(--rf-up);font-weight:600}
+  .rf-planner li.rf-off-route>a,.rf-planner li.rf-off-route>.rf-plan-t{opacity:.6}
+  .rf-plan-route{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:6px 0 8px;font-size:13px}
+  .rf-plan-route>span{flex:1 1 200px}.rf-plan-route .rf-btn{flex:none}
   .rf-dist{display:grid;grid-template-columns:1fr 90px;gap:10px}
   .rf-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .rf-nowatch .rf-label{flex:1 1 100%}
@@ -3070,9 +3125,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ui.pendingShare = null;
     });
     ui.list.addEventListener('click', (e) => {
-      if (!e.target.closest('[data-plan-ics]') || !ui.planDay) return;
+      const btn = e.target.closest('[data-plan-ics]');
+      if (!btn || !ui.planDay) return;
       const day = ui.planDay;
-      const rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day) }));
+      let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day) }));
+      if (btn.dataset.planIcs === 'route') { // just the suggested sessions
+        const picked = [...bestRoute(planDay(rows, day)).picked];
+        rows = rows.map((r) => ({ ...r, inspections: r.inspections.filter((i) => picked.some((x) => x.r.id === r.id && x.at === i.at)) })).filter((r) => r.inspections.length);
+      }
       downloadIcs(rows);
     });
     // The More menu closes once an item is chosen (or on a click elsewhere).
@@ -3460,12 +3520,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? dtf({ hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }).format(ms) : clock(ms, tz))
       .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
     const clashes = slots.filter((x) => x.flag).length;
+    const route = bestRoute(slots);
+    const partial = route.listings > 1 && route.visits < route.listings;
+    const inRoute = new Set([...route.picked].map((x) => x.r.id));
     return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
       <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
-      <ol>${slots.map((x) => `<li class="${x.flag ? `rf-${x.flag}` : ''}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
-        <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>
+      ${route.listings > 1 ? `<div class="rf-plan-route"><span>Suggested route: <strong>${route.visits} of ${plural(route.listings, 'listing')}</strong>${partial ? ' (the rest clash or are too far to reach in time)' : ''}</span>${partial || route.picked.size < slots.length ? ' <button class="rf-btn sec" data-plan-ics="route">Calendar for the route</button>' : ''}</div>` : ''}
+      <ol>${slots.map((x) => {
+        const tag = route.listings < 2 ? '' : route.picked.has(x) ? '<span class="rf-tag rf-new">route</span>'
+          : inRoute.has(x.r.id) ? '<span class="rf-tag">other time</span>' : '<span class="rf-tag">skip</span>';
+        return `<li class="${[x.flag ? `rf-${x.flag}` : '', route.listings > 1 && !route.picked.has(x) ? 'rf-off-route' : ''].filter(Boolean).join(' ')}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
+        <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>${tag}
         ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
-      </li>`).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance.</div></div>`;
+      </li>`;
+      }).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
   }
 
   function marketHtml(m) {

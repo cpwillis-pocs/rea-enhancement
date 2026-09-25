@@ -645,8 +645,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const n = await page.$$eval('.rf-planner li', (e) => e.length);
     assert.ok(n > 1, 'several inspections that day');
     assert.ok(await page.$('.rf-planner li.rf-clash'), 'same-time fixtures clash');
-    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-plan-ics]')]);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-plan-ics=""]')]);
     assert.equal((fs.readFileSync(await dl.path(), 'utf8').match(/BEGIN:VEVENT/g) || []).length, n);
+    // Suggested route: the clash means not every listing fits; its calendar has just the route.
+    const [visits, of] = (await page.textContent('.rf-plan-route')).match(/(\d+) of (\d+) listings/).slice(1).map(Number);
+    assert.ok(visits >= 1 && visits < of, `route ${visits} of ${of}`);
+    assert.equal(await count(page, '.rf-planner li .rf-tag.rf-new'), visits, 'route sessions tagged');
+    const [dr] = await Promise.all([page.waitForEvent('download'), page.click('[data-plan-ics=route]')]);
+    assert.equal((fs.readFileSync(await dr.path(), 'utf8').match(/BEGIN:VEVENT/g) || []).length, visits);
     const planned = await page.$$eval('.rf-planner li a', (a) => new Set(a.map((x) => x.href)).size);
     await page.selectOption('.rf-sl-bulk', 'status:applied');
     assert.match(await status(page), new RegExp(`Marked ${planned} as applied`), 'bulk acts on the planned day only');

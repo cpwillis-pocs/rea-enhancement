@@ -740,3 +740,24 @@ test('heads-up: cleaning, payment fees and garden upkeep; negated mentions ignor
   assert.deepEqual(core.watchOf('No payment fees.'), []);
   assert.deepEqual(core.watchOf('Tenant is responsible for the garden and lawns.'), ['garden']);
 });
+
+test('bestRoute: one session per listing, reachable in time, "to inspect" favoured, less travel on ties', () => {
+  const d = (h, m) => new Date(2026, 8, 26, h, m).getTime();
+  const R = (id, times, lat, o = {}) => ({ id, url: `u${id}`, address: id, price: '$1', lat, lng: 151.27, inspections: times.map((at) => ({ at, label: id })), ...o });
+  const route = (rows) => { const r = core.bestRoute(core.planDay(rows, '2026-09-26')); return [...r.picked].map((x) => `${x.r.id}@${new Date(x.at).getHours()}:${String(new Date(x.at).getMinutes()).padStart(2, '0')}`); };
+  // a at 10:00 blocks b's 10:10 session, but b's later session fits: take it.
+  assert.deepEqual(route([R('a', [d(10, 0)], -33.89), R('b', [d(10, 10), d(11, 0)], -33.891)]), ['a@10:00', 'b@11:00']);
+  // Two listings at the same time: the one you marked "to inspect" wins.
+  assert.deepEqual(route([R('a', [d(10, 0)], -33.89), R('b', [d(10, 0)], -33.95, { appStatus: 'to inspect' })]), ['b@10:00']);
+  // ~46 km in 15 minutes can't be done: that listing is skipped.
+  const far = core.bestRoute(core.planDay([R('a', [d(10, 0)], -33.89), R('far', [d(10, 30)], -34.3), R('c', [d(11, 0)], -33.9)], '2026-09-26'));
+  assert.deepEqual([far.visits, far.listings], [2, 3]);
+  assert.ok(![...far.picked].some((x) => x.r.id === 'far'));
+  // Many listings: the greedy fallback still yields a feasible route.
+  const many = Array.from({ length: 20 }, (_, i) => R(`m${i}`, [d(8, 0) + i * 20 * 60e3], -33.89 + (i % 2) * 0.001));
+  const g = core.bestRoute(core.planDay(many, '2026-09-26'));
+  assert.equal(g.listings, 20);
+  const picked = [...g.picked].sort((a, b) => a.at - b.at);
+  for (let i = 1; i < picked.length; i++) assert.ok(picked[i].at >= picked[i - 1].end + 10 * 60e3);
+  assert.equal(g.visits, 10, 'sessions 20 min apart, 15-min visits + 10-min floor: every other one');
+});
