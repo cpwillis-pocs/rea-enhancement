@@ -1134,6 +1134,28 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 32. What's new: shown once after an update (never on a first install), dismissed for good.
+  await block('32', async () => {
+    const fresh = await browser.newContext();
+    const first = await open(fresh);
+    await first.click('#rf-launch');
+    assert.ok(await first.$('.rf-news[hidden]'), 'first install: no note');
+    await done(first); await fresh.close();
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/seen-version')) localStorage.setItem('rea-avail-filter/seen-version', '2.17.0'); });
+    const page = await open(ctx);
+    await page.click('#rf-launch');
+    await page.waitForSelector('.rf-news:not([hidden])');
+    assert.match(await page.textContent('.rf-news'), /Updated to \d+\.\d+\.\d+\./);
+    await page.click('.rf-news button');
+    assert.ok(await page.$('.rf-news[hidden]'));
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.click('#rf-launch');
+    assert.ok(await page.$('.rf-news[hidden]'), 'not again');
+    console.log("what's new: ok");
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

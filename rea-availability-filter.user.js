@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.19.0
+// @version      2.20.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis/rea-enhancement
@@ -2308,12 +2308,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
   @media (min-width:760px){
     #rf-panel.rf-full{display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);
-      grid-template-rows:auto auto auto auto auto auto auto minmax(0,1fr);
-      grid-template-areas:"head head" "tabs status" "ctrl partial" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
+      grid-template-rows:auto auto auto auto auto auto auto auto minmax(0,1fr);
+      grid-template-areas:"head head" "tabs status" "ctrl news" "ctrl partial" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
     .rf-full>.rf-head{grid-area:head} .rf-full>.rf-tabs{grid-area:tabs} .rf-full>.rf-sl-bar{grid-area:ctrl;align-self:stretch;align-content:flex-start} /* one of the two shows */
     .rf-full>.rf-controls{grid-area:ctrl;max-height:none;min-height:0;align-content:start;border-bottom:0;border-right:1px solid var(--rf-line)}
     .rf-full>.rf-help{grid-area:help} .rf-full>.rf-share-in{grid-area:share} .rf-full>.rf-warnbar{grid-area:warn}
-    .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-partial{grid-area:partial} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
+    .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-partial{grid-area:partial} .rf-full>.rf-news{grid-area:news} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
     .rf-full>.rf-tabs,.rf-full>.rf-sl-bar{border-right:1px solid var(--rf-line)}
     .rf-full .rf-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));align-content:start;gap:4px 12px;padding:8px 12px}
     .rf-full .rf-list>:not(.rf-item){grid-column:1/-1}
@@ -2432,6 +2432,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-planner{padding:8px 12px}
+  .rf-news{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
+  .rf-news-msg{flex:1}
   .rf-partial{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;font-size:12px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-partial .rf-btn{flex:none;padding:4px 12px}
   .rf-warnbar{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;color:var(--rf-err);background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
@@ -2767,6 +2769,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
       </div>
       <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
+      <div class="rf-news" hidden role="note"><span class="rf-news-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss what's new">×</button></div>
       <div class="rf-status" role="status" aria-live="polite"></div>
       <div class="rf-partial" hidden><span class="rf-partial-msg"></span> <button type="button" class="rf-btn sec" data-resume>Resume</button></div>
       <div class="rf-active" hidden aria-label="Active filters"></div>
@@ -2890,6 +2893,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     };
     setWide(wideKey.get() === '1', false);
     expandBtn.addEventListener('click', () => setWide(!panel.classList.contains('rf-full')));
+    // What's new since the version you last saw (never on a first install).
+    const seen = keyStore(storageOr('localStorage'), SEEN_KEY);
+    const news = panel.querySelector('.rf-news');
+    if (!seen.get()) seen.set(WHATS_NEW.version);
+    else if (verNum(seen.get()) < verNum(WHATS_NEW.version)) {
+      news.querySelector('.rf-news-msg').innerHTML = `<strong>Updated to ${esc(WHATS_NEW.version)}.</strong> ${WHATS_NEW.items.map(esc).join(' ')}`;
+      news.hidden = false;
+    }
+    news.querySelector('button').addEventListener('click', () => { news.hidden = true; seen.set(WHATS_NEW.version); });
     helpBtn.addEventListener('click', toggleHelp);
     const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     // List shortcuts: act on the focused listing (or the first one).
@@ -4069,6 +4081,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Minimised state is remembered: the bar can sit over REA's own buttons on small screens.
   const LBAR_MIN_KEY = `${TOOL_PREFIX}lbar-min`;
   const WIDE_KEY = `${TOOL_PREFIX}wide`;
+  // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
+  // with @version and the changelog). A first install records the version without a note.
+  const WHATS_NEW = { version: '2.20.0', items: [
+    'Expand the drawer near full screen with ⤢ (or e) to see results in a grid.',
+    'Plan a day now suggests a route; "Inspections I can make" keeps weekend or after-5pm open homes.',
+    'A search that fails partway keeps what it read, with Resume.',
+  ] };
+  const SEEN_KEY = `${TOOL_PREFIX}seen-version`;
+  const verNum = (v) => String(v || '0').split('.').reduce((n, x) => n * 1000 + (+x || 0), 0);
   const wideKey = keyStore(storageOr('localStorage'), WIDE_KEY);
   // Once a day at most, on a search page: saved searches not checked for a day get a small
   // prompt by the launcher. Nothing is fetched unless you click "Check now".

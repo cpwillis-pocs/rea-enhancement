@@ -30,6 +30,11 @@ if (tag('license') !== 'MIT' || !/MIT License/.test(read('LICENSE'))) err('@lice
 // 2. CHANGELOG top entry and README install link match the script.
 const top = read('CHANGELOG.md').match(/^## (\d+\.\d+\.\d+)/m)?.[1];
 if (top !== tag('version')) err(`CHANGELOG.md top entry is ${top}, @version is ${tag('version')}: add a changelog section for the new version`);
+const news = src.match(/const WHATS_NEW = \{ version: '(\d+\.\d+\.\d+)'/)?.[1];
+const vnum = (v) => String(v).split('.').reduce((n, x) => n * 1000 + +x, 0);
+if (!news) err('missing WHATS_NEW (the one-time "what\'s new" note after an update)');
+else if (vnum(news) > vnum(tag('version') || '0')) err(`WHATS_NEW.version ${news} is newer than @version ${tag('version')}`);
+else if (!new RegExp(`^## ${news.replace(/\./g, '\\.')}$`, 'm').test(read('CHANGELOG.md'))) err(`WHATS_NEW.version ${news} has no CHANGELOG.md section`);
 if (!read('README.md').includes(`](${RAW})`)) err('README.md install link must point at the @downloadURL');
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
