@@ -20,7 +20,7 @@ const photo = (i) => `<svg xmlns="http://www.w3.org/2000/svg" width="690" height
 // description) and share buildings/addresses, for the tests of those features.
 const EXTRAS = {
   0: { description: 'Pets considered on application. Apply via 2Apply. 12 month lease.' },
-  1: { availableDate: null, description: 'Sorry, no pets. Available from 1st December 2026.' },
+  1: { availableDate: null, description: 'Sorry, no pets. Available from 1st December 2026. Inspections strictly by appointment.' },
   2: { address: '7/2 Curlewis St' }, // same building as listing 0 (10/2 Curlewis St)
   3: { address: '10/2 Curlewis St', listingCompany: { name: 'Other Agency' } }, // same unit, second agency
   4: { description: '6 month lease only. Dishwasher.' },

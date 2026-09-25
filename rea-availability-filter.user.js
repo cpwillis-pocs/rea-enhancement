@@ -52,7 +52,7 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 10;
+  const ROWS_VERSION = 11;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'hideReason', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
@@ -185,12 +185,12 @@
   const summary = (r) => ({
     u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
-    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10), tk: clip(r.taken, 12),
+    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
   });
   // Summary fields a search result always carries in full (empty means none, not unknown).
-  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk'];
+  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk', 'bp'];
   // Label of an upcoming stored inspection missing from the fresh list ('' if none went).
   // The upcoming stored inspection missing from the fresh list (null if none went). A session
   // still listed by label only (no time) is not missing.
@@ -249,11 +249,11 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 2; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 3; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -317,7 +317,7 @@
         writeState.report(true);
       } catch { raw = null; writeState.report(false); /* quota/blocked: re-read next time */ }
     };
-    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
+    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     const bag = (d, f) => (d[f] = isObj(d[f]) ? d[f] : {});
     const setAs = (e, status) => { if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } };
@@ -618,7 +618,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken']; // inspect/nextInspect: re-derived on load
+    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken', 'byAppt']; // inspect/nextInspect: re-derived on load
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -645,7 +645,7 @@
     Object.assign(r, moveIn(r.bond, r.priceNum));
     r.surrounding = !!o?.surrounding;
     r.headline = clip(o?.headline, 160);
-    r.text = clip(o?.text, SNAP_TEXT_MAX).toLowerCase();
+    r.text = fold(clip(o?.text, SNAP_TEXT_MAX));
     r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
     if (typeof o?.taken !== 'string') r.taken = takenOf(r.headline, r.text); // saved before this was detected
     if (typeof o?.watch !== 'string') r.watch = watchOf([r.headline, r.text, ...(Array.isArray(o?.features) ? o.features : [])].join(' ')).join(','); // saved before heads-up existed
@@ -1217,6 +1217,15 @@
       pos: /\blift (?:access|in (?:the )?building|to all (?:levels|floors)|serviced)\b|\blift[- ]serviced\b|\belevators?\b/ },
     { id: 'parking', label: 'Secure parking', yes: 'Secure parking', neg: /\bno (?:off[- ]street |secure )?parking\b|\bstreet parking only\b/,
       pos: /\bsecure(?:d)? (?:car ?park(?:ing|s)?|parking|garage|basement(?: parking)?|car ?space)\b|\b(?:remote|lock)[- ]up garage\b|\bremote[- ]controlled? garage\b|\bsecurity (?:car ?park|parking|garage)\b/ },
+    // Appended only (featSig bit order). Energy bills, working from home, access.
+    { id: 'solar', label: 'Solar', yes: 'Solar', neg: /\bno solar\b/,
+      pos: /\bsolar[- ](?:panels?|power(?:ed)?|system|pv|electricity|energy|hot water|array)\b/ },
+    { id: 'fibre', label: 'NBN fibre', yes: 'NBN fibre', neg: /\bno nbn\b|\bnbn (?:is )?not (?:yet )?(?:available|connected)\b/,
+      pos: /\bfttp\b|\bfttb\b|\bfib(?:re|er) to the (?:premises|home|building)\b|\b(?:nbn )?fib(?:re|er) (?:nbn|internet|broadband|connection)\b|\bnbn fib(?:re|er)\b/ },
+    { id: 'ev', label: 'EV charging', yes: 'EV charging', neg: /\bno ev charg/,
+      pos: /\bev[- ]charg(?:er|ers|ing)\b|\belectric (?:vehicle|car) charg(?:er|ers|ing)\b|\bcar charging (?:point|station|bay)s?\b/ },
+    { id: 'stepfree', label: 'Step-free', yes: 'Step-free', neg: /\bwalk[- ]up\b|\bstairs only\b|\bno lift\b|\bsplit[- ]level\b/,
+      pos: /\bstep[- ]free\b|\bwheelchair (?:access(?:ible)?|friendly)\b|\blevel (?:entry|access)\b|\bno (?:stairs|steps)\b|\bsingle[- ](?:level|storey)\b/ },
   ];
   // "X: No" per amenity, built once.
   for (const a of AMENITIES) a.kvNo = new RegExp(`(?:${a.pos.source})${AMEN_NO}`);
@@ -1304,6 +1313,9 @@
     ['leased', /^\W*(?:leased|let agreed)\b|\b(?:now|just|has been) leased\b/, null],
   ];
   const TAKEN_LABELS = { deposit: 'Deposit taken', application: 'Under application', leased: 'Leased' };
+  // No open-home times because the agent books private inspections instead.
+  const BY_APPT = /\b(?:inspections?|viewings?) (?:are |is )?(?:strictly |only )?by (?:private )?appointment\b|\bby appointment only\b|\bprivate (?:inspections?|viewings?) (?:available|welcome|on request|by request)\b|\bcontact (?:the |our )?(?:agent|office) to (?:arrange|book) (?:an? |your )?(?:private )?(?:inspection|viewing)\b/;
+  const byApptOf = (text) => BY_APPT.test(String(text || '').toLowerCase());
   const takenOf = (headline, text) => {
     const h = String(headline || '').toLowerCase(), t = String(text || '').toLowerCase();
     return TAKEN.find(([, head, body]) => head.test(h) || (body && body.test(t)))?.[0] || '';
@@ -1430,11 +1442,12 @@
     row.inspect = row.inspections.map((i) => i.label).join('; ');
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
-    row.text = [row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' ').toLowerCase();
+    row.text = fold([row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' '));
     const said = [row.headline, str(listing.description), ...row.features].join(' ');
     row.watch = watchOf(said).join(',');
     row.applyVia = applyViaOf(said);
     row.taken = takenOf(row.headline, str(listing.description));
+    row.byAppt = !row.inspections.length && byApptOf(said);
     row.lease = leaseCode(leaseTermOf(said));
     if (!row.avail) { // REA's field missing or unreadable: the description often says it
       const t = availFromText(said);
@@ -1528,7 +1541,7 @@
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
-    type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
+    type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail',
     annotate: true, dimCards: true, onlyStarred: false, showHidden: false,
     remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '',
   };
@@ -1542,7 +1555,7 @@
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
   const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
-    'inspectOn', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
+    'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort']; // what a preset saves and restores
   const DISPLAY_PREFS = ['sort', 'annotate', 'dimCards', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm']; // Clear keeps your "from" point
@@ -1567,15 +1580,26 @@
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
 
   // Keyword: space-separated terms, all must match; "-term" excludes; "quoted phrase" kept whole.
+  // Lowercase without accents, so "cafe" finds "café" (row text is stored folded).
+  const fold = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  // Every term must appear; -term must not; "a phrase" as typed; a|b means either.
+  // "Inspections I can make": a weekend, or 5pm or later, in the listing's own time zone.
+  const INSPECT_WHEN = { weekend: 'Inspect on a weekend', evening: 'Inspect after 5pm', either: 'Weekend or after 5pm' };
+  const inspectFits = (at, tz, when) => {
+    const parts = Object.fromEntries(dtf({ weekday: 'short', hour: 'numeric', hourCycle: 'h23', ...(tz ? { timeZone: tz } : {}) }).formatToParts(at).map((p) => [p.type, p.value]));
+    const weekend = parts.weekday === 'Sat' || parts.weekday === 'Sun', evening = +parts.hour >= 17;
+    return when === 'weekend' ? weekend : when === 'evening' ? evening : weekend || evening;
+  };
   const keywordTest = (q) => {
-    const terms = (q || '').toLowerCase().match(/-?"[^"]+"|\S+/g) || [];
+    const terms = fold(q).match(/-?"[^"]+"|\S+/g) || [];
     const inc = [], exc = [];
     for (const t of terms) {
       const neg = t.startsWith('-') && t.length > 1;
-      const w = (neg ? t.slice(1) : t).replace(/^"|"$/g, '');
-      if (w) (neg ? exc : inc).push(w);
+      const alts = (neg ? t.slice(1) : t).replace(/^"|"$/g, '').split('|').filter(Boolean);
+      if (alts.length) (neg ? exc : inc).push(alts);
     }
-    return (text) => inc.every((w) => text.includes(w)) && !exc.some((w) => text.includes(w));
+    const has = (text, alts) => alts.some((w) => text.includes(w));
+    return (text) => inc.every((a) => has(text, a)) && !exc.some((a) => has(text, a));
   };
 
   // Rent vs the median for the same bed count in these results (exact matches only, groups
@@ -1654,7 +1678,7 @@
     from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
     bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
-    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, hideNoImage: () => 'Has a photo', hideTaken: () => 'Not taken',
+    keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, inspectWhen: (v) => INSPECT_WHEN[v] || '', hideNoImage: () => 'Has a photo', hideTaken: () => 'Not taken',
     exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet', leaseMin: (v) => `Lease ${v}+ mo`, onePerBuilding: () => 'One per building', building: (v) => `Building: ${v.split('|')[1] || 'one building'}`,
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
@@ -1840,6 +1864,7 @@
       .filter((r) => !cfg.hideTaken || !r.taken)
       .filter((r) => !kw || kw(r.text || ''))
       .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)))
+      .filter((r) => !INSPECT_WHEN[cfg.inspectWhen] || (r.inspections || []).some((i) => i.at != null && i.at >= +now - INSPECT_GRACE_MS && inspectFits(i.at, tzOf(r), cfg.inspectWhen)))
       .filter((r) => !bKey || buildingKey(r.address) === bKey)
       .filter((r) => { const l = leaseNeed ? leaseFromCode(r.lease) : null; return !l || l.flexible || l.max >= leaseNeed; }); // a stated lease too short; unstated or flexible passes
     return cfg.onePerBuilding && !cfg.building ? onePerBuilding(kept) : kept;
@@ -1895,10 +1920,10 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
-    ['headline', 'headline'], ['url', 'url'],
+    ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
@@ -2105,7 +2130,7 @@
       const a = String(r.available && r.available !== '-' ? r.available : '').replace(/^available\s*(from\s*)?/i, '').trim();
       return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
     })
-    .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : 'Could I arrange an inspection? ')
+    .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? ')
     .replace(/\{link\}/g, r.url || '').replace(/\s+\n/g, '\n').trim();
 
   // One listing as plain text for a message.
@@ -2653,8 +2678,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Other places (optional, one per line)<textarea id="rf-places" rows="2" placeholder="Work: -33.87, 151.21&#10;Uni: Google Maps link"
             title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
           <div class="rf-meta rf-places-fb" aria-live="polite"></div>
-          <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool -studio "north facing"'></label>
+          <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
           <label>Inspection on<input type="date" id="rf-inspectOn"></label>
+          <label title="Keeps listings with at least one upcoming inspection you can get to, in the listing's local time">Inspections I can make<select id="rf-inspectWhen">
+            <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option></select></label>
           <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
           <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
           <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
@@ -3592,8 +3619,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     renderActive();
     if (!rows.length) suggestDrops();
     const st = diffStats(cache);
-    const matchHint = cfg.sort === 'match' && !rows.some((r) => r.score != null)
-      ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '';
+    const matchHint = (cfg.sort === 'match' && !rows.some((r) => r.score != null)
+      ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '')
+      + (textClipped && cfg.keyword.trim() ? ' Keywords searched the saved (shortened) text; Refresh to search full descriptions.' : '');
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
     const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`, st.redated && `${st.redated} date changed`, st.featured && `${st.featured} details changed`,
       !cfg.showHidden && st.hidden && `${st.hidden} hidden`].filter(Boolean).join(' · ');
@@ -3758,6 +3786,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ${metaLine([
             r.lastSeen && sl ? `seen ${ago(now - r.lastSeen)}` : '',
             r.inspectCancelled && sl ? `Inspection ${r.inspectCancelled} cancelled` : '',
+            !r.inspections?.length && r.byAppt ? 'Inspections by appointment' : '',
             r.inspections?.length ? `Inspect ${r.inspections[0].label}${r.inspections.length > 1 ? ` +${r.inspections.length - 1}` : ''}` : '',
             r.listed ? `Listed ${ago(now - r.listed)}` : '',
             r.openedAt ? `opened ${ago(now - r.openedAt)}` : '',
@@ -3859,7 +3888,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.type.value = cfg.type;
   }
 
+  let textClipped = false; // rows came from storage, whose listing text is shortened
   function adopt(key, rows, trunc, note, snap = null, observe = false) {
+    textClipped = !observe;
     learn(rows, observe, observe); // adopt observes only fresh full crawls
     if (snap) queueMicrotask(renderSaved);
     scheduleAnnotate();
@@ -3941,7 +3972,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         // Show what was read, but don't let a part stand for the whole: no remembered snapshot
         // (unread listings would count as gone), no tab cache, no health sample, not a full crawl.
         learn(res.rows, true, false);
-        adopt(key, res.rows, true, '', null, false);
+        adopt(key, res.rows, res.truncated, '', null, false);
+        textClipped = false; // fresh text, just not every page
         showPartial(res.failed);
         logError(`search: page ${res.failed.page}: ${res.failed.message}`);
         return;

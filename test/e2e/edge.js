@@ -1106,6 +1106,34 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 31. 2.20: inspections I can make (weekends), by-appointment listings, keyword OR, and the
+  // note when keywords only searched stored (shortened) text.
+  await block('31', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
+    await run(page);
+    const total = await count(page);
+    await page.click('#rf-more summary');
+    await page.selectOption('#rf-inspectWhen', 'weekend');
+    const labels = await page.$$eval('.rf-item', (items) => items.map((i) => i.textContent.match(/Inspect (\w+)/)?.[1]));
+    assert.ok(labels.length > 0 && labels.length < total, `weekend inspections: ${labels.length} of ${total}`);
+    assert.ok(labels.every((d) => /^(Sat|Sun)/.test(d)), labels.join(','));
+    assert.ok(await page.$('.rf-achip:has-text("Inspect on a weekend")'));
+    await page.selectOption('#rf-inspectWhen', '');
+    assert.match(await page.textContent('.rf-item[data-id="146500001"]'), /Inspections by appointment/);
+    await page.fill('#rf-keyword', 'dishwasher|robes'); await page.dispatchEvent('#rf-keyword', 'change');
+    const either = await count(page);
+    await page.fill('#rf-keyword', 'dishwasher'); await page.dispatchEvent('#rf-keyword', 'change');
+    assert.ok(either > await count(page), 'a|b matches more than a alone');
+    assert.doesNotMatch(await status(page), /saved \(shortened\) text/, 'fresh results: no note');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.click('#rf-launch');
+    await waitStatus(page, /listings match/);
+    assert.match(await status(page), /saved \(shortened\) text; Refresh/, 'restored results: note shown');
+    console.log('inspect when, by appointment, keyword OR, stored-text note: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

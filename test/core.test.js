@@ -784,3 +784,35 @@ test('QA round 12: taken boilerplate, heads-up negatives, d/m dates after month 
   assert.ok(performance.now() - t0 < 200, 'exact route over 16 listings x 3 sessions stays interactive');
   assert.ok(route.visits >= 1 && route.listings === 16);
 });
+
+test('2.20: keyword OR and accents, inspections I can make, new amenities, by appointment, map columns', () => {
+  const k = core.keywordTest('pool|balcony -studio');
+  assert.equal(k('sunny balcony'), true);
+  assert.equal(k('pool studio'), false);
+  assert.equal(k('garden'), false);
+  const L = (id, o) => core.toRow(listing({ id, ...o }), false);
+  assert.equal(core.keywordTest('cafe')(L('1', { description: 'Near the best café.' }).text), true, 'accents folded');
+  const sat = new Date('2026-09-26T00:30:00Z').getTime(); // Sat 10:30 Sydney
+  const thuEve = new Date('2026-10-01T07:30:00Z').getTime(); // Thu 17:30 Sydney
+  const wedNoon = new Date('2026-09-30T02:30:00Z').getTime(); // Wed 12:30 Sydney
+  const R = (id, at) => ({ id, url: id, address: '1 A St, Bondi NSW 2026', inspections: [{ at, label: 'x' }] });
+  const rows = [R('sat', sat), R('eve', thuEve), R('noon', wedNoon)];
+  const ids = (when) => core.filterRows(rows, { ...core.DEFAULT_CFG, inspectWhen: when }, new Date('2026-09-23T00:00:00Z')).map((r) => r.id);
+  assert.deepEqual(ids('weekend'), ['sat']);
+  assert.deepEqual(ids('evening'), ['eve']);
+  assert.deepEqual(ids('either'), ['sat', 'eve']);
+  assert.equal(core.activeFilters({ ...core.DEFAULT_CFG, inspectWhen: 'weekend' })[0].label, 'Inspect on a weekend');
+  const am = (x) => Object.fromEntries(Object.entries(core.amenitiesOf({ text: x.toLowerCase() })).filter(([, v]) => v));
+  assert.deepEqual(am('Solar panels and an EV charger.'), { solar: 'yes', ev: 'yes' });
+  assert.deepEqual(am('Solar lights in the garden.'), {});
+  assert.equal(am('FTTP NBN connected.').fibre, 'yes');
+  assert.equal(am('Walk-up building.').stepfree, 'no');
+  assert.equal(am('Single level with level entry.').stepfree, 'yes');
+  const appt = L('2', { inspections: [], description: 'Inspections strictly by appointment.' });
+  assert.equal(appt.byAppt, true);
+  assert.equal(L('3', { inspections: [], description: 'Open for inspection Saturday.' }).byAppt, false);
+  assert.match(core.enquiryText(appt), /book a private inspection/);
+  const [head, line] = core.toCsv([{ id: '146500001', url: 'u', lat: -33.9, lng: 151.2, byAppt: true }]).split(/\r?\n/);
+  assert.ok(head.endsWith(',id,lat,lng'));
+  assert.ok(line.endsWith(',146500001,-33.9,151.2'));
+});
