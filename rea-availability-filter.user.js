@@ -88,11 +88,17 @@
   // ---------------------------------------------------------------- config
 
   // `building` narrows one search's results, so it is never stored (or carried to the next search).
+  // Outcome of the last write of something you chose (shortlist/notes, settings, presets): the UI
+  // warns while writes fail (browser storage full; REA's own code shares it) and clears on success.
+  const writeState = {
+    ok: true, listeners: new Set(),
+    report(ok) { if (ok === this.ok) return; this.ok = ok; for (const f of this.listeners) f(ok); },
+  };
   const loadCfg = () => {
     try { const { building, ...c } = sanitizeCfg(JSON.parse(localStorage.getItem(CFG_KEY))); return c; } catch { return {}; }
   };
   const saveCfg = (cfg) => {
-    try { const { building, ...c } = cfg; localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch { /* private mode */ }
+    try { const { building, ...c } = cfg; localStorage.setItem(CFG_KEY, JSON.stringify(c)); writeState.report(true); } catch { writeState.report(false); }
   };
 
   // Per-search row cache in sessionStorage (tab-scoped, survives reloads/back-nav).
@@ -308,7 +314,8 @@
         const out = JSON.stringify(data);
         storage.setItem(MARKS_KEY, out);
         raw = out;
-      } catch { raw = null; /* quota/blocked: re-read next time */ }
+        writeState.report(true);
+      } catch { raw = null; writeState.report(false); /* quota/blocked: re-read next time */ }
     };
     const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
@@ -812,7 +819,7 @@
       } catch { /* corrupt */ }
       return { v: 1, list: [] };
     };
-    const save = (d) => { try { storage.setItem(PRESETS_KEY, JSON.stringify(d)); } catch { /* quota/blocked */ } };
+    const save = (d) => { try { storage.setItem(PRESETS_KEY, JSON.stringify(d)); writeState.report(true); } catch { writeState.report(false); } };
     const pick = (cfg) => Object.fromEntries(PRESET_KEYS.filter((k) => k in cfg).map((k) => [k, cfg[k]]));
     return {
       list: () => load().list,
@@ -875,7 +882,19 @@
     if (!display) return null;
     const today = startOfDay(now);
     const clamp = (d) => (d < today ? today : d);
-    if (/\bnow\b/i.test(display)) return today;
+    if (/\b(?:now|immediately|immediate|vacant)\b/i.test(display)) return today;
+    const iso = display.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+    if (iso) {
+      const d = new Date(+iso[1], +iso[2] - 1, +iso[3]);
+      return d.getDate() !== +iso[3] || d.getMonth() !== +iso[2] - 1 ? null : clamp(d);
+    }
+    // "early December", "mid Nov", "end of October": the 1st, 15th or 25th of that month.
+    const part = display.match(/\b(early|beginning of|start of|mid|middle of|late|end of)[\s-]+([a-z]{3,})\.?\b(?:\s+(\d{4}))?/i);
+    const pm = part ? MONTH_NAMES.findIndex((n) => n.startsWith(part[2].toLowerCase())) : -1;
+    if (pm >= 0) {
+      const day = /^(?:mid|middle)/i.test(part[1]) ? 15 : /^(?:late|end)/i.test(part[1]) ? 25 : 1;
+      return part[3] ? clamp(new Date(+part[3], pm, day)) : yearless(day, pm, today, clamp);
+    }
     // AU numeric order: dd/mm/yyyy, dd-mm-yy
     const num = display.match(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})\b/);
     if (num) {
@@ -911,8 +930,10 @@
     if (!m) return Infinity;
     let v = +m[1] * (m[2] ? 1000 : 1);
     // Period is read from the text after this figure, up to the next $ amount, so
-    // "$800 pw / $3,466 pcm" and "$600 per week (a month free)" stay weekly.
-    const tail = s.slice(m.index + m[0].length).split('$')[0];
+    // "$800 pw / $3,466 pcm" and "$600 per week (a month free)" stay weekly. A range
+    // ("$2,600 - $2,800 per month") takes the period after its second figure.
+    const parts = s.slice(m.index + m[0].length).split('$');
+    const tail = /^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0];
     const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
     if (!weekly) {
       if (/\b(per\s*(?:calendar\s*)?month|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
@@ -925,14 +946,31 @@
 
   // REA's SSR payload: ArgonautExchange -> app key -> urqlClientCache (JSON string)
   // -> entries whose `data` is (usually) a further JSON string.
+  // Known path first: app key -> urqlClientCache -> entry.data.rentSearch.results. If REA renames
+  // the app key or the query field, any app with a urql cache is tried and any data field whose
+  // value looks like search results (exact.items + pagination) is taken. `resultsPath` says which.
+  const APP_KEY = 'resi-property_listing-experience-web';
+  const looksLikeResults = (v) => isObj(v) && Array.isArray(v.exact?.items) && isObj(v.pagination);
+  const resultsPath = { key: '', field: '', fallback: false };
   function parseExchange(exchange) {
-    const raw = exchange?.['resi-property_listing-experience-web']?.urqlClientCache;
-    if (!raw) throw new Error('Listing cache missing from page markup.');
-    const cache = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    for (const key of Object.keys(cache)) {
-      const entry = cache[key];
-      const data = typeof entry?.data === 'string' ? JSON.parse(entry.data) : entry?.data;
-      if (data?.rentSearch?.results) return data.rentSearch.results;
+    const apps = [APP_KEY, ...Object.keys(isObj(exchange) ? exchange : {}).filter((k) => k !== APP_KEY)].filter((k) => exchange?.[k]?.urqlClientCache);
+    if (!apps.length) throw new Error('Listing cache missing from page markup.');
+    for (const pass of ['known', 'shape']) {
+      for (const app of apps) {
+        const raw = exchange[app].urqlClientCache;
+        let cache;
+        try { cache = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { continue; }
+        for (const entry of Object.values(isObj(cache) ? cache : {})) {
+          let data;
+          try { data = typeof entry?.data === 'string' ? JSON.parse(entry.data) : entry?.data; } catch { continue; }
+          if (!isObj(data)) continue;
+          if (pass === 'known' && app === APP_KEY && data.rentSearch?.results) { Object.assign(resultsPath, { key: app, field: 'rentSearch', fallback: false }); return data.rentSearch.results; }
+          if (pass === 'shape') {
+            const field = Object.keys(data).find((f) => looksLikeResults(data[f]?.results));
+            if (field) { Object.assign(resultsPath, { key: app, field, fallback: app !== APP_KEY || field !== 'rentSearch' }); return data[field].results; }
+          }
+        }
+      }
     }
     throw new Error('No rentSearch results found in cache.');
   }
@@ -1452,7 +1490,10 @@
   }
 
   // `seed` = { key, page, results } from the already-loaded document, reused instead of refetching.
-  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal } = {}) {
+  // `keepPartial`: a page after the first that fails (not a cancel) ends the crawl with what was
+  // read, plus `failed: { page, max, message }`, instead of throwing it all away. `isCached(url)`
+  // skips the polite pause before a page that won't be fetched (eg on Resume).
+  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal, keepPartial = false, isCached = () => false } = {}) {
     const rows = [];
     const key = searchKey(base);
     let page = 1, max = 1, total = 1, sample = null;
@@ -1461,17 +1502,23 @@
       const label = `page ${page}${max > 1 ? ` of ${max}` : ''}`;
       onProgress(`Reading ${label}…`);
       const seeded = seed && seed.key === key && seed.page === page;
-      const results = seeded ? seed.results : getPage ? await getPage(pageUrl(base, page)) : await fetchResults(pageUrl(base, page), {
-        fetchImpl, wait, signal,
-        onRetry: (n, ms) => onProgress(`Retrying ${label} in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`),
-      });
+      let results;
+      try {
+        results = seeded ? seed.results : getPage ? await getPage(pageUrl(base, page)) : await fetchResults(pageUrl(base, page), {
+          fetchImpl, wait, signal,
+          onRetry: (n, ms) => onProgress(`Retrying ${label} in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`),
+        });
+      } catch (err) {
+        if (!keepPartial || page === 1 || signal?.aborted || err?.name === 'AbortError') throw err;
+        return { rows, truncated: total > MAX_PAGES, sample, failed: { page, max, message: String(err?.message || err) } };
+      }
       total = results.pagination?.maxPageNumberAvailable || 1;
       max = Math.min(total, MAX_PAGES);
       rows.push(...rowsFrom(results));
       sample ??= sampleOf(results);
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
-      if (page <= max && !seeded && !nextSeeded) await wait(jitter(PAGE_DELAY_MS), signal);
+      if (page <= max && !seeded && !nextSeeded && !isCached(pageUrl(base, page))) await wait(jitter(PAGE_DELAY_MS), signal);
     } while (page <= max);
     return { rows, truncated: total > MAX_PAGES, sample };
   }
@@ -2171,7 +2218,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2236,12 +2283,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
   @media (min-width:760px){
     #rf-panel.rf-full{display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);
-      grid-template-rows:auto auto auto auto auto auto minmax(0,1fr);
-      grid-template-areas:"head head" "tabs status" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
+      grid-template-rows:auto auto auto auto auto auto auto minmax(0,1fr);
+      grid-template-areas:"head head" "tabs status" "ctrl partial" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
     .rf-full>.rf-head{grid-area:head} .rf-full>.rf-tabs{grid-area:tabs} .rf-full>.rf-sl-bar{grid-area:ctrl;align-self:stretch;align-content:flex-start} /* one of the two shows */
     .rf-full>.rf-controls{grid-area:ctrl;max-height:none;min-height:0;align-content:start;border-bottom:0;border-right:1px solid var(--rf-line)}
     .rf-full>.rf-help{grid-area:help} .rf-full>.rf-share-in{grid-area:share} .rf-full>.rf-warnbar{grid-area:warn}
-    .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
+    .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-partial{grid-area:partial} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
     .rf-full>.rf-tabs,.rf-full>.rf-sl-bar{border-right:1px solid var(--rf-line)}
     .rf-full .rf-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));align-content:start;gap:4px 12px;padding:8px 12px}
     .rf-full .rf-list>:not(.rf-item){grid-column:1/-1}
@@ -2360,6 +2407,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-planner{padding:8px 12px}
+  .rf-partial{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;font-size:12px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
+  .rf-partial .rf-btn{flex:none;padding:4px 12px}
   .rf-warnbar{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;color:var(--rf-err);background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-warnbar .rf-warn-msg{flex:1}
   .rf-warn-x{border:0;background:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;min-width:24px;min-height:24px}
@@ -2692,6 +2741,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       </div>
       <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
       <div class="rf-status" role="status" aria-live="polite"></div>
+      <div class="rf-partial" hidden><span class="rf-partial-msg"></span> <button type="button" class="rf-btn sec" data-resume>Resume</button></div>
       <div class="rf-active" hidden aria-label="Active filters"></div>
       <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
 
@@ -2706,6 +2756,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       refresh: panel.querySelector('#rf-refresh'),
       exports: [...panel.querySelectorAll('[data-export]')],
       status: panel.querySelector('.rf-status'),
+      partial: panel.querySelector('.rf-partial'),
       warnbar: panel.querySelector('.rf-warnbar'),
       active: panel.querySelector('.rf-active'),
       controls: panel.querySelector('.rf-controls'),
@@ -3256,6 +3307,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     });
 
     ui.run.addEventListener('click', () => busy || run());
+    ui.partial.querySelector('[data-resume]').addEventListener('click', () => busy || run(true, { resume: true }));
     ui.refresh.addEventListener('click', () => busy || run(true));
     for (const b of ui.exports) {
       b.addEventListener('click', async () => {
@@ -3344,7 +3396,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const here = currentKey();
     ui.saved.querySelector('.rf-saved-list').innerHTML = entries.map(([k, e]) => {
       const r = ui.savedResult.get(k);
-      const found = r ? ` · <strong>${r.added} new</strong>${r.gone ? `, ${r.gone} gone` : ''}` : '';
+      const found = r?.error ? ' · <span class="rf-warn-t">couldn\'t be read</span>' : r ? ` · <strong>${r.added} new</strong>${r.gone ? `, ${r.gone} gone` : ''}` : '';
       return `<li><a href="${esc(safeUrl(k))}">${esc(searchLabel(k))}</a>${k === here ? ' <span class="rf-tag">this search</span>' : ''}
         <button type="button" class="rf-chip rf-pin" data-saved-pin="${esc(k)}" aria-pressed="${!!e.pin}" title="${e.pin ? 'Pinned: kept when you open other searches' : `Keep this one when more than ${SNAP_MAX} searches are opened`}">${e.pin ? 'Pinned' : 'Pin'}</button>
         <div class="rf-meta">${(e.ids || e.rows || []).length} listings · checked ${esc(ago(Date.now() - e.at))}${found}</div></li>`;
@@ -3362,9 +3414,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       for (const [i, key] of keys.entries()) {
         const label = searchLabel(key);
         const before = new Set(snaps.exportData()[key]?.ids || []);
-        const res = await fetchAllPages(key, (m) => setStatus(`Checking ${label} (${i + 1} of ${keys.length}): ${m}`), {
-          signal: ctrl.signal, getPage: (url) => getPage(url, { signal: ctrl.signal }),
-        });
+        let res;
+        try {
+          res = await fetchAllPages(key, (m) => setStatus(`Checking ${label} (${i + 1} of ${keys.length}): ${m}`), {
+            signal: ctrl.signal, getPage: (url) => getPage(url, { signal: ctrl.signal }),
+          });
+        } catch (err) { // one failing search doesn't stop the rest
+          if (ctrl.signal.aborted || err?.name === 'AbortError') throw err;
+          logError(`saved ${label}: ${err.message}`);
+          ui.savedResult.set(key, { error: true });
+          out.push(`${label}: couldn't be read`);
+          continue;
+        }
         const ids = new Set(res.rows.map((r) => r.id));
         const found = { added: res.rows.filter((r) => !before.has(r.id)).length, gone: [...before].filter((id) => !ids.has(id)).length };
         if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
@@ -3493,6 +3554,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // One-shot Undo link in the status line.
+  // A search that stopped partway: say how far it got, offer to pick up from there.
+  function showPartial(failed) {
+    if (!ui.partial) return;
+    ui.partial.hidden = !failed;
+    if (failed) ui.partial.querySelector('.rf-partial-msg').textContent = `Read ${failed.page - 1} of ${failed.max} pages; page ${failed.page} failed (${failed.message}). Showing the listings read so far.`;
+  }
+
   function offerUndo(msg, undo) {
     setStatus(msg);
     const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: 'Undo' });
@@ -3847,8 +3915,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   };
 
   let runCtrl = null; // AbortController of the in-flight search, aborted on navigation
-  async function run(force = false) {
+  // `resume`: after a search stopped partway, fetch from where it failed (pages already read
+  // come from pageMemo, without a pause).
+  async function run(force = false, { resume = false } = {}) {
     if (!force && restoreSession()) return;
+    showPartial(null);
     runCtrl?.abort();
     const ctrl = runCtrl = new AbortController();
     const id = ++runId;
@@ -3857,19 +3928,30 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setBusy(true);
     setExport(true);
     try {
-      if (force) pageMemo.clear();
+      if (force && !resume) pageMemo.clear();
       const onProgress = (m) => { if (id === runId) setStatus(m); };
       // Refresh means "newer than what I'm looking at", so the load-time seed is skipped too.
       const res = await fetchAllPages(base, onProgress, {
-        seed: force || Date.now() - bootAt > ROWS_TTL_MS ? null : boot,
-        signal: ctrl.signal,
+        seed: (force && !resume) || Date.now() - bootAt > ROWS_TTL_MS ? null : boot,
+        signal: ctrl.signal, keepPartial: true, isCached: memoFresh,
         getPage: (url) => getPage(url, { signal: ctrl.signal, onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
+      if (res.failed) {
+        // Show what was read, but don't let a part stand for the whole: no remembered snapshot
+        // (unread listings would count as gone), no tab cache, no health sample, not a full crawl.
+        learn(res.rows, true, false);
+        adopt(key, res.rows, true, '', null, false);
+        showPartial(res.failed);
+        logError(`search: page ${res.failed.page}: ${res.failed.message}`);
+        return;
+      }
       if (res.sample) rawSample = res.sample;
       let drops = [];
       try { drops = health.record(res.rows); } catch (e) { logError(`health: ${e.message}`); }
-      setWarn('drift', drops.length ? `REA may have changed its data: ${drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`).join('; ')}. Run reaFilter.selfcheck() in the console and report it.` : '');
+      const moved = resultsPath.fallback ? [`results are now under ${resultsPath.key}.${resultsPath.field}`] : [];
+      const drift = [...moved, ...drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`)];
+      setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Run reaFilter.selfcheck() in the console and report it.` : '');
       store.set(key, res.rows, res.truncated);
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
@@ -3897,6 +3979,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // pageUrl -> { at, p: Promise<results>, signal }; shared by annotation and full searches so a
   // page is fetched once per ROWS_TTL_MS. Failures are evicted so they can be retried.
   const pageMemo = new Map();
+  const memoFresh = (url) => { const hit = pageMemo.get(url); return !!hit && !hit.signal?.aborted && Date.now() - hit.at < ROWS_TTL_MS; };
   const getPage = (url, opts) => {
     const hit = pageMemo.get(url);
     // An entry whose run was aborted is about to reject; don't hand it to a new caller.
@@ -4204,6 +4287,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       runCtrl?.abort(); // stop crawling the old search
       runId++;
       applySnap(null);
+      showPartial(null);
       cache = null;
       cacheKey = null;
       setBusy(false);
@@ -4240,6 +4324,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const report = [
         `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${truncated ? ' (truncated)' : ''}`,
         `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
+        `results path: ${resultsPath.key ? `${resultsPath.key}.${resultsPath.field}${resultsPath.fallback ? ' (fallback: REA renamed it)' : ''}` : 'not read yet'}`,
         `discovered paths: ${Object.entries(found).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'}`,
         `schema warnings: ${schemaWarnings(rows).join('; ') || 'none'}`,
         `recent errors: ${errorLog.length ? `\n  ${errorLog.join('\n  ')}` : 'none'}`,
@@ -4263,6 +4348,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     step('cards', watchCards);
     step('card actions', watchCardActions);
     step('opens', watchOpens);
+    step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
+      : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
     step('sync', () => window.addEventListener('storage', (e) => {
       // Another tab changed the shortlist/hidden/notes: pick it up here.
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }

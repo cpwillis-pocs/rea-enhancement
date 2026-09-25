@@ -107,13 +107,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('4', async () => {
     const ctx = await browser.newContext();
     const base = serve([], { pages: 3 });
-    const page = await open(ctx, SEARCH, { route: (route) => (/list-2/.test(route.request().url())
-      ? route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Please verify you are human</html>' }) : base(route)) });
+    let blocked = true;
+    const hits = [];
+    const page = await open(ctx, SEARCH, { route: (route) => {
+      const u = route.request().url();
+      if (/\/list-\d/.test(u)) hits.push(u.match(/list-(\d)/)[1]);
+      return blocked && /list-2/.test(u) ? route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Please verify you are human</html>' }) : base(route);
+    } });
     await page.click('#rf-launch'); await page.click('#rf-run');
-    await waitStatus(page, /bot-check/);
-    assert.match(await page.textContent('.rf-list'), /Search failed/);
+    await page.waitForSelector('.rf-partial:not([hidden])');
+    assert.match(await page.textContent('.rf-partial'), /Read 1 of 3 pages; page 2 failed \(.*bot-check/);
+    assert.equal(await count(page), 6, 'page 1 kept');
+    assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'a partial crawl is not remembered');
     assert.notEqual(await page.getAttribute('#rf-run', 'aria-disabled'), 'true', 'usable after failure');
-    console.log('crawl failure:', await status(page));
+    blocked = false; hits.length = 0;
+    await page.click('.rf-partial [data-resume]');
+    await waitStatus(page, /18 listings match|of 18 listings match/);
+    assert.ok(await page.$('.rf-partial[hidden]'), 'resume clears the notice');
+    assert.ok(!hits.includes('1'), `page 1 not fetched again (${hits})`);
+    assert.ok(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), 'complete crawl remembered');
+    console.log('crawl failure keeps page 1, resume completes: ok');
     await done(page); await ctx.close();
   });
 

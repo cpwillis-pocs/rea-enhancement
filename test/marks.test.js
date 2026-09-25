@@ -558,3 +558,23 @@ test('cancelled-inspection flag: label-only sessions, a session coming back, re-
   assert.equal(r.inspections.length, 1, 'no inspections anywhere in the batch: stored ones kept');
   assert.equal(r.inspectCancelled, '');
 });
+
+test('a failed write is reported, and the next good one clears it', () => {
+  const m = mem();
+  let full = false;
+  const set = m.setItem;
+  m.setItem = (k, v) => { if (full) throw new Error('QuotaExceededError'); return set(k, v); };
+  const seen = [];
+  const f = (ok) => seen.push(ok);
+  core.writeState.listeners.add(f);
+  try {
+    const st = core.marksStore(m, () => 1e12);
+    full = true;
+    st.toggle('146500090', 's', row('146500090'));
+    assert.equal(core.writeState.ok, false);
+    full = false;
+    st.toggle('146500090', 's', row('146500090'));
+    assert.equal(core.writeState.ok, true);
+    assert.deepEqual(seen, [false, true]);
+  } finally { core.writeState.listeners.delete(f); core.writeState.report(true); }
+});

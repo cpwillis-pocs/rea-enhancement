@@ -96,3 +96,38 @@ test('sleep: aborts early and when already aborted', async () => {
   await assert.rejects(core.sleep(1, ctrl.signal), /stop/);
   await core.sleep(1); // no signal resolves
 });
+
+test('parseExchange: falls back to a renamed app key or query field by shape, and says so', () => {
+  const { exchange, results, listing } = require('./helpers');
+  const res = results({ exact: [listing({ id: '146500001' })], maxPage: 1 });
+  const known = exchange(res);
+  assert.equal(core.parseExchange(known).exact.items.length, 1);
+  assert.equal(core.resultsPath.fallback, false);
+  const cache = known['resi-property_listing-experience-web'].urqlClientCache;
+  const renamedApp = { 'resi-rent-web-v2': { urqlClientCache: cache } };
+  assert.equal(core.parseExchange(renamedApp).exact.items.length, 1);
+  assert.deepEqual([core.resultsPath.key, core.resultsPath.fallback], ['resi-rent-web-v2', true]);
+  const renamedField = { 'resi-property_listing-experience-web': { urqlClientCache: JSON.stringify({ 1: { data: JSON.stringify({ rentalSearch: { results: res } }) } }) } };
+  assert.equal(core.parseExchange(renamedField).exact.items.length, 1);
+  assert.equal(core.resultsPath.field, 'rentalSearch');
+  const lookalike = { other: { urqlClientCache: JSON.stringify({ 1: { data: JSON.stringify({ agents: { results: { items: [] } } }) } }) } };
+  assert.throws(() => core.parseExchange(lookalike), /No rentSearch results/);
+});
+
+test('fetchAllPages keepPartial: a later page failing returns what was read; page 1 or a cancel still throws', async () => {
+  const { results, listing } = require('./helpers');
+  const pages = (fail) => async (url) => {
+    const n = +url.match(/list-(\d+)/)[1];
+    if (n === fail) throw new Error('bot-check');
+    return results({ exact: [listing({ id: String(146500100 + n) })], maxPage: 4 });
+  };
+  const base = 'https://www.realestate.com.au/rent/in-bondi/list-1';
+  const out = await core.fetchAllPages(base, () => {}, { getPage: pages(3), keepPartial: true, wait: async () => {} });
+  assert.equal(out.rows.length, 2);
+  assert.deepEqual([out.failed.page, out.failed.max], [3, 4]);
+  await assert.rejects(core.fetchAllPages(base, () => {}, { getPage: pages(3), wait: async () => {} }), /bot-check/, 'default still throws');
+  await assert.rejects(core.fetchAllPages(base, () => {}, { getPage: pages(1), keepPartial: true, wait: async () => {} }), /bot-check/);
+  let waits = 0;
+  await core.fetchAllPages(base, () => {}, { getPage: pages(0), wait: async () => { waits++; }, isCached: (u) => /list-[23]/.test(u) });
+  assert.equal(waits, 1, 'no pause before cached pages');
+});
