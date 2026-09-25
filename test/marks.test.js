@@ -439,7 +439,8 @@ test('a search result replaces inspections and clauses: cancelled open homes lea
   const st = core.marksStore(m, () => t);
   const at = t + 2 * 864e5;
   st.toggle('146500032', 's', Object.assign(row('146500032'), { agency: 'Harbour Co', watch: 'water', inspections: [{ at, label: 'Sat 10:00am' }] }));
-  st.observe([Object.assign(row('146500032'), { agency: '', watch: '', inspections: [] })]); // search rows are complete
+  const other = Object.assign(row('146500033'), { inspections: [{ at: at + 36e5, label: 'Sat 11:00am' }] }); // the batch still carries inspections
+  st.observe([Object.assign(row('146500032'), { agency: '', watch: '', inspections: [] }), other]); // search rows are complete
   const s1 = st.shortlist()[0];
   assert.deepEqual(s1.inspections, []);
   assert.equal(s1.watch, '');
@@ -528,4 +529,32 @@ test('a past inspection is remembered after REA drops it from the listing; backu
   const other = core.marksStore(mem(), () => t);
   other.importJson(st.exportJson());
   assert.equal(core.needsAction(other.shortlist()[0], t), '', 'restored answer is not asked again');
+});
+
+test('cancelled-inspection flag: label-only sessions, a session coming back, re-shortlisting, and a batch with no inspections', () => {
+  const t = Date.now();
+  const at = t + 2 * 864e5;
+  const setup = () => {
+    const st = core.marksStore(mem(), () => t);
+    st.toggle('146500034', 's', Object.assign(row('146500034'), { inspections: [{ at, label: 'Sat 10:00am' }] }));
+    return st;
+  };
+  const other = Object.assign(row('146500035'), { inspections: [{ at: at + 36e5, label: 'Sat 11:00am' }] });
+  const flag = (st) => st.shortlist().find((r) => r.id === '146500034').inspectCancelled;
+  let st = setup();
+  st.observe([Object.assign(row('146500034'), { inspections: [{ at: null, label: 'Sat 10:00am' }] }), other]);
+  assert.equal(flag(st), '', 'same session listed by label only');
+  st = setup();
+  st.observe([Object.assign(row('146500034'), { inspections: [] }), other]);
+  assert.equal(flag(st), 'Sat 10:00am');
+  st.observe([Object.assign(row('146500034'), { inspections: [{ at, label: 'Sat 10:00am' }] }), other]);
+  assert.equal(flag(st), '', 'it came back');
+  st.observe([Object.assign(row('146500034'), { inspections: [] }), other]);
+  st.toggle('146500034', 's'); st.toggle('146500034', 's');
+  assert.equal(flag(st), '', 're-shortlisting starts clean');
+  st = setup();
+  st.observe([Object.assign(row('146500034'), { inspections: [] })]);
+  const r = st.shortlist()[0];
+  assert.equal(r.inspections.length, 1, 'no inspections anywhere in the batch: stored ones kept');
+  assert.equal(r.inspectCancelled, '');
 });

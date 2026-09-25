@@ -123,3 +123,21 @@ test('pinned saved searches are forgotten last; evictions are reported; all pinn
   other.importData(st.exportData());
   assert.equal(other.exportData()[key('a')].pin, 1, 'pins survive a backup');
 });
+
+test('storage full: a pinned search is kept (or the loss reported), and pin reports a failed write', () => {
+  let t = Date.UTC(2026, 8, 1);
+  const store = mem(Infinity);
+  const st = core.snapshotStore(store, () => t);
+  const key = (x) => `https://www.realestate.com.au/rent/in-${x}/list-1`;
+  const rows = (n, base) => Array.from({ length: n }, (_, i) => row(String(146510000 + base + i)));
+  st.save(key('a'), rows(20, 0)); t += H;
+  st.pin(key('a'), true);
+  const one = store._m.get('rea-avail-filter/snapshots/v1').length;
+  const tight = core.snapshotStore(mem(Math.round(one * 1.6)), () => t);
+  tight.importData(st.exportData());
+  const out = tight.save(key('b'), rows(20, 100));
+  const kept = Object.keys(tight.exportData());
+  assert.ok(kept.includes(key('a')) || out.evicted.includes(key('a')), 'pinned search kept, or its loss reported');
+  assert.ok(kept.includes(key('a')), 'the pinned one wins');
+  assert.equal(out.refused, true, 'the new unpinned one is the one dropped');
+});

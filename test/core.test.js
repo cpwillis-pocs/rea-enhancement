@@ -761,3 +761,26 @@ test('bestRoute: one session per listing, reachable in time, "to inspect" favour
   for (let i = 1; i < picked.length; i++) assert.ok(picked[i].at >= picked[i - 1].end + 10 * 60e3);
   assert.equal(g.visits, 10, 'sessions 20 min apart, 15-min visits + 10-min floor: every other one');
 });
+
+test('QA round 12: taken boilerplate, heads-up negatives, d/m dates after month names, fast exact route', () => {
+  const t = (h, d = '') => core.toRow(listing({ title: h, description: d }), false).taken;
+  for (const d of ['Once approved, a holding deposit paid within 24 hours secures the property.', 'Holding deposit received upon approval of your application.',
+    'No holding deposit taken until your application is approved.', 'Pets considered under application.', 'Application approved tenants must sign within 48 hours.'])
+    assert.equal(t('Sunny 2 bed', d), '', d);
+  assert.equal(t('UNDER DEPOSIT | Bondi'), 'deposit');
+  assert.equal(t('Application received - 2 bed'), 'application');
+  assert.equal(t('Sunny 2 bed', 'The holding deposit has been paid; no further inspections.'), 'deposit');
+  for (const x of ['Freshly painted and professionally cleaned, must be seen!', 'Carpets cleaned, must inspect', 'a $30 application processing fee applies', 'bond lodgement and processing fees are paid by the landlord'])
+    assert.deepEqual(core.watchOf(x), [], x);
+  const now = new Date(2026, 8, 23);
+  assert.equal(+core.parseAvail('Available 1st Nov 2/3 bed', now), +new Date(2026, 10, 1));
+  assert.equal(+core.parseAvail('Available 1 Dec at 3/12 Hall St', now), +new Date(2026, 11, 1));
+  for (const x of ['Available 7/7', 'Available 12/7 days', 'Available 1/2 price first week']) assert.equal(core.parseAvail(x, now), null, x);
+  const d = (h, m) => new Date(2026, 8, 26, h, m).getTime();
+  const rows = Array.from({ length: 16 }, (_, i) => ({ id: `r${i}`, url: `u${i}`, address: `${i}`, price: '$1', lat: -33.89 + i * 0.002, lng: 151.27,
+    inspections: [0, 1, 2].map((k) => ({ at: d(9 + ((i * 7 + k * 5) % 4), ((i + k) % 4) * 15), label: 'x' })) }));
+  const t0 = performance.now();
+  const route = core.bestRoute(core.planDay(rows, '2026-09-26'));
+  assert.ok(performance.now() - t0 < 200, 'exact route over 16 listings x 3 sessions stays interactive');
+  assert.ok(route.visits >= 1 && route.listings === 16);
+});

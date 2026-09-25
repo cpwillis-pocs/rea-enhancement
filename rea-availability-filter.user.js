@@ -186,9 +186,11 @@
   // Summary fields a search result always carries in full (empty means none, not unknown).
   const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk'];
   // Label of an upcoming stored inspection missing from the fresh list ('' if none went).
+  // The upcoming stored inspection missing from the fresh list (null if none went). A session
+  // still listed by label only (no time) is not missing.
   const cancelledInspection = (old, next, t) => {
-    const keep = new Set((next || []).map((i) => i.at ?? i.label));
-    return (Array.isArray(old) ? old : []).find((i) => typeof i?.at === 'number' && i.at > t && !keep.has(i.at))?.label || '';
+    const keep = new Set((next || []).flatMap((i) => [i.at, i.label]).filter((x) => x != null && x !== ''));
+    return (Array.isArray(old) ? old : []).find((i) => typeof i?.at === 'number' && i.at > t && !keep.has(i.at) && !keep.has(i.label)) || null;
   };
   const CANCEL_SHOW_MS = 7 * DAY_MS;
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
@@ -330,6 +332,7 @@
         const { m } = fresh();
         const t = now();
         const batch = new Set(rows.map((r) => r.id));
+        const anyInspections = rows.some((r) => r.inspections?.length);
         for (const r of rows) {
           if (!r.id) continue;
           const e = m[r.id] || (m[r.id] = { f: t });
@@ -341,9 +344,12 @@
             if (features) {
               // Search results are complete for these, so an empty value is news: a cancelled
               // inspection or a dropped clause leaves the shortlist too. (Property pages merge.)
-              const gone = cancelledInspection(e.d?.in, next.in, t);
-              if (gone) e.ic = [t, gone];
-              e.d = { ...mergeSummary(e.d, next), ...Object.fromEntries(SEARCH_COMPLETE.map((k) => [k, next[k]])) };
+              // A batch with no inspections at all may mean REA stopped sending them: keep what's stored.
+              const fields = anyInspections ? SEARCH_COMPLETE : SEARCH_COMPLETE.filter((k) => k !== 'in');
+              const gone = anyInspections ? cancelledInspection(e.d?.in, next.in, t) : null;
+              if (gone) e.ic = [t, clip(gone.label, 80), gone.at];
+              else if (Array.isArray(e.ic) && next.in.some((i) => i.at === e.ic[2] || i.label === e.ic[1])) delete e.ic; // it came back
+              e.d = { ...mergeSummary(e.d, next), ...Object.fromEntries(fields.map((k) => [k, next[k]])) };
             } else e.d = mergeSummary(e.d, next); // keep the shortlist's copy current, never poorer
             if (li) e.li = li;
           }
@@ -429,7 +435,7 @@
         if (k === 'h') e.h = hiddenOf(e, e.rl ? m[e.rl] : null) ? 0 : 1;
         else e[k] = e[k] ? 0 : 1;
         if (k === 's') {
-          if (e.s) { e.st = now(); if (row) e.d = summary(row); } else { delete e.st; }
+          if (e.s) { e.st = now(); delete e.ic; if (row) e.d = summary(row); } else { delete e.st; }
         }
         save();
         return !!e[k];
@@ -534,7 +540,7 @@
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
           for (const k of ['nd', 'li']) if (typeof e[k] === 'number') cur[k] = Math.max(cur[k] || 0, e[k]);
-          if (Array.isArray(e.ic) && typeof e.ic[0] === 'number' && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80)];
+          if (Array.isArray(e.ic) && typeof e.ic[0] === 'number' && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80), typeof e.ic[2] === 'number' ? e.ic[2] : null];
           n++;
         }
         for (const f of Object.keys(NAMED)) {
@@ -709,18 +715,18 @@
     // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
     // lists, then give up. Returns the keys it stopped remembering.
     const persist = (d) => {
-      const keys = Object.keys(d.s).sort((a, b) => (d.s[b].pin ? 1 : 0) - (d.s[a].pin ? 1 : 0) || d.s[b].at - d.s[a].at);
-      const evicted = keys.slice(SNAP_MAX);
+      const order = () => Object.keys(d.s).sort((a, b) => (d.s[b].pin ? 1 : 0) - (d.s[a].pin ? 1 : 0) || d.s[b].at - d.s[a].at);
+      const evicted = order().slice(SNAP_MAX);
       for (const k of evicted) delete d.s[k];
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { const out = JSON.stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return evicted; } catch {
+        try { const out = JSON.stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return { evicted, ok: true }; } catch {
           memo = null;
-          const ks = Object.keys(d.s).sort((a, b) => d.s[b].at - d.s[a].at);
-          if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) delete d.s[k];
+          const ks = order(); // pinned first here too, and whatever goes is reported
+          if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) { delete d.s[k]; evicted.push(k); }
           else for (const k of ks) d.s[k].gone = [];
         }
       }
-      return evicted;
+      return { evicted, ok: false };
     };
     const newSince = (ids, baseIds) => {
       if (!baseIds) return new Set();
@@ -758,7 +764,7 @@
           }
         }
         const entry = d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX), ...(prev?.pin ? { pin: 1 } : {}) };
-        const evicted = persist(d);
+        const { evicted } = persist(d);
         // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
         return { ...view(entry), evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) };
       },
@@ -767,8 +773,7 @@
         const d = load();
         if (!d.s[key]) return false;
         if (on) d.s[key].pin = 1; else delete d.s[key].pin;
-        persist(d);
-        return true;
+        return persist(d).ok;
       },
       clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
       exportData: () => load().s,
@@ -877,9 +882,6 @@
       const d = new Date(+num[3] < 100 ? 2000 + +num[3] : +num[3], +num[2] - 1, +num[1]);
       return isNaN(d) || d.getDate() !== +num[1] || d.getMonth() !== +num[2] - 1 ? null : clamp(d); // 31/13 is not 31 Jan
     }
-    // Yearless "1/11" (d/m, slash only: "6-12" is a lease and "1.5" a bathroom count).
-    const dm = display.match(/\b(\d{1,2})\/(\d{1,2})\b(?![/.-]?\d)/);
-    if (dm && dm[0] !== '24/7') return yearless(+dm[1], +dm[2] - 1, today, clamp); // "available 24/7" is not 24 July
     // "12th Oct 2026", "1st of December", "October 12, 2026". Every candidate is tried so
     // words like "Available" (-> "ava") or weekdays don't shadow the real month.
     const cands = [
@@ -894,6 +896,10 @@
       const d = new Date(+yr, month, +day);
       return d.getDate() !== +day ? null : clamp(d); // 31 Feb, 29 Feb in a non-leap year
     }
+    // Last resort, yearless "1/11" (d/m) and only at the start: slash only ("6-12" is a lease,
+    // "1.5" a bathroom count), not "x/7" (a schedule), and not "2/3 bed", "1/2 price", "12/7 days".
+    const dm = display.match(/^\W*(?:available\s*)?(?:from\s+|on\s+|date:?\s*)?(\d{1,2})\/(\d{1,2})\b(?![/.-]?\d)(?!\s*(?:days?|price|bed|bath|car|br|off)\b)/i);
+    if (dm && dm[2] !== '7') return yearless(+dm[1], +dm[2] - 1, today, clamp);
     return null;
   };
 
@@ -1181,7 +1187,7 @@
   const amenitiesOf = (row) => {
     const text = `${(row.features || []).join(' | ')} | ${row.amenText ?? row.text ?? ''}`.toLowerCase();
     return Object.fromEntries(AMENITIES.map((a) => [a.id, a.gate && !text.includes(a.gate) ? null
-      : a.neg.test(text) || a.kvNo.test(text) ? 'no' : a.pos.test(text) ? 'yes' : null]));
+      : a.neg.test(text) ? 'no' : !a.pos.test(text) ? null : a.kvNo.test(text) ? 'no' : 'yes'])); // kvNo only matches where pos does
   };
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
@@ -1199,8 +1205,9 @@
     { id: 'strata', label: 'Subject to strata approval', re: /\bsubject to (?:strata|body corporate|owners? corporation)\b[^.;]{0,25}?\bapproval/ },
     { id: 'break', label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)?[- ]fees?\b|\blease[- ]break (?:fee|cost|clause)|\bbreaking (?:the|your) lease (?:incurs|costs|will)/ },
     // Appended only: signatures are bitmasks by position (featSig).
-    { id: 'clean', label: 'Professional clean required', re: /\b(?:professional(?:ly)?|carpets?|steam)(?: end[- ]of[- ]lease| bond)? clean(?:ed|ing)?\b[^.;]{0,30}?\b(?:required|must|on vacating|upon vacating|at (?:the )?end of)|\bmust be (?:professionally|steam) cleaned\b/ },
-    { id: 'payfee', label: 'Rent payment fee', re: /\b(?:rent )?(?:payment|processing|transaction|convenience) fees?\b/ },
+    { id: 'clean', label: 'Professional clean required', re: /\b(?:professional(?:ly)?|carpets?|steam)(?: end[- ]of[- ]lease| bond)? clean(?:ing)?\b[^.;]{0,30}?\b(?:required|must be|on vacating|upon vacating|at (?:the )?end of)|\bmust be (?:professionally|steam) cleaned\b|\bprofessionally cleaned (?:on|upon|when) vacating\b/ },
+    // Charges for paying the rent itself, not application or bond paperwork.
+    { id: 'payfee', label: 'Rent payment fee', re: /(?<!\b(?:application|bond|lodgement|holding|admin)\s(?:and\s)?)\b(?:rent )?(?:payment|processing|transaction|convenience) fees?\b/ },
     { id: 'garden', label: 'You maintain garden/pool', re: /\btenants? (?:is |are |will be )?(?:responsible for|to maintain|must maintain|maintains?) (?:the |all )?(?:gardens?|lawns?|yard|pool)\b/ },
   ];
   // A mention right next to a negation ("no application fee", "water usage not charged", "rent
@@ -1210,8 +1217,8 @@
   for (const w of WATCHOUTS) w.reG = new RegExp(w.re.source, 'g'); // compiled once; lastIndex reset per use
   const watchOf = (text) => {
     const lower = String(text || '').toLowerCase();
-    const clauses = lower.split(/(?<=[.!?;])\s+|\n+/);
-    return WATCHOUTS.filter((w) => w.re.test(lower) && clauses.some((c) => { // whole-text test first: most listings mention none
+    let clauses = null; // split only once some pattern hits: most listings mention none
+    return WATCHOUTS.filter((w) => w.re.test(lower) && (clauses ??= lower.split(/(?<=[.!?;])\s+|\n+/)).some((c) => { // whole-text test first: most listings mention none
       const re = w.reG;
       re.lastIndex = 0;
       for (let m; (m = re.exec(c));) {
@@ -1248,15 +1255,20 @@
   ];
   // Listings agents leave up once taken: "DEPOSIT TAKEN", "Under application", "LEASED".
   // "Leased" only counts in the headline (descriptions say "leased parking", "previously leased").
+  // Headlines are terse ("DEPOSIT TAKEN"); descriptions also carry process boilerplate ("a holding
+  // deposit paid within 24 hours secures it", "pets considered under application"), so the text
+  // needs a statement that it has already happened.
   const TAKEN = [
-    ['deposit', /\b(?:holding )?deposit (?:has been |now |already )?(?:taken|received|paid)\b/, true],
-    ['application', /\bunder application\b|\bapplications? (?:(?:now|are) )?closed\b|\bapplication (?:approved|accepted)\b/, true],
-    ['leased', /^\W*(?:leased|let agreed)\b|\b(?:now|just|has been) leased\b/, false],
+    ['deposit', /\bunder deposit\b|\b(?:holding )?deposit (?:has been |now |already )?(?:taken|received|paid)\b/,
+      /\b(?:holding )?deposit (?:has (?:now |already )?been|is now|was|now|already) (?:taken|received|paid)\b/],
+    ['application', /\bunder application\b|\bapplications? (?:(?:now|are) )?closed\b|\bapplication (?:received|approved|accepted)\b/,
+      /(?<!\b(?:pets?|considered|allowed|permitted|accepted|welcome)\s)\bunder application\b|\bapplications (?:are |have )?(?:now )?closed\b|\ban application has (?:now )?been (?:approved|accepted)\b/],
+    ['leased', /^\W*(?:leased|let agreed)\b|\b(?:now|just|has been) leased\b/, null],
   ];
   const TAKEN_LABELS = { deposit: 'Deposit taken', application: 'Under application', leased: 'Leased' };
   const takenOf = (headline, text) => {
     const h = String(headline || '').toLowerCase(), t = String(text || '').toLowerCase();
-    return TAKEN.find(([, re, inText]) => re.test(h) || (inText && re.test(t)))?.[0] || '';
+    return TAKEN.find(([, head, body]) => head.test(h) || (body && body.test(t)))?.[0] || '';
   };
   const applyViaOf = (text) => { const t = String(text || '').toLowerCase(); return APPLY_VIA.find(([, re]) => re.test(t))?.[0] || ''; };
 
@@ -1527,20 +1539,15 @@
   // suburb's median for that bed count (when that has MEDIAN_MIN listings), so a cheaper suburb
   // doesn't read as a bargain against a dearer one.
   const withMedians = (rows) => {
-    const byBeds = new Map(), bySuburb = new Map();
-    const add = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
     const priced = dedupe(rows).filter((r) => Number.isFinite(r.priceNum) && r.beds !== '');
-    for (const r of priced) {
-      if (!r.surrounding) add(byBeds, +r.beds, r.priceNum);
-      if (r.suburb) add(bySuburb, `${String(r.suburb).toLowerCase()}|${+r.beds}`, r.priceNum);
-    }
-    const mid = (v) => { v.sort((a, b) => a - b); return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2; };
-    const medians = (groups) => new Map([...groups].filter(([, v]) => v.length >= MEDIAN_MIN).map(([k, v]) => [k, mid(v)]));
-    const med = medians(byBeds);
+    const subKey = (r) => (r.suburb ? `${String(r.suburb).toLowerCase()}|${+r.beds}` : null);
+    // Same grouping and median as the market view, so a card's "x% below" agrees with its table.
+    const medians = (groups) => new Map(groups.map((g) => [g.key, medianOf(g.rents)]).filter(([, m]) => m != null));
+    const med = medians(groupRents(priced, (r) => (r.surrounding ? null : +r.beds)));
     const multi = new Set(priced.map((r) => String(r.suburb).toLowerCase())).size > 1;
-    const sub = multi ? medians(bySuburb) : new Map();
+    const sub = multi ? medians(groupRents(priced, subKey)) : new Map();
     for (const r of rows) {
-      const sm = r.beds === '' || !r.suburb ? undefined : sub.get(`${String(r.suburb).toLowerCase()}|${+r.beds}`);
+      const sm = r.beds === '' ? undefined : sub.get(subKey(r));
       const m = sm ?? (r.beds === '' ? undefined : med.get(+r.beds));
       r.median = m ?? null;
       r.medianScope = sm != null ? r.suburb : '';
@@ -1559,7 +1566,6 @@
   const clamp01 = (x) => Math.max(0, Math.min(1, x));
   const SCORE_AVAIL_DAYS = 30; // this many days away from "from" scores 0 on timing
   const SCORE_KM = 15; // distance that scores 0 when no max km is set
-  const median = (v) => { const a = v.filter(isFinite).sort((x, y) => x - y); return a.length ? a[Math.floor((a.length - 1) / 2)] : null; };
   // Rent as a share of gross household income; over 30% is the usual "rent stress" line.
   const RENT_STRESS_PCT = 30;
   const incomePct = (r, income) => (num(income) > 0 && Number.isFinite(r.priceNum) ? Math.round((r.priceNum * 52 * 100) / num(income)) : null);
@@ -1570,7 +1576,7 @@
     // Budget: your max rent, else what 30% of your income affords.
     const pMax = num(cfg.priceMax) || (num(cfg.income) > 0 ? Math.round((num(cfg.income) * RENT_STRESS_PCT) / 100 / 52) : null), kmMax = num(cfg.maxKm) || SCORE_KM;
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
-    const upMed = median(rows.map((r) => r.upfront));
+    const upMed = quantile(rows.map((r) => r.upfront).filter(Number.isFinite).sort(asc), 0.5);
     const w = Object.fromEntries(SCORE_WEIGHTS.map(([k, key]) => { const v = num(cfg[key]); return [k, v == null ? 2 : Math.max(0, Math.min(3, v))]; }));
     for (const r of rows) {
       const parts = [];
@@ -1794,7 +1800,13 @@
 
   // Same building: a unit address without its unit ("5/12 Hall St, Bondi" -> "12 hall st bondi").
   const UNIT_PREFIX = /^\s*(?:(?:(?:unit|apartment|apt|flat|suite|villa|townhouse|lot|shop|studio|penthouse|room)\s*[\w-]+|level\s*\d+)\s*[,\/]?\s*)+|^\s*(?:(?:shop|studio|penthouse|suite)\s+)?[\w-]+\s*\/\s*/i;
-  const buildingKey = (address) => (UNIT_PREFIX.test(String(address || '')) ? addressKey(String(address).replace(UNIT_PREFIX, '')) : '');
+  const bKeys = new Map(); // address -> building key: withBuildings/onePerBuilding/filterRows ask per row, per render
+  const buildingKey = (address) => {
+    const a = String(address || '');
+    let k = bKeys.get(a);
+    if (k === undefined) { if (bKeys.size > 20000) bKeys.clear(); bKeys.set(a, (k = UNIT_PREFIX.test(a) ? addressKey(a.replace(UNIT_PREFIX, '')) : '')); }
+    return k;
+  };
   // One per building keeps the cheapest unit; houses and unit-less addresses always stay.
   const onePerBuilding = (rows) => {
     const best = new Map();
@@ -1981,25 +1993,34 @@
     const better = (a, b) => !b || a.w > b.w || (a.w === b.w && (a.km < b.km - 1e-9 || (Math.abs(a.km - b.km) <= 1e-9 && a.end < b.end)));
     let best;
     if (ids.length <= ROUTE_EXACT_MAX) {
-      const memo = new Map();
-      // Best continuation after slot `i` (-1: start of day), having visited `mask`.
+      const n = slots.length, memo = new Map();
+      const bits = slots.map((x) => 1 << bit.get(x.r.id));
+      const kmTo = slots.map((a, i) => slots.map((b, j) => (j > i ? reachable(a, b) : -1))); // once per pair, not per visited-set
+      // Listings with a slot after i: only those bits of `mask` can change what follows, so
+      // states differing in earlier-only listings share one memo entry.
+      const later = new Array(n + 1).fill(0);
+      for (let i = n - 1; i >= 0; i--) later[i] = later[i + 1] | bits[i];
+      // Best continuation after slot `i` (-1: start of day), having visited `mask`; path as a linked list.
       const go = (i, mask) => {
-        const key = `${i}|${mask}`;
-        if (memo.has(key)) return memo.get(key);
-        let out = { w: 0, km: 0, end: i < 0 ? 0 : slots[i].end, path: [] };
-        for (let j = i + 1; j < slots.length; j++) {
-          const b = 1 << bit.get(slots[j].r.id);
-          if (mask & b) continue;
-          const km = i < 0 ? 0 : reachable(slots[i], slots[j]);
+        mask &= later[i + 1];
+        const key = mask * (n + 1) + i + 1;
+        const hit = memo.get(key);
+        if (hit) return hit;
+        let out = { w: 0, km: 0, end: i < 0 ? 0 : slots[i].end, j: -1, next: null };
+        for (let j = i + 1; j < n; j++) {
+          if (mask & bits[j]) continue;
+          const km = i < 0 ? 0 : kmTo[i][j];
           if (km < 0) continue;
-          const rest = go(j, mask | b);
-          const cand = { w: rest.w + weight(slots[j]), km: rest.km + km, end: rest.path.length ? rest.end : slots[j].end, path: [j, ...rest.path] };
+          const rest = go(j, mask | bits[j]);
+          const cand = { w: rest.w + weight(slots[j]), km: rest.km + km, end: rest.end, j, next: rest };
           if (better(cand, out)) out = cand;
         }
         memo.set(key, out);
         return out;
       };
-      best = go(-1, 0);
+      const path = [];
+      for (let c = go(-1, 0); c.j >= 0; c = c.next) path.push(c.j);
+      best = { path };
     } else {
       const path = [], seen = new Set();
       for (;;) {
@@ -2871,7 +2892,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const typed = (el) => el?.tagName === 'TEXTAREA' || el?.type === 'text' || el?.type === 'number' || el?.type === 'date';
     const renderNow = (defer) => { if (defer && pressing) renderAfterPress = true; else showResults(); };
     panel.addEventListener('pointerdown', () => { pressing = true; }, true);
-    panel.addEventListener('keydown', () => { pressing = false; }, true); // a press that never got its pointerup can't hold renders
+    // A press that never got its pointerup can't hold renders: a key ends it, and flushes what it held.
+    panel.addEventListener('keydown', () => { if (pressing) { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } } }, true);
     const endPress = () => pressing && setTimeout(() => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } }, 0);
     for (const type of ['pointerup', 'pointercancel', 'click']) document.addEventListener(type, endPress, true); // pointerup's timeout runs after its click
     const onChange = (e) => {
@@ -2888,6 +2910,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       saveCfg(cfg);
       if (!cfg.remember || !cfg.remindSaved) document.getElementById('rf-remind')?.remove();
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
+        setWarn('saved', '');
         ui.savedCtrl?.abort();
         snaps.clear();
         applySnap(null);
@@ -2973,7 +2996,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }
       const bulk = BULK_HIDE[b.dataset.act];
       if (bulk) { // hide a whole suburb or agency
-        const [field, toggle, prep] = bulk, name = rowById(id)?.[field];
+        const [field, toggle, prep] = bulk, name = rowOf(id)?.[field];
         if (!name) return;
         const on = toggle(name);
         refreshMarks();
@@ -3190,8 +3213,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const b = e.target.closest('[data-saved-pin]');
       if (!b) return;
       const on = b.getAttribute('aria-pressed') !== 'true';
-      snaps.pin(b.dataset.savedPin, on);
+      const ok = snaps.pin(b.dataset.savedPin, on);
+      setWarn('saved', '');
       renderSaved();
+      if (!ok) return setStatus("Couldn't save that: browser storage is full.", true);
       ui.saved.querySelector(`[data-saved-pin="${CSS.escape(b.dataset.savedPin)}"]`)?.focus();
       setStatus(on ? `Pinned ${searchLabel(b.dataset.savedPin)}.` : `Unpinned ${searchLabel(b.dataset.savedPin)}.`);
     });
@@ -4167,6 +4192,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
+      setWarn('saved', ''); // about the previous search
       fillPresets();
       renderSaved();
       setTimeout(() => enterSearchPresets(key), 0); // after the old search's state is cleared below

@@ -1059,7 +1059,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.evaluate(() => document.querySelectorAll('.rf-acts-more[open]').forEach((d) => { d.open = false; }));
     await page.click('.rf-item[data-id="146500000"] [data-act=s]');
     await done(page);
-    const later = await open(ctx, SEARCH, { route: serve([], { extras: true, noInspections: true }) });
+    const later = await open(ctx, SEARCH, { route: serve([], { extras: true, noInspectFor: ['146500000'] }) });
     await run(later);
     await later.click('[data-view=shortlist]');
     assert.match(await later.textContent('.rf-item[data-id="146500000"]'), /Inspection .+ cancelled/);
