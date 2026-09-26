@@ -332,7 +332,7 @@ const html = (n) => {
     await big.click('.rf-more-btn');
     assert.ok((await big.$$eval('.rf-item', (e) => e.length)) >= 100, 'button loads the next chunk');
     for (let i = 0; i < 5 && await big.$('.rf-more-btn'); i++) {
-      await big.evaluate(() => { const l = document.querySelector('.rf-list'); l.scrollTop = l.scrollHeight; });
+      await big.evaluate(() => { const p = document.getElementById('rf-panel'); p.scrollTop = p.scrollHeight; }); // the whole drawer scrolls
       await big.waitForTimeout(150);
     }
     assert.equal(await big.$$eval('.rf-item', (e) => e.length), 150, 'scrolling loads the rest');

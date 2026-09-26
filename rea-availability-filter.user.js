@@ -2309,6 +2309,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.22);color-scheme:light dark;
     font:13px/1.45 system-ui,-apple-system,sans-serif;color:var(--rf-fg)}
   #rf-panel *{box-sizing:border-box}
+  /* Side drawer: the whole drawer scrolls as one page (filters, then results) under a sticky
+     header, instead of the results getting a small scroll box of their own. */
+  #rf-panel:not(.rf-full){overflow-y:auto;overscroll-behavior:contain}
+  #rf-panel:not(.rf-full)>*{flex-shrink:0}
+  #rf-panel:not(.rf-full)>.rf-head{position:sticky;top:0;z-index:4;background:var(--rf-bg)}
+  #rf-panel:not(.rf-full)>.rf-controls{max-height:none;overflow:visible}
+  #rf-panel:not(.rf-full)>.rf-controls>.rf-actions{position:static}
+  #rf-panel:not(.rf-full)>.rf-list{flex:1 0 auto;overflow:visible}
+  #rf-panel:not(.rf-full) .rf-item{scroll-margin-top:64px}
   /* Expanded: near full-screen. Filters become a left column and results a grid on the right. */
   @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
   @media (min-width:760px){
@@ -2521,22 +2530,25 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   article[data-rf-pos]{position:relative}
   article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
   article[data-rf-match="0"]:hover{opacity:1}
-  .rf-badge{position:absolute;top:10px;left:10px;right:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;
-    font:600 11px/1 system-ui,-apple-system,sans-serif}
-  .rf-badge span{padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;white-space:nowrap}
-  .rf-badge .rf-b-pets{background:#7c3aed}
-  .rf-card-acts{display:inline-flex;gap:4px;margin-left:auto;pointer-events:auto}
-  .rf-badge .rf-card-acts button{pointer-events:auto;border:0;border-radius:999px;padding:5px 9px;cursor:pointer;
-    font:600 11px/1 system-ui,-apple-system,sans-serif;background:rgba(255,255,255,.92);color:#111;box-shadow:0 1px 3px rgba(0,0,0,.25)}
-  .rf-badge .rf-card-acts button[aria-pressed=true]{background:#e6a700}
-  .rf-badge .rf-card-acts button:focus-visible{outline:2px solid #087a50;outline-offset:1px}
-  .rf-badge .rf-b-now{background:#087a50}
-  .rf-badge .rf-b-none{background:rgba(90,90,90,.85)}
-  .rf-badge .rf-b-star{background:#e6a700;color:#111}
-  .rf-badge .rf-b-new{background:#2563eb}
-  .rf-badge .rf-b-taken{background:#b42318}
-  .rf-badge .rf-b-down{background:#087a50}
-  .rf-badge .rf-b-up{background:#a84f00}
+  /* On REA's cards: its own CSS (which may load after ours) mustn't size or pad our tags: reset, then !important. */
+  .rf-badge,.rf-badge *{all:unset!important;box-sizing:border-box!important}
+  .rf-badge{position:absolute!important;top:10px!important;left:10px!important;right:10px!important;z-index:5!important;display:flex!important;gap:4px!important;flex-wrap:wrap!important;align-items:center!important;pointer-events:none!important;
+    font:600 11px/1.2 system-ui,-apple-system,sans-serif!important;color:#fff!important;text-align:left!important}
+  .rf-badge>span{display:inline-block!important;padding:4px 8px!important;border-radius:999px!important;background:rgba(0,0,0,.78)!important;color:#fff!important;white-space:nowrap!important}
+  .rf-badge .rf-b-pets{background:#7c3aed!important}
+  .rf-badge>.rf-card-acts{display:inline-flex!important;gap:4px!important;margin-left:auto!important;padding:0!important;background:none!important;border-radius:0!important;pointer-events:auto!important}
+  .rf-badge .rf-card-acts button{display:inline-block!important;pointer-events:auto!important;border-radius:999px!important;padding:4px 9px!important;cursor:pointer!important;
+    font:600 11px/1.2 system-ui,-apple-system,sans-serif!important;background:rgba(255,255,255,.95)!important;color:#111!important;box-shadow:0 1px 3px rgba(0,0,0,.3)!important}
+  .rf-badge .rf-card-acts button:hover{background:#fff!important}
+  .rf-badge .rf-card-acts button[aria-pressed=true]{background:#e6a700!important}
+  .rf-badge .rf-card-acts button:focus-visible{outline:2px solid #087a50!important;outline-offset:1px!important}
+  .rf-badge .rf-b-now{background:#087a50!important}
+  .rf-badge .rf-b-none{background:rgba(90,90,90,.85)!important}
+  .rf-badge .rf-b-star{background:#e6a700!important;color:#111!important}
+  .rf-badge .rf-b-new{background:#2563eb!important}
+  .rf-badge .rf-b-taken{background:#b42318!important}
+  .rf-badge .rf-b-down{background:#087a50!important}
+  .rf-badge .rf-b-up{background:#a84f00!important}
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
     .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:48vh}
     .rf-actions{flex-wrap:wrap} .rf-actions .rf-bulk{flex:1 1 100%}
@@ -2549,11 +2561,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   `;
 
   const EMPTY_INTRO = 'Set your dates, then search.<br>Every result page is merged and sorted by availability.';
+  // What scrolls the results: the list itself when expanded, else the whole drawer.
+  const listScroller = () => (ui.panel.classList.contains('rf-full') ? ui.list : ui.panel);
+  // New results start at their top; in the side drawer only scroll up if the list's top has
+  // gone above the header (a filter change near the top of the drawer stays put).
+  const toListTop = () => {
+    if (ui.panel.classList.contains('rf-full')) { ui.list.scrollTop = 0; return; }
+    const head = ui.panel.querySelector('.rf-head').offsetHeight;
+    if (ui.list.getBoundingClientRect().top < ui.panel.getBoundingClientRect().top + head) ui.panel.scrollTop = ui.list.offsetTop - head;
+  };
   const setEmpty = (html) => { ui.list.innerHTML = `<div class="rf-empty">${html}</div>`; };
   const setLaunchCount = (n) => {
     ui.launchN = n;
     const star = marks.counts().starred;
-    ui.launch.textContent = `Availability filter${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
+    ui.launch.textContent = `Availability Filter${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
   };
   const currentKey = () => (isSearchPage(location.href) ? searchKey(location.href) : null);
 
@@ -2602,18 +2623,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
     const launch = document.createElement('button');
     launch.id = 'rf-launch';
-    launch.textContent = 'Availability filter';
+    launch.textContent = 'Availability Filter';
 
     const panel = document.createElement('div');
     panel.id = 'rf-panel';
     panel.hidden = true;
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Availability filter');
+    panel.setAttribute('aria-label', 'Availability Filter');
     launch.setAttribute('aria-controls', 'rf-panel');
     launch.setAttribute('aria-expanded', 'false');
     panel.innerHTML = `
       <div class="rf-head">
-        <h2>Availability filter</h2>
+        <h2>Availability Filter</h2>
         <button class="rf-clear" title="Reset all filters">Clear</button>
         <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
         <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
@@ -3145,7 +3166,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.warnbar.querySelector('.rf-warn-x').addEventListener('click', () => { ui.warnDismissed = ui.warnbar.querySelector('.rf-warn-msg').textContent; ui.warnbar.hidden = true; });
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
     if (typeof IntersectionObserver === 'function') {
-      const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: ui.list, rootMargin: '600px 0px' });
+      const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: null, rootMargin: '600px 0px' }); // the viewport: works whichever element scrolls
       new MutationObserver(() => { io.disconnect(); const b = ui.list.querySelector(':scope > .rf-more-btn'); if (b) io.observe(b); }).observe(ui.list, { childList: true });
     }
     ui.list.addEventListener('change', (e) => {
@@ -3595,13 +3616,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (cache) withBuildings(cache); // hiding one changes "N in this building"
     knownVer++;
     updateCounts();
-    const top = ui.list.scrollTop;
+    const scroller = listScroller(), top = scroller.scrollTop;
     const shown = ui.list.querySelectorAll('.rf-item').length;
     ui.keepShown = shown; // re-render as many as were showing, in one pass
     if (ui.view === 'shortlist') renderShortlist();
     else if (cache) showResults();
     ui.keepShown = 0;
-    ui.list.scrollTop = top;
+    scroller.scrollTop = top;
     scheduleAnnotate();
   }
 
@@ -3700,7 +3721,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : listHtml(rows);
-    ui.list.scrollTop = 0;
+    toListTop();
   }
 
   function planHtml(slots, day) {

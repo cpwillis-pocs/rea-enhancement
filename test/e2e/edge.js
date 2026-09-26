@@ -1184,6 +1184,30 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 34. Side drawer scrolls as one page (results aren't a small box of their own) with the header
+  // kept in view; REA's CSS can't inflate our card tags or wrap the card buttons in a pill.
+  await block('34', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await open(ctx, SEARCH, { before: (p) => p.addStyleTag({ content: 'article span{padding:14px 18px!important;font-size:18px;line-height:2;background:red} article button{padding:12px 20px}' }) });
+    await page.waitForSelector('article > .rf-badge');
+    const tag = await page.$eval('article > .rf-badge > span', (e) => e.getBoundingClientRect().height);
+    assert.ok(tag < 24, `tag height ${tag}`);
+    const acts = await page.$eval('article > .rf-badge > .rf-card-acts', (e) => getComputedStyle(e).backgroundColor);
+    assert.match(acts, /rgba\(0, 0, 0, 0\)|transparent/, 'button group has no pill of its own');
+    await run(page);
+    const [panelScrolls, listScrolls] = await page.evaluate(() => {
+      const p = document.getElementById('rf-panel'), l = document.querySelector('.rf-list');
+      return [p.scrollHeight > p.clientHeight + 100, l.scrollHeight > l.clientHeight + 1];
+    });
+    assert.ok(panelScrolls && !listScrolls, 'the drawer scrolls, not the list');
+    await page.$eval('#rf-panel', (p) => { p.scrollTop = p.scrollHeight; });
+    const headTop = await page.$eval('.rf-head', (h) => h.getBoundingClientRect().top);
+    assert.equal(Math.round(headTop), 0, 'header stays at the top');
+    assert.equal(await page.textContent('.rf-head h2'), 'Availability Filter');
+    console.log('drawer page scroll, card tags: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
