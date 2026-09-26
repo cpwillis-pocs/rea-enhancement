@@ -816,3 +816,16 @@ test('2.20: keyword OR and accents, inspections I can make, new amenities, by ap
   assert.ok(head.endsWith(',id,lat,lng'));
   assert.ok(line.endsWith(',146500001,-33.9,151.2'));
 });
+
+test('property type: several can be picked, any matches; one chip each; old single values still work', () => {
+  const rows = [{ id: '1', url: 'a', type: 'Apartment' }, { id: '2', url: 'b', type: 'Unit' }, { id: '3', url: 'c', type: 'House' }];
+  const ids = (type) => core.filterRows(rows, { ...core.DEFAULT_CFG, type }).map((r) => r.id);
+  assert.deepEqual(ids('Apartment,Unit'), ['1', '2']);
+  assert.deepEqual(ids('House'), ['3'], 'a saved single type');
+  assert.deepEqual(ids(''), ['1', '2', '3']);
+  assert.deepEqual(core.typeList(' Unit, ,Unit,House'), ['Unit', 'House']);
+  const cfg = { ...core.DEFAULT_CFG, type: 'Apartment,Unit' };
+  const chips = core.removedBy(rows, cfg);
+  assert.deepEqual(chips.map((c) => [c.label, c.removes]), [['Apartment', -1], ['Unit', -1]], 'dropping one of several types narrows (shown without a count)');
+  assert.deepEqual(core.removedBy(rows, { ...core.DEFAULT_CFG, type: 'Apartment' }).map((c) => c.removes), [2]);
+});

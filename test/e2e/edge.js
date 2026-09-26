@@ -546,14 +546,15 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'd:x' : '-3-bed'));
     await run(page);
     await page.click('#rf-more summary');
-    await page.selectOption('#rf-type', 'Townhouse');
+    await page.click('.rf-types [data-ptype="Townhouse"]');
     await page.selectOption('.rf-preset', 'c:save');
     assert.match(await status(page), /Saved preset "-3-bed"/);
     await page.selectOption('.rf-preset', 'c:bind');
     assert.match(await status(page), /d:x/);
     const vals = await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value));
     assert.ok(vals.includes('a:-3-bed') && vals.includes('d:-3-bed'), 'command-like name kept as a preset');
-    await page.selectOption('#rf-type', '');
+    await page.click('.rf-types [data-ptype="Townhouse"]'); // off again
+    assert.equal(await page.inputValue('#rf-type'), '');
     await page.selectOption('.rf-preset', 'a:-3-bed');
     assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'applying a "-" name applies, not deletes');
     await page.evaluate(() => sessionStorage.removeItem('rea-avail-filter/preset-visit'));
@@ -1153,6 +1154,33 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-launch');
     assert.ok(await page.$('.rf-news[hidden]'), 'not again');
     console.log("what's new: ok");
+    await done(page); await ctx.close();
+  });
+
+  // 33. Property type: pick several (any of them matches), one removable chip per type, kept
+  // across a reload; a picked type missing from the results still shows as a chip.
+  await block('33', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    await page.click('#rf-more summary');
+    const byType = await page.evaluate(() => { const n = {}; for (const r of window.reaFilter.rows()) n[r.type] = (n[r.type] || 0) + 1; return n; });
+    const names = await page.$$eval('.rf-types [data-ptype]', (b) => b.map((x) => x.dataset.ptype));
+    assert.deepEqual(names, Object.keys(byType).sort(), 'one chip per type in the results');
+    await page.click('.rf-types [data-ptype="Apartment"]');
+    assert.equal(await count(page), byType.Apartment);
+    await page.click('.rf-types [data-ptype="Unit"]');
+    assert.equal(await count(page), byType.Apartment + byType.Unit, 'either type matches');
+    assert.equal(await page.inputValue('#rf-type'), 'Apartment,Unit');
+    assert.equal(await page.getAttribute('.rf-types [data-ptype="Unit"]', 'aria-pressed'), 'true');
+    await page.click('.rf-achip:has-text("Apartment")');
+    assert.equal(await count(page), byType.Unit, 'removing one chip keeps the other type');
+    assert.equal(await page.getAttribute('.rf-types [data-ptype="Apartment"]', 'aria-pressed'), 'false', 'type chip follows');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    assert.equal(await page.inputValue('#rf-type'), 'Unit', 'remembered');
+    await page.click('#rf-launch');
+    assert.ok(await page.$('.rf-types [data-ptype="Unit"][aria-pressed=true]'), 'picked type shown before results load');
+    console.log('multi-select type: ok');
     await done(page); await ctx.close();
   });
 

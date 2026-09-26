@@ -1694,13 +1694,18 @@
           const a = AMENITIES.find((x) => x.id === id);
           out.push({ key: k, amen: id, label: `${st === 'yes' ? '+' : '−'} ${a.label}` });
         }
+      } else if (k === 'type') {
+        for (const t of typeList(v)) out.push({ key: k, ptype: t, label: t });
       } else if (k === 'noWatch') {
         for (const id of watchIds(v)) out.push({ key: k, watch: id, label: `No ${WATCHOUTS.find((w) => w.id === id).label.toLowerCase()}` });
       } else if (k !== 'maxKm' || parseAnchor(cfg.anchor)) out.push({ key: k, label: CHIP_LABELS[k] ? CHIP_LABELS[k](v) : k });
     }
     return out;
   };
+  // cfg.type: one or more property types, comma-separated ("Apartment,Unit"); '' is any.
+  const typeList = (v) => [...new Set(String(v || '').split(',').map((t) => t.trim()).filter(Boolean))];
   const without = (cfg, chip) => {
+    if (chip.ptype) return { ...cfg, type: typeList(cfg.type).filter((t) => t !== chip.ptype).join(',') };
     if (chip.watch) return { ...cfg, noWatch: watchIds(cfg.noWatch).filter((id) => id !== chip.watch).join(',') };
     if (!chip.amen) return { ...cfg, [chip.key]: DEFAULT_CFG[chip.key] };
     const st = parseAmenCfg(cfg.amenities);
@@ -1834,7 +1839,7 @@
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const amenReq = Object.entries(parseAmenCfg(cfg.amenities));
     const noWatch = watchIds(cfg.noWatch);
-    const bKey = cfg.building.split('|')[0], leaseNeed = num(cfg.leaseMin); // building is "key|label" from "N in this building"
+    const bKey = cfg.building.split('|')[0], leaseNeed = num(cfg.leaseMin), types = typeList(cfg.type); // building is "key|label" from "N in this building"
     // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
     // Memoised per anchor: removedBy() re-filters once per chip with the same point.
@@ -1859,7 +1864,7 @@
       .filter((r) => (pMin == null || (Number.isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
       .filter((r) => upMax == null || (r.upfront ?? Infinity) <= upMax) // unknown bond fails a move-in cap
       .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
-      .filter((r) => !cfg.type || r.type === cfg.type)
+      .filter((r) => !types.length || types.includes(r.type))
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !cfg.hideTaken || !r.taken)
       .filter((r) => !kw || kw(r.text || ''))
@@ -2243,7 +2248,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2434,6 +2439,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-planner{padding:8px 12px}
   .rf-news{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-news-msg{flex:1}
+  .rf-types{align-items:center} .rf-types-list{display:contents} .rf-types .rf-label{margin-right:4px}
+  .rf-types .rf-chip[aria-pressed=true]{background:var(--rf-accent);color:#fff;border-color:var(--rf-accent)}
   .rf-partial{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;font-size:12px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-partial .rf-btn{flex:none;padding:4px 12px}
   .rf-warnbar{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;color:var(--rf-err);background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
@@ -2658,7 +2665,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
             <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
             <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
             <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
-            <label>Type<select id="rf-type"><option value="">Any</option></select></label>
+          </div>
+          <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
+            <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
           </div>
           <div class="rf-amen rf-amen-req" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
             <input type="hidden" id="rf-amenities">
@@ -2817,7 +2826,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
     queueMicrotask(() => ui.paintAmen?.());
     ui.fields = fields;
-    ui.type = panel.querySelector('#rf-type');
     // Amenity chips cycle any -> require -> exclude, writing the hidden rf-amenities field.
     const amenInput = panel.querySelector('#rf-amenities');
     const paintAmen = () => {
@@ -2842,7 +2850,27 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       paintNoWatch();
       noWatchInput.dispatchEvent(new Event('change'));
     });
-    ui.paintAmen = () => { paintAmen(); paintNoWatch(); };
+    const typeInput = panel.querySelector('#rf-type');
+    // Chips for the types in these results, plus any picked type they lack (eg from a preset).
+    ui.typeNames = [];
+    const paintTypes = () => {
+      const on = typeList(typeInput.value), names = [...new Set([...ui.typeNames, ...on])].sort();
+      const list = panel.querySelector('.rf-types-list');
+      const focused = list.contains(document.activeElement) ? document.activeElement.dataset.ptype : null;
+      list.innerHTML = names.length ? names.map((t) => `<button type="button" class="rf-chip" data-ptype="${esc(t)}" aria-pressed="${on.includes(t)}">${esc(t)}</button>`).join('')
+        : '<span class="rf-meta">Search to see the types</span>';
+      if (focused) list.querySelector(`[data-ptype="${CSS.escape(focused)}"]`)?.focus();
+    };
+    panel.querySelector('.rf-types').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ptype]');
+      if (!b) return;
+      const on = typeList(typeInput.value), t = b.dataset.ptype;
+      typeInput.value = (on.includes(t) ? on.filter((x) => x !== t) : [...on, t]).join(',');
+      paintTypes();
+      typeInput.dispatchEvent(new Event('change'));
+    });
+    ui.paintTypes = paintTypes;
+    ui.paintAmen = () => { paintAmen(); paintNoWatch(); paintTypes(); };
     panel.querySelector('.rf-amen-req').addEventListener('click', (e) => {
       const b = e.target.closest('[data-amen]');
       if (!b) return;
@@ -3657,7 +3685,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const chips = cache ? removedBy(pool(), cfg) : [];
     ui.active.hidden = !chips.length || ui.view === 'shortlist';
     ui.active.innerHTML = chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"
-      aria-label="Remove filter ${esc(c.label)}${c.removes ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join('');
+      aria-label="Remove filter ${esc(c.label)}${c.removes > 0 ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes > 0 ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join('');
     ui.activeChips = chips;
     ui.moreSummary.textContent = `More filters${chips.length ? ` (${chips.length} active)` : ''}`;
   }
@@ -3893,11 +3921,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   function fillTypes(rows) {
-    const types = [...new Set(rows.map((r) => r.type).filter(Boolean))].sort();
-    if (cfg.type && !types.includes(cfg.type)) types.unshift(cfg.type);
-    ui.type.innerHTML = '<option value="">Any</option>' +
-      types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
-    ui.type.value = cfg.type;
+    ui.typeNames = [...new Set(rows.map((r) => r.type).filter(Boolean))];
+    ui.paintTypes();
   }
 
   let textClipped = false; // rows came from storage, whose listing text is shortened
