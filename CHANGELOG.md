@@ -2,6 +2,13 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.21.2
+
+- Side drawer, now that it scrolls as one page: the header, tabs and status line stay at the top, so the listing count, **Undo** and the hide reasons are visible however far down you are. **↑ Filters** (or f) jumps back to the filters, switching between Results and Shortlist keeps your place in each, and ? scrolls the keyboard help into view.
+- Expanded view loads the next 50 listings before you reach the end again.
+- Hiding a listing from REA's own card with the drawer closed shows Undo and the reasons in a small note by the launcher.
+- The status line's "N new · N price changed" counts no longer include listings you've hidden.
+
 ## 2.21.1
 
 - **More room for results in the side drawer**: the whole drawer now scrolls as one page (filters, then results) with the header kept at the top, instead of the results sitting in a small scroll box of their own. Expanded mode keeps its two columns.
