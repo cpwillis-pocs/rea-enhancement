@@ -1204,8 +1204,51 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const headTop = await page.$eval('.rf-head', (h) => h.getBoundingClientRect().top);
     assert.equal(Math.round(headTop), 0, 'header stays at the top');
     assert.equal(await page.textContent('.rf-head h2'), 'Availability Filter');
-    console.log('drawer page scroll, card tags: ok');
     await done(page); await ctx.close();
+
+    // 150 listings: Undo stays in view deep in the list, ↑ Filters goes back up, tabs keep your
+    // place, and expanded mode still loads the next chunk before its button is reached.
+    const big = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const p = await open(big, SEARCH, { route: serve([], { pages: 10, perPage: 15 }) });
+    await p.click('#rf-launch'); await p.click('#rf-run');
+    await waitStatus(p, /150 listings match|of 150 listings match/, 20000);
+    const id = await p.$$eval('.rf-item', (e) => e[40].dataset.id);
+    await p.focus(`.rf-item[data-id="${id}"]`);
+    await p.keyboard.press('h');
+    const inView = await p.evaluate(() => {
+      const u = document.querySelector('.rf-status .rf-undo'), panel = document.getElementById('rf-panel');
+      if (!u) return false;
+      const r = u.getBoundingClientRect(), head = panel.querySelector('.rf-tabs').getBoundingClientRect();
+      return r.top >= head.bottom - 1 && r.bottom <= panel.getBoundingClientRect().bottom;
+    });
+    assert.ok(inView, 'Undo visible under the header');
+    await p.click('.rf-status .rf-undo');
+    assert.equal((await marks(p))[id].h, 0, 'undone');
+    assert.ok(await p.isVisible('.rf-tofilters'), '↑ Filters offered once they scrolled away');
+    const before = await p.$eval('#rf-panel', (el) => el.scrollTop);
+    await p.click('[data-view=shortlist]'); await p.click('[data-view=results]');
+    assert.ok(Math.abs(await p.$eval('#rf-panel', (el) => el.scrollTop) - before) < 5, 'tab switch keeps the place');
+    await p.click('.rf-tofilters');
+    assert.equal(await p.$eval('#rf-panel', (el) => el.scrollTop), 0);
+    assert.equal(await p.evaluate(() => document.activeElement.id), 'rf-from');
+    assert.ok(!(await p.isVisible('.rf-tofilters')));
+    await p.click('.rf-expand');
+    const shown = await count(p);
+    await p.$eval('.rf-list', (l) => { l.scrollTop = l.querySelector('.rf-more-btn').offsetTop - l.clientHeight - 300; });
+    await p.waitForFunction((n) => document.querySelectorAll('.rf-item').length > n, shown, { timeout: 3000 });
+    await p.click('.rf-expand');
+    // Hide from REA's card with the drawer closed: Undo and reasons appear by the launcher.
+    await p.click('#rf-panel .rf-x');
+    const card = 'article:has(.rf-badge)';
+    await p.hover(card);
+    const cid = await p.$eval(`${card} [data-card-act=h]`, (b) => b.dataset.id);
+    await p.click(`${card} [data-card-act=h]`);
+    await p.waitForSelector('#rf-toast');
+    await p.click('#rf-toast [data-r=price]');
+    assert.equal((await marks(p))[cid].hr, 'price', 'reason from the note');
+    assert.equal(await p.$('#rf-toast'), null);
+    console.log('drawer page scroll, sticky status, filters jump, tab place, card toast: ok');
+    await done(p); await big.close();
   });
 
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.

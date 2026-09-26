@@ -268,7 +268,9 @@ test('cfgError: conflicting settings explained', () => {
 test('diffStats / ago / isFresh', () => {
   const a = core.toRow(listing({ id: 'a' }), false), b = core.toRow(listing({ id: 'b' }), true), b2 = core.toRow(listing({ id: 'b' }), false);
   a.sinceLast = true; b.hidden = b2.hidden = true; b2.prevPrice = '$1';
-  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 1, redated: 0, featured: 0, hidden: 1 });
+  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 0, redated: 0, featured: 0, hidden: 1 }, "a hidden listing's price change isn't counted");
+  b.hidden = b2.hidden = false;
+  assert.equal(core.diffStats([a, b, b2]).moved, 1);
   assert.equal(core.ago(30e3), 'just now');
   assert.equal(core.ago(5 * 60e3), '5 min ago');
   assert.equal(core.ago(3 * 36e5), '3h ago');

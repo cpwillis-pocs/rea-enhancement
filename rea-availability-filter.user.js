@@ -1805,7 +1805,11 @@
   // Counts for the status line over the deduped rows.
   const diffStats = (rows) => {
     let fresh = 0, moved = 0, redated = 0, featured = 0, hidden = 0;
-    for (const r of dedupe(rows)) { fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; redated += r.prevAvail ? 1 : 0; featured += r.featChange ? 1 : 0; hidden += r.hidden ? 1 : 0; }
+    for (const r of dedupe(rows)) {
+      hidden += r.hidden ? 1 : 0;
+      if (ruledOut(r)) continue; // changes are counted over what you could still pick, as "Changed recently" shows
+      fresh += isFresh(r) ? 1 : 0; moved += r.prevPrice ? 1 : 0; redated += r.prevAvail ? 1 : 0; featured += r.featChange ? 1 : 0;
+    }
     return { fresh, moved, redated, featured, hidden };
   };
 
@@ -2292,11 +2296,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Colours are tokens on #rf-panel so the dark scheme only swaps values.
   const css = `
-  #rf-panel,#rf-launch,#rf-lbar,#rf-remind{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
+  #rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
     --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
     --rf-err:#c00;--rf-tag:#eee;--rf-up:#b34700;--rf-star-fg:#8a6100}
   @media (prefers-color-scheme: dark){
-    #rf-panel,#rf-launch,#rf-lbar,#rf-remind{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;
+    #rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;
       --rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e}
   }
   #rf-launch{position:fixed;right:20px;bottom:20px;z-index:2147483000;padding:11px 16px;border:0;border-radius:999px;
@@ -2317,7 +2321,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-panel:not(.rf-full)>.rf-controls{max-height:none;overflow:visible}
   #rf-panel:not(.rf-full)>.rf-controls>.rf-actions{position:static}
   #rf-panel:not(.rf-full)>.rf-list{flex:1 0 auto;overflow:visible}
-  #rf-panel:not(.rf-full) .rf-item{scroll-margin-top:64px}
+  #rf-panel:not(.rf-full)>.rf-tabs{position:sticky;top:var(--rf-head-h,51px);z-index:4;background:var(--rf-bg)}
+  #rf-panel:not(.rf-full)>.rf-status{position:sticky;top:calc(var(--rf-head-h,51px) + var(--rf-tabs-h,38px));z-index:3;background:var(--rf-bg)}
+  #rf-panel:not(.rf-full) .rf-item{scroll-margin-top:calc(var(--rf-head-h,51px) + var(--rf-tabs-h,38px) + var(--rf-status-h,40px) + 4px)}
   /* Expanded: near full-screen. Filters become a left column and results a grid on the right. */
   @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
   @media (min-width:760px){
@@ -2339,7 +2345,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-n{font-weight:400;color:var(--rf-soft)}
   .rf-undo{margin-left:8px;border:0;background:none;padding:0;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);
     text-decoration:underline;cursor:pointer}
-  .rf-clear{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
+  .rf-clear,.rf-tofilters{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-keys,.rf-expand{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
     color:var(--rf-muted);cursor:pointer;padding:0}
   .rf-help{padding:10px 16px;border-bottom:1px solid var(--rf-line);font-size:12px;background:var(--rf-hover)}
@@ -2473,6 +2479,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)}
   .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  #rf-toast{position:fixed;right:20px;bottom:72px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(360px,calc(100vw - 32px));
+    padding:10px 12px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
+  #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
   #rf-remind{position:fixed;right:20px;bottom:72px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:min(340px,calc(100vw - 32px));
     padding:10px 12px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
   #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
@@ -2567,7 +2576,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // gone above the header (a filter change near the top of the drawer stays put).
   const toListTop = () => {
     if (ui.panel.classList.contains('rf-full')) { ui.list.scrollTop = 0; return; }
-    const head = ui.panel.querySelector('.rf-head').offsetHeight;
+    const head = ui.panel.querySelector('.rf-head').offsetHeight + ui.panel.querySelector('.rf-tabs').offsetHeight;
     if (ui.list.getBoundingClientRect().top < ui.panel.getBoundingClientRect().top + head) ui.panel.scrollTop = ui.list.offsetTop - head;
   };
   const setEmpty = (html) => { ui.list.innerHTML = `<div class="rf-empty">${html}</div>`; };
@@ -2635,6 +2644,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     panel.innerHTML = `
       <div class="rf-head">
         <h2>Availability Filter</h2>
+        <button type="button" class="rf-tofilters" hidden title="Back up to the filters (f)">↑ Filters</button>
         <button class="rf-clear" title="Reset all filters">Clear</button>
         <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
         <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
@@ -2791,7 +2801,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <strong>Keyboard</strong>
         <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
         <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>o / Enter</dt><dd>open listing</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
-        <dt>e</dt><dd>expand / shrink the drawer</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
+        <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
       </div>
       <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
         <span class="rf-share-msg"></span>
@@ -2929,7 +2939,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     launch.addEventListener('click', () => { setOpen(true); ui.run.focus(); });
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
     const help = panel.querySelector('.rf-help'), helpBtn = panel.querySelector('.rf-keys');
-    const toggleHelp = () => { help.hidden = !help.hidden; helpBtn.setAttribute('aria-expanded', String(!help.hidden)); };
+    const toggleHelp = () => {
+      help.hidden = !help.hidden;
+      helpBtn.setAttribute('aria-expanded', String(!help.hidden));
+      if (!help.hidden) help.scrollIntoView({ block: 'nearest' });
+    };
     // Expanded drawer, remembered per browser. Phones are already full screen, so the button is hidden there.
     const expandBtn = panel.querySelector('.rf-expand');
     const setWide = (on, save = true) => {
@@ -2939,6 +2953,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       expandBtn.title = on ? 'Back to the side drawer (e)' : 'Expand to near full screen (e)';
       expandBtn.textContent = on ? '⤡' : '⤢';
       if (save) { if (on) wideKey.set('1'); else wideKey.clear(); }
+      ui.watchMore?.();
+      ui.syncSticky?.();
     };
     setWide(wideKey.get() === '1', false);
     expandBtn.addEventListener('click', () => setWide(!panel.classList.contains('rf-full')));
@@ -2993,6 +3009,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
         if (e.key === 'e' && !narrow.matches) { e.preventDefault(); expandBtn.click(); return; }
+        if (e.key === 'f') { e.preventDefault(); ui.toFilters(); return; }
         if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
         if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
         if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
@@ -3163,11 +3180,39 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     placesBox.addEventListener('input', paintPlaces);
     ui.paintPlaces = paintPlaces;
     paintPlaces();
+    // Side drawer: the status line (count, Undo, "Why?") sticks under the header, and once the
+    // filters have scrolled away the header offers a way back to them.
+    const head = panel.querySelector('.rf-head'), toFilters = panel.querySelector('.rf-tofilters');
+    ui.syncSticky = () => {
+      panel.style.setProperty('--rf-head-h', `${head.offsetHeight}px`);
+      panel.style.setProperty('--rf-status-h', `${ui.status.offsetHeight}px`);
+      const tabs = panel.querySelector('.rf-tabs');
+      panel.style.setProperty('--rf-tabs-h', `${tabs.offsetHeight}px`);
+      const top = ui.view === 'shortlist' ? ui.slBar : ui.controls;
+      toFilters.hidden = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
+    };
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => ui.syncSticky()).observe(ui.status);
+    panel.addEventListener('scroll', () => ui.syncSticky(), { passive: true });
+    ui.toFilters = () => {
+      panel.scrollTop = 0;
+      (ui.view === 'shortlist' ? ui.slBar.querySelector('select, input, button') : panel.querySelector('#rf-from'))?.focus({ preventScroll: true });
+      ui.syncSticky();
+    };
+    toFilters.addEventListener('click', () => ui.toFilters());
     ui.warnbar.querySelector('.rf-warn-x').addEventListener('click', () => { ui.warnDismissed = ui.warnbar.querySelector('.rf-warn-msg').textContent; ui.warnbar.hidden = true; });
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
+    // Its root is whatever scrolls the results (the drawer, or the list when expanded), so it is
+    // rebuilt when that changes.
     if (typeof IntersectionObserver === 'function') {
-      const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: null, rootMargin: '600px 0px' }); // the viewport: works whichever element scrolls
-      new MutationObserver(() => { io.disconnect(); const b = ui.list.querySelector(':scope > .rf-more-btn'); if (b) io.observe(b); }).observe(ui.list, { childList: true });
+      let io = null;
+      const observeMore = () => { if (!io) return; io.disconnect(); const b = ui.list.querySelector(':scope > .rf-more-btn'); if (b) io.observe(b); };
+      ui.watchMore = () => {
+        io?.disconnect();
+        io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: listScroller(), rootMargin: '600px 0px' });
+        observeMore();
+      };
+      ui.watchMore();
+      new MutationObserver(observeMore).observe(ui.list, { childList: true });
     }
     ui.list.addEventListener('change', (e) => {
       const cmp = e.target.closest('input[data-cmp]');
@@ -3417,7 +3462,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const rowOf = (id) => rowById(id) || ui.rows?.find((x) => x.id === id); // also shortlist-only rows
   const BULK_HIDE = { sb: ['suburb', (n) => marks.toggleSuburb(n), 'in'], ag: ['agency', (n) => marks.toggleAgency(n), 'from'] };
 
+  // Where you were in each tab (and for which search + filters), so switching tabs keeps it.
+  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify(cfg)}`);
   function setView(view) {
+    const place = (ui.place ||= {});
+    if (ui.view && ui.view !== view) place[ui.view] = { top: listScroller().scrollTop, shown: ui.list.querySelectorAll('.rf-item').length, sig: placeSig(ui.view) };
+    const back = place[view]?.sig === placeSig(view) ? place[view] : null;
+    if (back) ui.keepShown = back.shown;
     ui.view = view;
     for (const t of ui.tabs) { const on = t.dataset.view === view; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; }
     ui.list.setAttribute('aria-labelledby', `rf-tab-${view}`);
@@ -3430,6 +3481,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (sl) renderShortlist();
     else if (cache) showResults();
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
+    ui.keepShown = 0;
+    if (back) listScroller().scrollTop = back.top;
+    ui.syncSticky?.();
   }
 
   const shortlistRows = (all = marks.shortlist()) => {
@@ -3627,7 +3681,28 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // After a hide: Undo plus one-tap reasons, so "why did I rule this out?" has an answer later.
+  // Hidden from REA's card with the drawer closed: the drawer's status line can't be seen, so
+  // Undo and the reasons go in a small note by the launcher for a few seconds.
+  const TOAST_MS = 10000;
+  function toastHideUndo(id, undo) {
+    document.getElementById('rf-toast')?.remove();
+    const t = Object.assign(document.createElement('div'), { id: 'rf-toast' });
+    t.setAttribute('role', 'status');
+    t.innerHTML = `<span>Listing hidden.</span><button type="button" data-t="undo">Undo</button><span>Why?</span>${HIDE_REASONS.map((r) => `<button type="button" data-t="why" data-r="${esc(r)}">${esc(r)}</button>`).join('')}`;
+    let timer = setTimeout(() => t.remove(), TOAST_MS);
+    t.addEventListener('mouseenter', () => clearTimeout(timer));
+    t.addEventListener('mouseleave', () => { timer = setTimeout(() => t.remove(), TOAST_MS / 2); });
+    t.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-t]');
+      if (!b) return;
+      if (b.dataset.t === 'undo') undo();
+      else { marks.setHideReason(id, b.dataset.r); if (cache) marks.decorate(cache); }
+      t.remove();
+    });
+    document.body.appendChild(t);
+  }
   function offerHideUndo(id, undo) {
+    if (ui.panel.hidden) return toastHideUndo(id, undo);
     offerUndo('Listing hidden.', undo);
     const why = document.createElement('span');
     why.className = 'rf-why';
@@ -4353,7 +4428,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (!isSearchPage(location.href)) return;
       // Ignore mutations confined to our own badges/panel.
       const ours = (m) => m.type === 'childList' && (m.target.closest?.('.rf-badge, #rf-panel, #rf-launch') ||
-        m.removedNodes.length === 0 && m.addedNodes.length > 0 && [...m.addedNodes].every((n) => n.classList?.contains('rf-badge')));
+        m.removedNodes.length === 0 && m.addedNodes.length > 0 && [...m.addedNodes].every((n) => n.classList?.contains('rf-badge')) ||
+        [...m.addedNodes, ...m.removedNodes].every((n) => /^rf-(?:toast|remind|lbar)$/.test(n.id || '')) && m.addedNodes.length + m.removedNodes.length > 0); // our own notes on <body>
       if (muts.every(ours)) return;
       scheduleAnnotate();
     }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
