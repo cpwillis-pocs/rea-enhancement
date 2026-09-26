@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.21.0
+
+- **Pick several property types**: Type under More filters is now a row of chips built from the types in your results; pick any number ("Apartment" and "Unit") and a listing of any of them matches. Each picked type gets its own removable filter chip. Saved settings and presets with a single type keep working.
+
 ## 2.20.0
 
 - **Search failures keep what was read**: if REA blocks or errors on a later page, the listings from the pages already read are shown, with "Read 6 of 12 pages; page 7 failed (…)" and **Resume**, which carries on from there without re-reading the rest. A partial search isn't remembered as a saved search (unread listings would look gone). **Check all** carries on past a search that fails and marks it "couldn't be read".
