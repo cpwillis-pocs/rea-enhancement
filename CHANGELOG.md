@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.21.1
+
+- **More room for results in the side drawer**: the whole drawer now scrolls as one page (filters, then results) with the header kept at the top, instead of the results sitting in a small scroll box of their own. Expanded mode keeps its two columns.
+- **Tags on REA's cards** look right again: REA's own styles could enlarge them, and the Shortlist / Hide buttons sat inside a dark pill; both fixed.
+- The drawer is now titled **Availability Filter**.
+
 ## 2.21.0
 
 - **Pick several property types**: Type under More filters is now a row of chips built from the types in your results; pick any number ("Apartment" and "Unit") and a listing of any of them matches. Each picked type gets its own removable filter chip. Saved settings and presets with a single type keep working.

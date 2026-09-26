@@ -12,7 +12,7 @@ Everything stays local: no account, no telemetry, no third-party requests. The o
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) in Chrome (Firefox/Edge also work).
 2. Click **[install the script](https://raw.githubusercontent.com/cpwillis/rea-enhancement/main/rea-availability-filter.user.js)**. Tampermonkey opens its install page; confirm.
-3. Open any `realestate.com.au/rent/...` search and click **Availability filter** at the bottom right.
+3. Open any `realestate.com.au/rent/...` search and click **Availability Filter** at the bottom right.
 
 Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and installs any newer `@version`. To update now, Tampermonkey dashboard -> **Utilities** -> **Check for userscript updates**.
 
