@@ -26,7 +26,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Other places**: up to 3 named points (work, school, partner) with km to each and a "Nearest to all places" sort.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
-- Sort by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
+- Sort (⇅ reverses it; listings without the value stay last) by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Lease overlap**: with your current lease end set, each listing shows the days of double rent (and cost) or the nights you'd need to cover, sortable.
 - **Lease term** and **Apply via** portal picked out of the text; filter out leases shorter than you need; availability read from the description when REA's date is missing.
@@ -39,9 +39,13 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
 - **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
-- **Expand** (⤢ in the drawer's header, or e): near full screen, with the filters in a left column and results in a grid of cards; remembered until you shrink it again.
+- **Expand** (⤢ in the drawer's header, or e): near full screen, with the filters in a left column and results in a grid of cards; remembered until you shrink it again. Or drag the drawer's left edge to any width (two results per row from 760px).
+- **Compact list** (Settings, or d): small photos and the key facts, about twice as many listings on screen.
+- **Photo peek**: p or Space (or hover a thumbnail) shows a large photo; j/k flip through listings with it open.
+- **Reviewed**: going past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed; **Not reviewed yet** (More filters) and "reviewed 34 of 150" in the status line keep your place across visits.
+- **Hidden for the price?** Give "price" as the reason and the listing comes back, tagged "$110 cheaper since you hid it", if its rent drops. Reasons can be set or changed later from a hidden listing's ⋯ menu.
 - **Inspections I can make**: keep only listings with an open home on a weekend or after 5pm.
-- **Keyboard**: j/k move, s shortlist, h hide, n note, o open, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
+- **Keyboard**: j/k move, g/G first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, r reviewed, p photo, 1–5 application status, o open, t Results/Shortlist, f filters, d compact, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
 **On REA's own result cards**

@@ -2,6 +2,17 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.22.0
+
+- **Compact list** (Settings, or d): small photos and the key facts only, so about twice as many listings fit on screen; a listing's buttons appear when you point at it or move to it.
+- **Photo peek**: p or Space (or hovering a thumbnail) shows the photo large beside the drawer; j/k flip through listings with it open, Esc closes it.
+- **Reviewed**: moving past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed. **Not reviewed yet** under More filters, "reviewed 34 of 150" in the status line, and "Mark all shown reviewed" in Bulk let a long triage pick up where you left off, even on another day.
+- **Reverse sort** (⇅ next to Sort): highest rent first, latest available first and so on; listings without the value (eg "Contact agent") stay last.
+- **Resizable drawer**: drag its left edge (or use the arrow keys on it) to any width from 360 to 900px; from 760px results show two per row. Remembered.
+- **Hidden for the price, now cheaper**: a listing you hid with the reason "price" comes back, tagged "$110 cheaper since you hid it", if its rent drops (Hide again to dismiss it at the new rent). Other hidden listings that got cheaper are counted in the status line. A hidden listing's ⋯ menu now sets or changes its reason.
+- **More keys**: u undo, 1–5 application status, g/G first/last, PgUp/PgDn by five, t Results/Shortlist.
+- Screen readers hear each result as "12 of 150: $690 per week, 805/34 Wentworth St…", and the listing link by its price, address and date instead of the whole card.
+
 ## 2.21.2
 
 - Side drawer, now that it scrolls as one page: the header, tabs and status line stay at the top, so the listing count, **Undo** and the hide reasons are visible however far down you are. **↑ Filters** (or f) jumps back to the filters, switching between Results and Shortlist keeps your place in each, and ? scrolls the keyboard help into view.

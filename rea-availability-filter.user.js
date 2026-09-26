@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.21.2
+// @version      2.22.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis/rea-enhancement
@@ -4374,11 +4374,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install records the version without a note.
-  const WHATS_NEW = { version: '2.21.0', items: [
-    'Expand the drawer near full screen with ⤢ (or e) to see results in a grid.',
-    'Pick several property types at once under More filters.',
-    'Plan a day now suggests a route; "Inspections I can make" keeps weekend or after-5pm open homes.',
-    'A search that fails partway keeps what it read, with Resume.',
+  const WHATS_NEW = { version: '2.22.0', items: [
+    'Compact list (d) fits twice as many listings; p shows a large photo.',
+    'Drag the drawer\'s edge to resize it; ⇅ reverses the sort.',
+    'Reviewed marks (r, or moving on with j) and a "Not reviewed yet" filter keep your place across visits.',
   ] };
   const SEEN_KEY = `${TOOL_PREFIX}seen-version`;
   const verNum = (v) => String(v || '0').split('.').reduce((n, x) => n * 1000 + (+x || 0), 0);
