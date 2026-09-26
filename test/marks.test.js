@@ -578,3 +578,47 @@ test('a failed write is reported, and the next good one clears it', () => {
     assert.deepEqual(seen, [false, true]);
   } finally { core.writeState.listeners.delete(f); core.writeState.report(true); }
 });
+
+test('hidden for its price: comes back (tagged) when the rent drops; other reasons only counted; Hide again resets', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const at = (id, price) => row(id, `$${price} per week`);
+  st.observe([at('146500081', 800), at('146500082', 800), at('146500083', 800)]);
+  for (const id of ['146500081', '146500082', '146500083']) st.toggle(id, 'h');
+  st.setHideReason('146500081', 'price');
+  st.setHideReason('146500082', 'location');
+  t += 864e5;
+  const now = [at('146500081', 690), at('146500082', 690), at('146500083', 800)];
+  st.observe(now); st.decorate(now);
+  const [price, loc, same] = now;
+  assert.deepEqual([price.cheaperBy, price.resurfaced], [110, true]);
+  assert.equal(core.filterRows(now, core.DEFAULT_CFG).map((r) => r.id).join(), '146500081', 'only the price-hidden one shows');
+  assert.deepEqual([loc.cheaperBy, loc.resurfaced], [110, false]);
+  assert.equal(core.diffStats(now).cheaperHidden, 1);
+  assert.equal(same.cheaperBy, 0);
+  st.rehide('146500081'); st.decorate(now);
+  assert.equal(price.resurfaced, false, 'hidden again at the new rent');
+  const other = core.marksStore(mem(), () => t);
+  other.importJson(st.exportJson());
+  assert.equal(other.exportData().m['146500082'].hp, 800, 'hide price survives a backup');
+});
+
+test('reviewed: set by hand or by deciding (shortlist, hide, note), filtered, counted, backed up, undone by a dump', () => {
+  const t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const rows = ['146500091', '146500092', '146500093', '146500094'].map((id) => row(id));
+  st.observe(rows);
+  const before = st.dump(rows.map((r) => r.id));
+  assert.equal(st.setReviewed(['146500091', 'not-an-id']), 1);
+  st.toggle('146500092', 's', rows[1]);
+  st.setNote('146500093', 'nice');
+  st.decorate(rows);
+  assert.deepEqual(rows.map((r) => !!r.reviewedAt), [true, true, true, false]);
+  assert.deepEqual(core.filterRows(rows, { ...core.DEFAULT_CFG, unreviewedOnly: true }).map((r) => r.id), ['146500094']);
+  assert.deepEqual([core.diffStats(rows).reviewed, core.diffStats(rows).total], [3, 4]);
+  const other = core.marksStore(mem(), () => t);
+  other.importJson(st.exportJson());
+  assert.equal(typeof other.exportData().m['146500092'].rv, 'number', 'kept listings carry it in backups');
+  st.restoreDump(before); st.decorate(rows);
+  assert.equal(rows[0].reviewedAt, null, 'bulk undo clears it');
+});

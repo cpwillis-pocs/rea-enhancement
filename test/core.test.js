@@ -268,7 +268,7 @@ test('cfgError: conflicting settings explained', () => {
 test('diffStats / ago / isFresh', () => {
   const a = core.toRow(listing({ id: 'a' }), false), b = core.toRow(listing({ id: 'b' }), true), b2 = core.toRow(listing({ id: 'b' }), false);
   a.sinceLast = true; b.hidden = b2.hidden = true; b2.prevPrice = '$1';
-  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 0, redated: 0, featured: 0, hidden: 1 }, "a hidden listing's price change isn't counted");
+  assert.deepEqual(core.diffStats([a, b, b2]), { fresh: 1, moved: 0, redated: 0, featured: 0, hidden: 1, cheaperHidden: 0, reviewed: 0, total: 1 }, "a hidden listing's price change isn't counted");
   b.hidden = b2.hidden = false;
   assert.equal(core.diffStats([a, b, b2]).moved, 1);
   assert.equal(core.ago(30e3), 'just now');
@@ -830,4 +830,14 @@ test('property type: several can be picked, any matches; one chip each; old sing
   const chips = core.removedBy(rows, cfg);
   assert.deepEqual(chips.map((c) => [c.label, c.removes]), [['Apartment', -1], ['Unit', -1]], 'dropping one of several types narrows (shown without a count)');
   assert.deepEqual(core.removedBy(rows, { ...core.DEFAULT_CFG, type: 'Apartment' }).map((c) => c.removes), [2]);
+});
+
+test('reversed sort: highest first, listings without the value still last, ties fall through', () => {
+  const rows = [{ id: 'a', url: 'a', priceNum: 500, avail: new Date(2026, 9, 1) }, { id: 'b', url: 'b', priceNum: Infinity, avail: new Date(2026, 9, 1) },
+    { id: 'c', url: 'c', priceNum: 900, avail: new Date(2026, 9, 5) }, { id: 'd', url: 'd', priceNum: 900, avail: new Date(2026, 9, 2) }];
+  const ids = (cfg) => core.applyFilters(rows, { ...core.DEFAULT_CFG, ...cfg }).map((r) => r.id).join('');
+  assert.equal(ids({ sort: 'price' }), 'adcb');
+  assert.equal(ids({ sort: 'price', sortDesc: true }), 'cdab', '"Contact agent" stays last');
+  assert.equal(ids({ sort: 'avail', sortDesc: true }).slice(0, 2), 'cd', 'latest available first');
+  assert.equal(core.sanitizeCfg({ sortDesc: true }).sortDesc, true);
 });

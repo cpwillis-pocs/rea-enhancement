@@ -1251,6 +1251,83 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(p); await big.close();
   });
 
+  // 35. Triage: compact list, photo peek, reviewed marks, extra keys, reverse sort, resizable
+  // drawer, list semantics, and a listing hidden for its price coming back cheaper.
+  await block('35', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // Seed: 146500002 hidden for its price at $2000/wk (the fixture rent is lower).
+    await ctx.addInitScript(() => {
+      if (!localStorage.getItem('rea-avail-filter/marks/v1')) localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: { 146500002: { f: 1, l: 1, h: 1, hr: 'price', hp: 2000, p: 2000 } } }));
+    });
+    const page = await open(ctx);
+    await run(page);
+    const item = (i) => `.rf-item:nth-child(${i})`;
+    assert.equal(await page.getAttribute(item(1), 'aria-posinset'), '1');
+    assert.equal(await page.getAttribute(item(1), 'aria-setsize'), String(await count(page)));
+    assert.match(await page.getAttribute(`${item(1)} .rf-card`, 'aria-label'), /\$\d+ per week, .+ \(opens the listing\)/);
+    assert.match(await page.textContent('.rf-item[data-id="146500002"]'), /cheaper since you hid it/, 'price-hidden listing back, tagged');
+    assert.match(await page.textContent('.rf-item[data-id="146500002"] [data-act=h]'), /Hide again/);
+    // Compact: d halves the height; the action row appears for the focused listing.
+    const tall = await page.$eval(item(2), (e) => e.getBoundingClientRect().height);
+    await page.focus(item(1)); await page.keyboard.press('d');
+    const short = await page.$eval(item(2), (e) => e.getBoundingClientRect().height);
+    assert.ok(short < tall * 0.7, `compact ${tall} -> ${short}`);
+    assert.ok(await page.isVisible(`${item(1)} .rf-acts`) && !(await page.isVisible(`${item(3)} .rf-acts`)), 'actions on the focused one only');
+    await page.keyboard.press('d');
+    // Photo peek: p opens a larger image, j flips to the next listing, Esc closes just the photo.
+    await page.keyboard.press('p');
+    const src1 = await page.getAttribute('.rf-peek img', 'src');
+    assert.match(src1, /800x600/);
+    await page.keyboard.press('j');
+    assert.notEqual(await page.getAttribute('.rf-peek img', 'src'), src1, 'flips with j');
+    await page.keyboard.press('Escape');
+    assert.ok(await page.$('.rf-peek[hidden]') && await page.isVisible('#rf-panel'), 'Esc closes only the photo');
+    // Reviewed: j marked the one it left; r marks and moves; the filter keeps the rest.
+    await page.keyboard.press('r');
+    const reviewed = Object.values(await marks(page)).filter((e) => e.rv).length;
+    assert.equal(reviewed, 2);
+    assert.match(await status(page), /listings match/);
+    await page.click('#rf-more summary');
+    const total = await count(page);
+    await page.check('#rf-unreviewedOnly');
+    assert.equal(await count(page), total - 2);
+    await page.uncheck('#rf-unreviewedOnly');
+    assert.match(await status(page), /reviewed 2 of \d+/);
+    // Keys: h then u undoes; G goes to the last listing; t switches tabs; 1-5 set a status.
+    await page.focus(item(3)); const hid = await page.getAttribute(item(3), 'data-id');
+    await page.keyboard.press('h'); await page.keyboard.press('u');
+    assert.equal((await marks(page))[hid].h, 0, 'u undid the hide');
+    await page.focus(item(1)); await page.keyboard.press('G');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-posinset')), await page.getAttribute(item(1), 'aria-setsize'));
+    await page.focus(item(1)); await page.keyboard.press('s'); await page.keyboard.press('t');
+    assert.equal(await page.getAttribute('[data-view=shortlist]', 'aria-selected'), 'true');
+    await page.focus('.rf-item'); await page.keyboard.press('3');
+    assert.equal(Object.values(await marks(page)).find((e) => e.s).as, 'applied', '3 = applied (1 to inspect … 5 declined)');
+    await page.keyboard.press('t');
+    // Reverse sort: the first and last prices swap ends ("Contact agent" stays last).
+    await page.selectOption('#rf-sort', 'price');
+    const prices = async () => page.$$eval('.rf-item .rf-price', (p) => p.map((x) => x.textContent.match(/\$(\d+)/)?.[1]).filter(Boolean).map(Number));
+    const asc = await prices();
+    await page.click('.rf-sortdir');
+    assert.equal(await page.getAttribute('.rf-sortdir', 'aria-pressed'), 'true');
+    const desc = await prices();
+    assert.equal(desc[0], Math.max(...asc)); assert.equal(desc.at(-1), Math.min(...asc));
+    assert.match(await page.textContent('.rf-item:last-child .rf-price'), /Contact agent/);
+    await page.click('.rf-sortdir');
+    // Resize: drag the left edge; wide enough and results go two per row; remembered.
+    const hb = await (await page.$('.rf-resize')).boundingBox();
+    await page.mouse.move(hb.x + 4, 400); await page.mouse.down(); await page.mouse.move(1440 - 800, 400, { steps: 4 }); await page.mouse.up();
+    assert.ok(Math.abs(await page.$eval('#rf-panel', (p) => p.offsetWidth) - 800) < 3);
+    assert.ok(await page.$('#rf-panel.rf-two'));
+    await page.focus('.rf-resize'); await page.keyboard.press('ArrowRight');
+    assert.ok(Math.abs(await page.$eval('#rf-panel', (p) => p.offsetWidth) - 760) < 3, 'arrow keys resize');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.click('#rf-launch');
+    assert.ok(Math.abs(await page.$eval('#rf-panel', (p) => p.offsetWidth) - 760) < 3, 'width remembered');
+    console.log('compact, peek, reviewed, keys, reverse sort, resize, semantics, cheaper since hidden: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
