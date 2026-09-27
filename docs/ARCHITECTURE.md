@@ -16,7 +16,7 @@ New logic goes in the pure half wherever possible, with a unit test.
 ## Data flow
 
 1. **Read.** The results page embeds a hydration blob (`window.ArgonautExchange`, or the `<script>` tag if REA's app has already consumed it). `parseExchange` finds the search results by the known path (`resi-property_listing-experience-web` → `urqlClientCache` → `rentSearch.results`). If REA renames either, it falls back to any cache entry shaped like results (`exact.items` + `pagination`) and records that in `resultsPath`.
-2. **Crawl.** `fetchAllPages` reads page 1 from the page itself and later pages one at a time, with a jittered 600 ms gap, retry/backoff, 20 s timeouts and a 20-page cap. `pageMemo` shares fetched pages between a search, card annotation and Resume. A page failing after page 1 returns what was read, plus `failed`. A 403, a 429 after every retry, or a page without the results blob is flagged `botCheck`; `getPage` then trips `pauseGate` and refuses every fetch (search, Check all, Re-check, card annotation) for `PAUSE_MS` (10 minutes), with a banner.
+2. **Crawl.** `fetchAllPages` reads page 1 from the page itself and later pages one at a time, with a jittered 600 ms gap, retry/backoff, 20 s timeouts and a 20-page cap. `pageMemo` shares fetched pages between a search, card annotation and Resume. A page failing after page 1 returns what was read, plus `failed`. A 403, a 429 after every retry, or a page without the results blob is flagged `botCheck`; `getPage` then trips `pauseGate` and refuses every fetch (search, Check all, Re-check, card annotation, the listing-page bar) for `PAUSE_MS` (10 minutes) in every tab, with a banner.
 3. **Rows.** `toRow` turns each listing into a flat row: dates, prices normalised to weekly, bond and move-in cost, internal floor size, amenities, heads-up clauses, lease term, apply-via, taken, by-appointment, inspections in the listing's time zone, coordinates, and folded text for keywords. Every field is optional; unknown paths are found by `discover` and reported by `reaFilter.probe()`.
 4. **Learn.** `learn` → `marksStore.observe` records sightings, price/date/feature changes, relists and cancelled inspections. It also refreshes the shortlist copy: search rows replace inspections and clauses, property pages merge.
 5. **Adopt.** `adopt` decorates rows with your marks, then works out suburb-scoped medians (`withMedians`) and building groups (`withBuildings`), and compares against the remembered snapshot (new / gone).
@@ -32,14 +32,15 @@ All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces 
 |---|---|---|---|
 | `v1` | localStorage | Settings (`DEFAULT_CFG` keys, sanitised by type). `building` is never saved. | none |
 | `marks/v1` | localStorage | Per-listing marks (see below), plus hidden agencies (`ag`) and hidden suburbs (`sb`) | 5000 listings; unmarked ones are dropped 90 days after they were last seen |
-| `snapshots/v1` | localStorage | Remembered searches: slim rows, ids and baseline for "new since last visit", gone rows, `pin`, `lite` | 3 searches (pinned kept first), 300 characters of text per field, about 400K characters per search (`SNAP_ENTRY_BUDGET`: past it the rows furthest down lose their text and the entry is marked `lite`) |
+| `snapshots/v1` | localStorage | Remembered searches: slim rows, ids and baseline for "new since last visit", gone rows, `pin`, `lite`, `trend` (one point per visit: count and median rent per bed count, at most 12) | 3 searches (pinned kept first), 300 characters of text per field, about 400K characters per search (`SNAP_ENTRY_BUDGET`: past it the rows furthest down lose their text, then gone rows theirs, then rows their features and headlines, then gone rows go; the entry is marked `lite`. Rows need about 730 characters each even then, so above roughly 550 listings an entry stays over budget) |
 | `presets/v1` | localStorage | Named filter presets, and the search each is bound to | none |
 | `health/v1` | localStorage | Moving average of how often each field is filled, for drift warnings | none |
 | `rows/<search>` | sessionStorage | This tab's results cache, versioned by `ROWS_VERSION` | 2 searches, 10 minutes |
 | `preset-visit`, `preset-prev/v1` | sessionStorage | "Bound preset applies once per visit", and the filters it replaced | none |
-| `paused` | sessionStorage | When fetching may resume after a bot check | one timestamp |
 | `place` | sessionStorage | Per search (and one for the Shortlist tab): the listing you were on, how many were shown, and the filters it applies to | 10 entries |
 | `lbar-min`, `wide`, `width`, `seen-version`, `remind-at` | localStorage | Listing bar minimised, expanded drawer, drawer width, last what's-new version, saved-search reminder time | none |
+| `paused` | localStorage | When fetching may resume after a bot check, for every tab (`storage` events update the others); removed once past | one timestamp |
+| `backup-at`, `backup-nudge-at` | localStorage | When you last downloaded a backup, and when the "no backup" reminder last showed | none |
 
 A failed write of something you chose (marks, settings, presets) goes to `writeState`, and the UI shows a "storage full" banner until a later write succeeds.
 
@@ -76,6 +77,8 @@ The install and update links serve the raw file from `main`, so they only work w
 | `ROWS_VERSION` (12) | `toRow()` output changes shape | Invalidates old tab caches |
 | `FEAT_V` | `AMENITIES` or `WATCHOUTS` detection changes | Old feature signatures aren't compared, so no false "details changed". Only append to those lists: signatures are bit positions. |
 
+`test/versions.test.js` catches a forgotten `ROWS_VERSION` or `FEAT_V` bump; after bumping, refresh its record with `UPDATE_VERSIONS=1 node --test test/versions.test.js`. `npm run release x.y.z` bumps `@version` and prints the rest.
+
 ## Heuristics (text parsing)
 
 These are all pure and unit-tested, and all can be wrong. Each has a negative-case table in the tests.
@@ -97,9 +100,10 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 
 ## Tests at a glance
 
-- **Unit:** `test/*.test.js` (178 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
+- **Unit:** `test/*.test.js` (188 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
 - **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (64 blocks, numbered 1–50 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Shapes:** `test/shapes.test.js` rebuilds a listing from each `test/shapes/*.json` (`reaFilter.shape()` output) and checks it still parses.
 - **Live:** `npm run live` (`test/live.js`) runs one real search locally and saves a fresh shape. Never in CI; lint enforces that.
-- **Lint:** `test/lint.js` enforces the project rules (including SECURITY.md and PRIVACY.md existing, and the Playwright version matching CI), and `test/lint.test.js` checks the lint itself.
+- **Versions:** `test/versions.test.js` compares `toRow()`'s fields and the amenity / heads-up patterns with `test/versions.json`, and fails if they changed without a `ROWS_VERSION` / `FEAT_V` bump (or if an id was inserted anywhere but the end).
+- **Lint:** `test/lint.js` enforces the project rules (including SECURITY.md and PRIVACY.md existing, the Playwright version matching CI, and the ROADMAP version and e2e block count being current), and `test/lint.test.js` checks the lint and `npm run release`.

@@ -2,6 +2,28 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.27.0
+
+- **Map view** (Map, or v): the listings shown on a simple map with no map tiles, coloured by rent vs the median, shortlisted ones larger, your places and distance point as pins, a scale bar and suburb names. Click (or Enter on) a dot to go to that listing.
+- **Rent trend** per remembered search: each visit records the listing count and median rent per bed count (up to 12 visits), shown under Saved searches and in the market view ("2-bed median $720 → $690 over 5 weeks · 42 → 55 listings").
+- **Why this tag?** Hover an amenity or heads-up tag to see the sentence it was read from, or that it came from REA's feature list. With a keyword filter on, each listing says where it matched. ⋯ → Copy tags as test cases copies the phrases in the unit-test format, for reporting a wrong tag.
+- **At an inspection**: the listing-page bar has a Checklist and details section for shortlisted listings, with the checklist and the move-in cost, size, lease, apply-via, heads-up and distances.
+- **Backups carry your settings** (places, checklist, enquiry template, lease end, income, weights, theme; not a search's filters). Settings shows when you last backed up, and with 5 or more shortlisted and no backup for 30 days there's one reminder a month.
+- **Copy report** in the "REA may have changed" and "cards not recognised" warnings (and in Settings) copies the diagnostics and one listing's structure, with no listing text, names or addresses.
+- **The bot-check pause applies to every tab**, not just the one that hit it.
+- Fixed:
+  - An older tab no longer overwrites settings changed in another tab; places, checklist, weights and theme now follow across tabs (filters and sort stay per tab).
+  - Refresh or Check all during a bot-check pause keeps what's shown instead of emptying the list.
+  - Floor size reaches the Shortlist, so Compare's Size and Per m² rows and Shortlist exports have it.
+  - Sizes in the text: "1,200sqm" is 1200, not 200, and land wording ("Land size: 1,250 sqm", "set on 650sqm", "allotment", "parcel") no longer counts as floor size.
+  - Very large remembered searches (500+ listings) now trim features, headlines and the no-longer-listed rows too, to stay nearer the size budget.
+  - Fading REA's cards no longer changes the Match scores shown in the drawer and exported.
+  - Re-check stops and pauses on a challenge page, and waits and retries once on a 429 before pausing. The listing-page bar doesn't fetch during a pause.
+  - The keyword hint for large remembered searches is right from the first render; `reaFilter.selfcheck()` doesn't report another search's page 1 after in-app navigation.
+- Faster: the end of a big search does less work (remembered rows are rebuilt only when read, cache timestamps are read without parsing whole entries), Settings no longer re-measures remembered searches on every star or hide, chip counts and same-building grouping are quicker, and page load is split into two shorter tasks.
+- Project: `npm run release x.y.z` does the mechanical release steps, and lint checks the ROADMAP version and the e2e block count; `test/versions.test.js` fails when a parsing change forgets `ROWS_VERSION` or `FEAT_V`; CI skips the unit and e2e jobs on docs-only PRs.
+- `ROWS_VERSION` 13 (text sizes read differently): this tab's cached results are refetched once.
+
 ## 2.26.1
 
 - Floor size disclaimer: an ⓘ next to **Min m²** (hover or focus it), and the same note on the Min m² filter chip and the Price per m² sort, saying most rentals don't state a size, that listings without one are left out or sorted last, and that sizes read from the text can be wrong.

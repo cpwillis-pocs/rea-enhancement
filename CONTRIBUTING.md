@@ -28,6 +28,7 @@ npm run ci      # check + e2e, the whole gate locally
 | Job | What | When |
 |---|---|---|
 | lint | `npm run lint` | first, on every run except the on-demand `screenshots` suite |
+| changes | decides whether the PR touches code: a PR that changes only Markdown, `docs/`, `LICENSE` or issue templates skips unit and e2e (a skipped job counts as passing for required checks) | PR, on demand |
 | unit | unit tests on Node 20 (in Los Angeles time, so dates can't depend on the runner's zone), 22 and 24, with a JUnit report | PR, on demand `all`/`unit` |
 | e2e | `smoke.js` and `edge.js` in parallel, `edge.js` running 3 blocks at a time (`E2E_JOBS=3`); failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
 | coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | on demand `all`/`coverage` (run `npm run coverage` locally for new UI code) |

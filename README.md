@@ -34,6 +34,8 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Rent vs median** for the same bed count in your results (eg "12% below 2-bed median"); when a search spans several suburbs, each listing is compared with its own suburb ("at median for Maroubra 2-bed").
 - **Taken listings**: "Deposit taken", "Under application" or "Leased" in the listing text is tagged in the drawer and on REA's cards; **Hide listings already taken** filters them out.
 - **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
+- **Map view** (v): the listings shown on a simple map (no map tiles), coloured by rent vs the median, with your places as pins; click a dot to jump to the listing.
+- **Why this tag?** Hover an amenity or heads-up tag for the sentence it was read from; with a keyword filter, each listing says where it matched.
 - **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval, lease-break terms, a required professional clean, rent payment fees and garden/pool upkeep, picked out of the listing text; **Hide if mentioned** filters them out.
 - **Household income** (optional): rent as a share of income, flagged over 30%.
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
@@ -68,14 +70,14 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, plus a **suggested route** that fits in as many listings as can be reached in time (one session each, "to inspect" ones first), exportable to your calendar as the whole day or just the route.
 - **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
 - **Share** the shortlist as a link or **Print** it for open homes. The shared data sits in the link's `#` fragment, which browsers don't send to REA's servers; REA's own page scripts could read it before the script clears it, and wherever you paste the link keeps a copy.
-- **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
+- **Backup / Restore** the shortlist, hidden listings, notes, remembered searches and your settings as a JSON file, eg to move to another browser. Settings shows when you last backed up.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
-- **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder. **Pin** a search to keep it when you open others (3 are remembered); you're told when one is forgotten.
+- **Saved searches**: see your remembered searches (with a rent trend across visits) and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder. **Pin** a search to keep it when you open others (3 are remembered); you're told when one is forgotten.
 - **Opened tracking**: "opened 2d ago" on listings you've looked at, and a **Not opened yet** filter.
 - **Hide with a reason** (too small, location, condition, price) so you remember why later.
 - **Application follow-up**: "did you inspect?" after an inspection passes, time since you applied, a "follow up?" nudge, a **Needs action** filter, and your record with each agency.
 - **Copy enquiry**: a ready-made message for the agent from a template you can edit.
-- **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly.
+- **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly; for a shortlisted one it also has your inspection checklist and the key facts.
 - Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
@@ -105,7 +107,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ## When REA changes something
 
-REA's data format is undocumented and changes. If the badges on REA's cards stop appearing, the drawer shows a banner saying the cards weren't recognised. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, or a field is always empty, click **Search all pages**, then open DevTools and run:
+REA's data format is undocumented and changes. If the badges on REA's cards stop appearing, the drawer shows a banner saying the cards weren't recognised. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, press **Copy report** in it (also under Settings) and paste the result into an issue: it holds the diagnostics and one listing's structure, with no listing text, names or addresses. If a field is always empty but there's no warning, click **Search all pages**, then open DevTools and run:
 
 ```js
 reaFilter.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue
