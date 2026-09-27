@@ -1592,7 +1592,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const saved = await a.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')));
     assert.equal(saved.theme, 'dark', 'theme kept');
     assert.equal(saved.priceMax, '900', 'and the rent change saved');
-    console.log('settings across tabs: ok');
+    // A preset saved in one tab is in the other's menu; a search remembered there is listed here.
+    b.once('dialog', (d) => d.accept('from B'));
+    await b.selectOption('.rf-preset', 'c:save');
+    await a.waitForFunction(() => [...document.querySelectorAll('.rf-preset option')].some((o) => /from B/.test(o.textContent)));
+    await b.click('#rf-run'); await waitStatus(b, /listings match/);
+    await a.waitForFunction(() => document.querySelector('.rf-saved-list li'), null, { timeout: 8000 });
+    console.log('settings, presets and saved searches across tabs: ok');
     await done(a); await done(b); await ctx.close();
   });
 

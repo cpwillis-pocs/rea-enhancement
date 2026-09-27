@@ -39,7 +39,7 @@ const VIEWS = [
 
 const check = async (page, include, label, out) => {
   await page.addScriptTag({ content: AXE });
-  const res = await page.evaluate(async (sel) => window.axe.run({ include: [sel] }, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } }), include);
+  const res = await page.evaluate(async (sel) => window.axe.run({ include: [sel] }, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } }), include);
   for (const v of res.violations.filter((x) => BLOCKING.has(x.impact))) {
     out.push(`${label}: ${v.id} (${v.impact}) ${v.help}\n    ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join('\n    ')}`);
   }
@@ -77,7 +77,27 @@ const check = async (page, include, label, out) => {
     await check(page, '#rf-lbar', `${scheme} listing bar`, found);
     await ctx.close();
   }
+  // A phone at an inspection: touch, 390px wide; target size counts here.
+  for (const [name, url, sel, go] of [
+    ['phone drawer', SEARCH, '#rf-panel', async (p) => { await p.click('#rf-launch'); await p.click('#rf-run'); await p.waitForFunction(() => /listings match/.test(document.querySelector('.rf-status').textContent)); }],
+    ['phone listing bar', `${ORIGIN}/property-unit-nsw-bondi-146500101`, '#rf-lbar', async (p) => { await p.waitForSelector('#rf-lbar'); await p.tap('#rf-lbar [data-l=s]'); await p.tap('#rf-lbar .rf-lbar-more summary'); }],
+  ]) {
+    harness.section(name);
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: FIXED });
+    await page.route('**/*', serve());
+    await page.goto(url);
+    await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    await go(page);
+    await check(page, sel, name, found);
+    const small = await page.$$eval(`${sel} button, ${sel} select, ${sel} summary`, (els) => els.filter((e) => e.offsetParent && (e.getBoundingClientRect().height < 44 || e.getBoundingClientRect().width < 24))
+      .map((e) => `${e.className || e.tagName} "${(e.textContent || '').trim().slice(0, 20)}" ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`));
+    if (name === 'phone listing bar' && small.length) found.push(`${name}: touch targets under 44px: ${small.slice(0, 5).join('; ')}`);
+    await ctx.close();
+  }
   await browser.close();
   if (found.length) { console.error(`a11y: ${found.length} serious/critical finding(s):\n  ${found.join('\n  ')}`); process.exit(1); }
-  console.log(`a11y: ok (${VIEWS.length + 1} views, light and dark)`);
+  console.log(`a11y: ok (${VIEWS.length + 1} views, light and dark, plus phone)`);
 })().catch((e) => { console.error(e); process.exit(1); });

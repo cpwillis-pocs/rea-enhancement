@@ -2999,7 +2999,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-group,.rf-nudge{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px}
   .rf-nudge{padding:6px 8px;border-radius:6px;background:var(--rf-hover)}
   .rf-checks{display:flex;flex-wrap:wrap;gap:4px;margin:6px 9px 0 124px}
-  .rf-checks .rf-chip{font-size:11px;padding:2px 7px}
+  .rf-checks .rf-chip{font-size:11px;padding:2px 7px} .rf-checks{margin-bottom:6px;row-gap:6px}
   .rf-checks .rf-chip[data-state=no]{text-decoration:none;background:transparent;color:var(--rf-err);border-color:var(--rf-err)}
   .rf-weights{border:1px solid var(--rf-line);border-radius:8px;padding:6px 10px;margin:6px 0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
   .rf-tip{margin-left:4px;color:var(--rf-muted);font-weight:400;text-transform:none;cursor:help;border-radius:50%} .rf-tip:focus-visible{outline:2px solid var(--rf-accent)}
@@ -3083,6 +3083,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   [data-rf-id][data-rf-pos]{position:relative}
   [data-rf-id][data-rf-match="0"]{opacity:.35;transition:opacity .15s}
+  /* Every control at least 24px to hit, with a mouse too (WCAG 2.2 target size). */
+  #rf-panel summary,.rf-checks .rf-chip,.rf-rate button,.rf-lbar-checks button,.rf-acts button,.rf-acts-more summary{min-height:24px}
+  .rf-checks .rf-chip,.rf-rate button,.rf-lbar-checks button{min-width:24px} .rf-rate button{display:inline-flex;align-items:center;justify-content:center}
+  /* Fingers, not a mouse: every control at least 44px to hit (WCAG 2.2 target size), most of all
+     on the listing bar and checklist used standing in an inspection. */
+  @media (pointer: coarse){
+    #rf-lbar button,#rf-lbar select,#rf-lbar .rf-lbar-more summary,.rf-checks .rf-chip,.rf-lbar-checks button,.rf-rate button,.rf-acts button,.rf-acts-more summary,.rf-chip{min-height:44px;min-width:44px}
+    .rf-lbar-more summary{display:flex;align-items:center}
+  }
   @media (prefers-reduced-motion: reduce){ [data-rf-id][data-rf-match="0"],#rf-panel *,#rf-lbar *{transition:none!important;animation:none!important} }
   [data-rf-id][data-rf-match="0"]:hover{opacity:1}
   /* On REA's cards: its own CSS (which may load after ours) mustn't size or pad our tags: reset, then !important. */
@@ -5683,6 +5692,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       step('sync', () => window.addEventListener('storage', (e) => {
         // Another tab changed the shortlist/hidden/notes: pick it up here.
         if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
+        if (e.key === PRESETS_KEY || e.key === null) fillPresets(); // a preset saved in another tab
+        if (e.key === SNAP_KEY || e.key === null) renderSaved(); // another tab's search or Check all
       // A restore's Undo puts back what was stored before it: after another tab has written, that
       // would silently undo the other tab too, so the offer goes.
       if ((e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) && ui.restoreUndo) {
