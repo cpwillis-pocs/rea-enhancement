@@ -1385,6 +1385,44 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 38. Cards REA renders that we can't recognise: after a grace period the drawer says the
+  // badges are off; a normal page never shows it.
+  await block('38', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { noCardLinks: true }) });
+    await page.waitForSelector('#rf-launch');
+    await page.clock.runFor(9000);
+    await page.click('#rf-launch');
+    assert.match(await page.textContent('.rf-warnbar'), /result cards weren't recognised/);
+    assert.ok(await page.isVisible('.rf-warnbar'));
+    await done(page);
+    const ok = await open(ctx);
+    await ok.waitForSelector('article > .rf-badge');
+    await ok.clock.runFor(9000);
+    await ok.click('#rf-launch');
+    assert.doesNotMatch(await ok.textContent('.rf-warnbar'), /weren't recognised/);
+    console.log('unrecognised cards warning: ok');
+    await done(ok); await ctx.close();
+  });
+
+  // 39. The Shortlist tab also reopens where you were after a reload.
+  await block('39', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 700 } });
+    const page = await open(ctx);
+    await run(page);
+    for (const n of [1, 2, 3, 4, 5, 6]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    const id = await page.$$eval('.rf-item', (e) => e[4].dataset.id);
+    await page.focus(`.rf-item[data-id="${id}"]`);
+    await page.clock.runFor(600);
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.click('#rf-launch');
+    await page.click('[data-view=shortlist]');
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset?.id), id, 'the shortlisted listing you were on');
+    console.log('shortlist place across reloads: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

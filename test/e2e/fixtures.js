@@ -59,12 +59,13 @@ function pageResults(n, { pages = 3, perPage = 6, noInspections = false, extras 
 const reaPage = (n, opts) => {
   const r = pageResults(n, opts);
   const tag = opts?.cardTag || 'article'; // cardTag: 'div' mimics REA dropping <article>
+  const href = (l) => (opts?.noCardLinks ? '#' : l._links.canonical.href.replace(ORIGIN, '')); // noCardLinks: cards we can't recognise
   const cards = r.exact.items.map(({ listing: l }, i) => `
     <${tag} class="rc">
-      <a class="rc-img" href="${l._links.canonical.href.replace(ORIGIN, '')}"><img src="${l.media.mainImage.templatedUrl.replace('{size}', '800x600')}" alt=""></a>
+      <a class="rc-img" href="${href(l)}"><img src="${l.media.mainImage.templatedUrl.replace('{size}', '800x600')}" alt=""></a>
       <div class="rc-body">
         <div class="rc-price">${l.price.display}</div>
-        <a class="rc-addr" href="${l._links.canonical.href.replace(ORIGIN, '')}">${l.address.display.fullAddress}</a>
+        <a class="rc-addr" href="${href(l)}">${l.address.display.fullAddress}</a>
         <div class="rc-feat">${l.generalFeatures.bedrooms.value} bed · ${l.generalFeatures.bathrooms.value} bath · ${l.generalFeatures.parkingSpaces.value} car · ${l.propertyType.display}</div>
       </div>
     </${tag}>`).join('');

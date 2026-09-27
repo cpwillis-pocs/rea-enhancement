@@ -94,6 +94,7 @@ jobs:
     env:
       E2E_ARTIFACTS: e2e-artifacts
       E2E_TIMEOUT_MS: '600000'
+      E2E_JOBS: '3' # edge.js runs 3 scenario blocks at once (each in its own browser context); smoke.js ignores it
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v5

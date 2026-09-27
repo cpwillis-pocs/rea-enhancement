@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.23.0
+// @version      2.24.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis/rea-enhancement
@@ -2955,6 +2955,194 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   });
   }
 
+  // Keyboard: list keys (j/k, s, h, r, p, 1-5…) and drawer keys (Esc, ?, e, f, t, d, m, /), plus
+  // the focus trap on phones. Needs the drawer pieces build() made.
+  function wireKeys(panel, { launch, narrow, help, toggleHelp, setOpen, expandBtn }) {
+  const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  // List shortcuts: act on the focused listing (or the first one).
+  // Reviewed: stored at once, shown on the item without a re-render (so a "Not reviewed" list
+  // doesn't jump under you); counts and the filter catch up on the next render.
+  const markReviewed = (item, on = true) => {
+    const id = item.dataset.id;
+    marks.setReviewed([id], on);
+    const r = rowOf(id);
+    if (r) r.reviewedAt = on ? new Date() : null;
+    item.dataset.rv = on ? '1' : '';
+  };
+  const listKeys = (e) => {
+    const items = [...ui.list.querySelectorAll('.rf-item')];
+    if (!items.length) return false;
+    const cur = document.activeElement?.closest?.('.rf-item');
+    const i = cur ? items.indexOf(cur) : -1;
+    const move = (d) => { const n = items[Math.max(0, Math.min(items.length - 1, i + d))] || items[0]; n.focus(); n.scrollIntoView({ block: 'nearest' }); if (ui.peekId) ui.showPeek(n); };
+    const act = (a) => (cur || items[0]).querySelector(`[data-act="${a}"]`)?.click();
+    switch (e.key) {
+      case 'j': case 'ArrowDown': if (cur && e.key === 'j' && ui.view !== 'shortlist') markReviewed(cur); move(i < 0 ? 0 : 1); return true;
+      case 'r': { const it = cur || items[0]; markReviewed(it, !rowOf(it.dataset.id)?.reviewedAt || it.dataset.rv !== '1'); move(i < 0 ? 0 : 1); return true; }
+      case 'k': case 'ArrowUp': move(i < 0 ? 0 : -1); return true;
+      case 's': act('s'); return true;
+      case 'h': act('h'); return true;
+      case 'n': act('n'); return true;
+      case 'c': act('copy'); return true;
+      case 'x': { const box = (cur || items[0]).querySelector('input[data-cmp]'); box?.click(); return !!box; }
+      case 'PageDown': move(i < 0 ? 0 : 5); return true;
+      case 'PageUp': move(i < 0 ? 0 : -5); return true;
+      case 'g': case 'Home': items[0].focus(); items[0].scrollIntoView({ block: 'nearest' }); return true;
+      case 'G': case 'End': { // the rest render first (capped), then the last listing
+        for (let n = 0; n < 20 && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
+        const all = ui.list.querySelectorAll('.rf-item'), last = all[all.length - 1];
+        last.focus(); last.scrollIntoView({ block: 'nearest' }); return true;
+      }
+      case '1': case '2': case '3': case '4': case '5': { // application status of a shortlisted listing
+        const it = cur || items[0], sel = it.querySelector('select[data-app]');
+        if (!sel) return false;
+        sel.value = APP_STATUSES[+e.key];
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        ui.list.querySelector(`.rf-item[data-id="${CSS.escape(it.dataset.id)}"]`)?.focus(); // after the re-render
+        return true;
+      }
+      case 'p': case ' ': if (!cur && e.key === ' ') return false; if (ui.peekId) ui.closePeek(); else ui.showPeek(cur || items[0]); return true;
+      case 'u': { const undo = ui.status.querySelector('.rf-undo'); if (!undo || undo.textContent !== 'Undo') return false; undo.click(); return true; }
+      // Enter opens only when the item itself is focused; on a button it presses the button.
+      case 'o': case 'Enter': if (!cur || (e.key === 'Enter' && document.activeElement !== cur)) return false; cur.querySelector('.rf-card')?.click(); return true;
+      default: return false;
+    }
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href) && !typing(e.target)) {
+      e.preventDefault();
+      setOpen(panel.hidden);
+      if (!panel.hidden) { if (!ui.placedNow) ui.run.focus(); } else launch.focus();
+      return;
+    }
+    if (panel.hidden) return;
+    // Esc is ours only when focus is in the drawer (or it's full-screen): REA's own viewers use it too.
+    if (e.key === 'Escape' && ui.peekId) { ui.closePeek(); return; } // closes just the photo
+    const menu = document.activeElement?.closest?.('.rf-acts-more[open], .rf-menu[open]');
+    if (e.key === 'Escape' && menu && panel.contains(menu)) { menu.open = false; menu.querySelector('summary').focus(); return; } // closes just the ⋯ menu
+    if (e.key === 'Escape' && !e.defaultPrevented && (panel.contains(document.activeElement) || narrow.matches)) {
+      if (!help.hidden) { toggleHelp(); return; }
+      setOpen(false); launch.focus(); return;
+    }
+    const inPanel = panel.contains(document.activeElement);
+    if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+      if (e.key === 'e' && !narrow.matches) { e.preventDefault(); expandBtn.click(); return; }
+      if (e.key === 'f') { e.preventDefault(); ui.toFilters(); return; }
+      if (e.key === 't') { e.preventDefault(); const other = panel.querySelector(`.rf-tabs [data-view="${ui.view === 'shortlist' ? 'results' : 'shortlist'}"]`); other.click(); other.focus(); return; }
+      if (e.key === 'd') { // re-renders, so focus goes back to the same listing
+        e.preventDefault();
+        const at = document.activeElement.closest?.('.rf-item')?.dataset.id, c = panel.querySelector('#rf-compact');
+        c.checked = !c.checked;
+        c.dispatchEvent(new Event('change', { bubbles: true }));
+        if (at) ui.list.querySelector(`.rf-item[data-id="${CSS.escape(at)}"]`)?.focus();
+        return;
+      }
+      if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
+      if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
+      if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
+      if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
+        if (listKeys(e)) { e.preventDefault(); return; }
+      }
+    }
+    if (e.key === 'Tab' && narrow.matches) {
+      const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled &&
+        !el.closest('details:not([open]) > :not(summary)') && (el.checkVisibility?.({ contentVisibilityAuto: true }) ?? true));
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    }
+  });
+  }
+
+  // Clicks inside a listing (shortlist, hide, note, status, checklist, ⋯ menu…), delegated from the
+  // list. `write`/`onChange` put a setting into the form and apply it (building, anchor, places).
+  function wireList(panel, { write, onChange }) {
+  ui.list.addEventListener('click', (e) => {
+    if (e.target.closest('.rf-more-btn')) return renderMore();
+    const ck = e.target.closest('[data-ck]');
+    if (ck) {
+      const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
+      marks.cycleCheck(id, label);
+      refreshMarks();
+      ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] [data-ck="${CSS.escape(label)}"]`)?.focus();
+      return;
+    }
+    const drop = e.target.closest('[data-drop-chip]');
+    if (drop) return ui.active.querySelector(`[data-chip="${drop.dataset.dropChip}"]`)?.click();
+    const na = e.target.closest('[data-na]');
+    if (na) { // after-inspection prompt
+      const id = na.closest('.rf-item').dataset.id;
+      if (na.dataset.na === 'yes') marks.setStatus(id, 'inspected');
+      else if (na.dataset.na === 'applied') marks.setStatus(id, 'applied');
+      else marks.answerInspect(id);
+      refreshMarks();
+      setStatus(na.dataset.na === 'no' ? 'Noted.' : `Marked ${na.dataset.na === 'yes' ? 'inspected: tick the checklist while it\'s fresh' : 'applied'}.`);
+      return;
+    }
+    const bldg = e.target.closest('[data-act=bldg]');
+    if (bldg) { // same building: keyword on the street address (the listing text includes it)
+      const r = rowById(bldg.closest('.rf-item').dataset.id);
+      if (!r?.buildingAddr) return;
+      write(panel.querySelector('#rf-building'), `${buildingKey(r.address)}|${r.buildingAddr}`);
+      onChange({ type: 'change' });
+      return setStatus(`Showing ${plural(ui.rows?.length ?? r.buildingN, 'listing')} at ${r.buildingAddr}. Remove the Building chip to go back.`);
+    }
+    const b = e.target.closest('.rf-acts button');
+    if (!b) return;
+    const id = b.closest('.rf-item')?.dataset.id;
+    if (!id) return;
+    if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
+    if (b.dataset.act === 'anchor' || b.dataset.act === 'place') {
+      const r = rowOf(id);
+      if (r?.lat == null) return;
+      const at = `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`;
+      let msg = `Measuring from ${r.address}.`;
+      if (b.dataset.act === 'anchor') write(panel.querySelector('#rf-anchor'), at);
+      else {
+        const lines = String(cfg.places || '').split('\n').filter((l) => l.trim());
+        if (parsePlaces(cfg.places).some((p) => Math.abs(p.lat - r.lat) < 1e-4 && Math.abs(p.lng - r.lng) < 1e-4)) return setStatus('Already in Other places.');
+        if (lines.length >= PLACES_MAX) return setStatus(`Other places holds ${PLACES_MAX}; remove one first.`, true);
+        write(panel.querySelector('#rf-places'), [...lines, `${clip(String(r.address).split(',')[0], 24).replace(/:/g, '')}: ${at}`].join('\n'));
+        msg = 'Added to Other places (under More filters).';
+        ui.paintPlaces();
+      }
+      onChange({ type: 'change' });
+      return setStatus(msg);
+    }
+    if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
+    if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
+    if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
+    if (b.dataset.act === 'enq') {
+      const r = rowOf(id);
+      if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
+      return;
+    }
+    if (b.dataset.act === 'copy') {
+      const r = rowOf(id);
+      if (r) copyText(summaryText(r)).then((ok) => setStatus(ok ? 'Listing summary copied.' : 'Clipboard blocked.', !ok));
+      return;
+    }
+    const bulk = BULK_HIDE[b.dataset.act];
+    if (bulk) { // hide a whole suburb or agency
+      const [field, toggle, prep] = bulk, name = rowOf(id)?.[field];
+      if (!name) return;
+      const on = toggle(name);
+      refreshMarks();
+      ui.list.focus();
+      return offerUndo(on ? `Hidden all listings ${prep} ${name}.` : `Showing ${name} again.`, () => { toggle(name); refreshMarks(); });
+    }
+    const act = b.dataset.act;
+    const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
+    const on = marks.toggle(id, act, rowById(id));
+    refreshMarks();
+    // Re-render replaced the button: put focus back (or on the next item if this one left the list).
+    const q = (i) => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(i)}"] [data-act="${act}"]`);
+    (q(id) || (next && q(next)) || ui.list).focus?.();
+    if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
+  });
+  }
+
   function build() {
     const style = document.createElement('style');
     style.textContent = css;
@@ -3133,101 +3321,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
     news.querySelector('button').addEventListener('click', () => { news.hidden = true; seen.set(WHATS_NEW.version); });
     helpBtn.addEventListener('click', toggleHelp);
-    const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-    // List shortcuts: act on the focused listing (or the first one).
-    // Reviewed: stored at once, shown on the item without a re-render (so a "Not reviewed" list
-    // doesn't jump under you); counts and the filter catch up on the next render.
-    const markReviewed = (item, on = true) => {
-      const id = item.dataset.id;
-      marks.setReviewed([id], on);
-      const r = rowOf(id);
-      if (r) r.reviewedAt = on ? new Date() : null;
-      item.dataset.rv = on ? '1' : '';
-    };
-    const listKeys = (e) => {
-      const items = [...ui.list.querySelectorAll('.rf-item')];
-      if (!items.length) return false;
-      const cur = document.activeElement?.closest?.('.rf-item');
-      const i = cur ? items.indexOf(cur) : -1;
-      const move = (d) => { const n = items[Math.max(0, Math.min(items.length - 1, i + d))] || items[0]; n.focus(); n.scrollIntoView({ block: 'nearest' }); if (ui.peekId) ui.showPeek(n); };
-      const act = (a) => (cur || items[0]).querySelector(`[data-act="${a}"]`)?.click();
-      switch (e.key) {
-        case 'j': case 'ArrowDown': if (cur && e.key === 'j' && ui.view !== 'shortlist') markReviewed(cur); move(i < 0 ? 0 : 1); return true;
-        case 'r': { const it = cur || items[0]; markReviewed(it, !rowOf(it.dataset.id)?.reviewedAt || it.dataset.rv !== '1'); move(i < 0 ? 0 : 1); return true; }
-        case 'k': case 'ArrowUp': move(i < 0 ? 0 : -1); return true;
-        case 's': act('s'); return true;
-        case 'h': act('h'); return true;
-        case 'n': act('n'); return true;
-        case 'c': act('copy'); return true;
-        case 'x': { const box = (cur || items[0]).querySelector('input[data-cmp]'); box?.click(); return !!box; }
-        case 'PageDown': move(i < 0 ? 0 : 5); return true;
-        case 'PageUp': move(i < 0 ? 0 : -5); return true;
-        case 'g': case 'Home': items[0].focus(); items[0].scrollIntoView({ block: 'nearest' }); return true;
-        case 'G': case 'End': { // the rest render first (capped), then the last listing
-          for (let n = 0; n < 20 && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
-          const all = ui.list.querySelectorAll('.rf-item'), last = all[all.length - 1];
-          last.focus(); last.scrollIntoView({ block: 'nearest' }); return true;
-        }
-        case '1': case '2': case '3': case '4': case '5': { // application status of a shortlisted listing
-          const it = cur || items[0], sel = it.querySelector('select[data-app]');
-          if (!sel) return false;
-          sel.value = APP_STATUSES[+e.key];
-          sel.dispatchEvent(new Event('change', { bubbles: true }));
-          ui.list.querySelector(`.rf-item[data-id="${CSS.escape(it.dataset.id)}"]`)?.focus(); // after the re-render
-          return true;
-        }
-        case 'p': case ' ': if (!cur && e.key === ' ') return false; if (ui.peekId) ui.closePeek(); else ui.showPeek(cur || items[0]); return true;
-        case 'u': { const undo = ui.status.querySelector('.rf-undo'); if (!undo || undo.textContent !== 'Undo') return false; undo.click(); return true; }
-        // Enter opens only when the item itself is focused; on a button it presses the button.
-        case 'o': case 'Enter': if (!cur || (e.key === 'Enter' && document.activeElement !== cur)) return false; cur.querySelector('.rf-card')?.click(); return true;
-        default: return false;
-      }
-    };
-    document.addEventListener('keydown', (e) => {
-      if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href) && !typing(e.target)) {
-        e.preventDefault();
-        setOpen(panel.hidden);
-        if (!panel.hidden) { if (!ui.placedNow) ui.run.focus(); } else launch.focus();
-        return;
-      }
-      if (panel.hidden) return;
-      // Esc is ours only when focus is in the drawer (or it's full-screen): REA's own viewers use it too.
-      if (e.key === 'Escape' && ui.peekId) { ui.closePeek(); return; } // closes just the photo
-      const menu = document.activeElement?.closest?.('.rf-acts-more[open], .rf-menu[open]');
-      if (e.key === 'Escape' && menu && panel.contains(menu)) { menu.open = false; menu.querySelector('summary').focus(); return; } // closes just the ⋯ menu
-      if (e.key === 'Escape' && !e.defaultPrevented && (panel.contains(document.activeElement) || narrow.matches)) {
-        if (!help.hidden) { toggleHelp(); return; }
-        setOpen(false); launch.focus(); return;
-      }
-      const inPanel = panel.contains(document.activeElement);
-      if (inPanel && !typing(document.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
-        if (e.key === 'e' && !narrow.matches) { e.preventDefault(); expandBtn.click(); return; }
-        if (e.key === 'f') { e.preventDefault(); ui.toFilters(); return; }
-        if (e.key === 't') { e.preventDefault(); const other = panel.querySelector(`.rf-tabs [data-view="${ui.view === 'shortlist' ? 'results' : 'shortlist'}"]`); other.click(); other.focus(); return; }
-        if (e.key === 'd') { // re-renders, so focus goes back to the same listing
-          e.preventDefault();
-          const at = document.activeElement.closest?.('.rf-item')?.dataset.id, c = panel.querySelector('#rf-compact');
-          c.checked = !c.checked;
-          c.dispatchEvent(new Event('change', { bubbles: true }));
-          if (at) ui.list.querySelector(`.rf-item[data-id="${CSS.escape(at)}"]`)?.focus();
-          return;
-        }
-        if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
-        if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
-        if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
-        if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
-          if (listKeys(e)) { e.preventDefault(); return; }
-        }
-      }
-      if (e.key === 'Tab' && narrow.matches) {
-        const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled &&
-          !el.closest('details:not([open]) > :not(summary)') && (el.checkVisibility?.({ contentVisibilityAuto: true }) ?? true));
-        if (!f.length) return;
-        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
-        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
-      }
-    });
+    wireKeys(panel, { launch, narrow, help, toggleHelp, setOpen, expandBtn });
     panel.querySelector('.rf-clear').addEventListener('click', () => {
       const before = { ...cfg };
       // Resets filters only; display preferences (sort, annotate, dim) are kept.
@@ -3292,89 +3386,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
 
     // Shortlist / hide / note: one delegated handler; re-render keeps scroll position.
-    ui.list.addEventListener('click', (e) => {
-      if (e.target.closest('.rf-more-btn')) return renderMore();
-      const ck = e.target.closest('[data-ck]');
-      if (ck) {
-        const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
-        marks.cycleCheck(id, label);
-        refreshMarks();
-        ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] [data-ck="${CSS.escape(label)}"]`)?.focus();
-        return;
-      }
-      const drop = e.target.closest('[data-drop-chip]');
-      if (drop) return ui.active.querySelector(`[data-chip="${drop.dataset.dropChip}"]`)?.click();
-      const na = e.target.closest('[data-na]');
-      if (na) { // after-inspection prompt
-        const id = na.closest('.rf-item').dataset.id;
-        if (na.dataset.na === 'yes') marks.setStatus(id, 'inspected');
-        else if (na.dataset.na === 'applied') marks.setStatus(id, 'applied');
-        else marks.answerInspect(id);
-        refreshMarks();
-        setStatus(na.dataset.na === 'no' ? 'Noted.' : `Marked ${na.dataset.na === 'yes' ? 'inspected: tick the checklist while it\'s fresh' : 'applied'}.`);
-        return;
-      }
-      const bldg = e.target.closest('[data-act=bldg]');
-      if (bldg) { // same building: keyword on the street address (the listing text includes it)
-        const r = rowById(bldg.closest('.rf-item').dataset.id);
-        if (!r?.buildingAddr) return;
-        write(panel.querySelector('#rf-building'), `${buildingKey(r.address)}|${r.buildingAddr}`);
-        onChange({ type: 'change' });
-        return setStatus(`Showing ${plural(ui.rows?.length ?? r.buildingN, 'listing')} at ${r.buildingAddr}. Remove the Building chip to go back.`);
-      }
-      const b = e.target.closest('.rf-acts button');
-      if (!b) return;
-      const id = b.closest('.rf-item')?.dataset.id;
-      if (!id) return;
-      if (b.dataset.act === 'n') return editNote(b.closest('.rf-item'));
-      if (b.dataset.act === 'anchor' || b.dataset.act === 'place') {
-        const r = rowOf(id);
-        if (r?.lat == null) return;
-        const at = `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`;
-        let msg = `Measuring from ${r.address}.`;
-        if (b.dataset.act === 'anchor') write(panel.querySelector('#rf-anchor'), at);
-        else {
-          const lines = String(cfg.places || '').split('\n').filter((l) => l.trim());
-          if (parsePlaces(cfg.places).some((p) => Math.abs(p.lat - r.lat) < 1e-4 && Math.abs(p.lng - r.lng) < 1e-4)) return setStatus('Already in Other places.');
-          if (lines.length >= PLACES_MAX) return setStatus(`Other places holds ${PLACES_MAX}; remove one first.`, true);
-          write(panel.querySelector('#rf-places'), [...lines, `${clip(String(r.address).split(',')[0], 24).replace(/:/g, '')}: ${at}`].join('\n'));
-          msg = 'Added to Other places (under More filters).';
-          ui.paintPlaces();
-        }
-        onChange({ type: 'change' });
-        return setStatus(msg);
-      }
-      if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
-      if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
-      if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
-      if (b.dataset.act === 'enq') {
-        const r = rowOf(id);
-        if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
-        return;
-      }
-      if (b.dataset.act === 'copy') {
-        const r = rowOf(id);
-        if (r) copyText(summaryText(r)).then((ok) => setStatus(ok ? 'Listing summary copied.' : 'Clipboard blocked.', !ok));
-        return;
-      }
-      const bulk = BULK_HIDE[b.dataset.act];
-      if (bulk) { // hide a whole suburb or agency
-        const [field, toggle, prep] = bulk, name = rowOf(id)?.[field];
-        if (!name) return;
-        const on = toggle(name);
-        refreshMarks();
-        ui.list.focus();
-        return offerUndo(on ? `Hidden all listings ${prep} ${name}.` : `Showing ${name} again.`, () => { toggle(name); refreshMarks(); });
-      }
-      const act = b.dataset.act;
-      const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
-      const on = marks.toggle(id, act, rowById(id));
-      refreshMarks();
-      // Re-render replaced the button: put focus back (or on the next item if this one left the list).
-      const q = (i) => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(i)}"] [data-act="${act}"]`);
-      (q(id) || (next && q(next)) || ui.list).focus?.();
-      if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
-    });
+    wireList(panel, { write, onChange });
     ui.list.tabIndex = -1;
     // Other places: say what was understood, so a mistyped line isn't silently ignored.
     const placesBox = panel.querySelector('#rf-places'), placesFb = panel.querySelector('.rf-places-fb');
@@ -3695,6 +3707,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
     ui.keepShown = 0;
     if (back) listScroller().scrollTop = back.top;
+    else if (sl) shortlistPlace();
     ui.syncSticky?.();
   }
 
@@ -4292,20 +4305,25 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // different list and the top is the right place.
   const PLACE_MAX = 10;
   const placeKey = keyStore(storageOr('sessionStorage'), PLACE_KEY);
-  const placeFor = () => JSON.stringify(PRESET_KEYS.map((k) => cfg[k]));
+  // Results: per search, for these filters and sort. Shortlist: one place, for its own filter
+  // and search box (not while planning a day or comparing).
+  const SL_PLACE = 'shortlist';
+  const placeFor = (view = ui.view) => (view === 'shortlist' ? JSON.stringify([ui.slFilter?.value, ui.slQuery?.value]) : JSON.stringify(PRESET_KEYS.map((k) => cfg[k])));
+  const placeSlot = (view = ui.view) => (view === 'shortlist' ? SL_PLACE : cacheKey);
   const readPlaces = () => { try { const p = JSON.parse(placeKey.get() || '{}'); return isObj(p) ? p : {}; } catch { return {}; } };
   let placeTimer = null;
   function notePlace() {
     clearTimeout(placeTimer);
     placeTimer = setTimeout(() => {
-      if (ui.view === 'shortlist' || !cacheKey || ui.panel.hidden) return;
+      const slot = placeSlot();
+      if (!slot || ui.panel.hidden || (ui.view === 'shortlist' && (ui.planDay || ui.compare))) return;
       const items = [...ui.list.querySelectorAll('.rf-item')];
       const cur = document.activeElement?.closest?.('.rf-item');
       const edge = ui.panel.classList.contains('rf-full') ? ui.list.getBoundingClientRect().top : ui.status.getBoundingClientRect().bottom;
       const at = cur && ui.list.contains(cur) ? cur : items.find((el) => el.getBoundingClientRect().bottom > edge + 8);
       const places = readPlaces();
-      if (!at || items.indexOf(at) === 0) delete places[cacheKey];
-      else places[cacheKey] = { id: at.dataset.id, shown: items.length, sig: placeFor(), t: Date.now() };
+      if (!at || items.indexOf(at) === 0) delete places[slot];
+      else places[slot] = { id: at.dataset.id, shown: items.length, sig: placeFor(), t: Date.now() };
       const keep = Object.entries(places).sort(([, a], [, b]) => b.t - a.t).slice(0, PLACE_MAX);
       placeKey.set(JSON.stringify(Object.fromEntries(keep)));
     }, 400);
@@ -4320,6 +4338,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const p = pendingPlace;
     pendingPlace = null;
     if (!p || ui.view === 'shortlist') return false;
+    return goToPlace(p);
+  }
+  // The Shortlist tab, opened for the first time since the page loaded: back where you were.
+  function shortlistPlace() {
+    const p = readPlaces()[SL_PLACE];
+    return !!p && p.sig === placeFor('shortlist') && goToPlace(p);
+  }
+  function goToPlace(p) {
     for (let n = 0; n < 20 && ui.list.querySelectorAll('.rf-item').length < p.shown && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
     const el = ui.list.querySelector(`.rf-item[data-id="${CSS.escape(p.id)}"]`);
     if (!el) return false;
@@ -4647,11 +4673,28 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return cards;
   }
 
+  // No card recognised on a list page that has listings: say so (after a grace period, since
+  // REA renders its cards after the page data arrives), and clear it once cards show up.
+  const CARD_WARN_MS = 8000;
+  let cardWarnTimer = null;
+  const checkCards = (found) => {
+    if (found || !cfg.annotate || !known.size || !PAGE_SEG.test(location.pathname) || /\/map-/.test(location.pathname)) {
+      clearTimeout(cardWarnTimer); cardWarnTimer = null;
+      if (found) setWarn('cards', '');
+      return;
+    }
+    if (cardWarnTimer) return;
+    cardWarnTimer = setTimeout(() => {
+      cardWarnTimer = null;
+      if (isSearchPage(location.href) && !cardsOnPage().size) setWarn('cards', "REA's result cards weren't recognised, so the badges and card buttons are off (the drawer still works). Run reaFilter.selfcheck() in the console and report it.");
+    }, CARD_WARN_MS);
+  };
   function annotate() {
     if (!isSearchPage(location.href)) return;
     const matches = matchSet();
     const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
     const cards = cardsOnPage();
+    checkCards(cards.size > 0);
     // Read phase: computed style for newly seen cards, before any writes (avoids layout thrash).
     const statics = new Set();
     for (const [card, { id }] of cards) {
