@@ -1901,7 +1901,7 @@
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
-    type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
+    type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
     annotate: true, dimCards: true, compact: false, onlyStarred: false, showHidden: false,
     remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '', theme: '',
   };
@@ -1915,7 +1915,7 @@
   const BACKUP_CFG_SKIP = new Set(['remember', 'remindSaved']);
   const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
   // What a restore would do, shown before anything is merged.
-  const SETTING_NAMES = { places: 'places', checklist: 'checklist', enquiry: 'enquiry template', leaseEnd: 'lease end', income: 'income', theme: 'theme', anchor: 'distance point',
+  const SETTING_NAMES = { places: 'places', checklist: 'checklist', enquiry: 'enquiry template', leaseEnd: 'lease end', inspectFree: 'inspection times', income: 'income', theme: 'theme', anchor: 'distance point',
     wRent: 'weights', wTiming: 'weights', wDist: 'weights', wMovein: 'weights', icsAlarm: 'calendar reminder', compact: 'compact list', annotate: 'card badges', dimCards: 'card fading', sort: 'sort', sortDesc: 'sort' };
   const backupSummary = (data, cur) => {
     const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
@@ -1941,7 +1941,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm', 'theme']; // Clear keeps your "from" point
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm', 'theme', 'inspectFree']; // Clear keeps your "from" point and your free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -1982,9 +1982,52 @@
   const fold = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   // Every term must appear; -term must not; "a phrase" as typed; a|b means either.
   // "Inspections I can make": a weekend, or 5pm or later, in the listing's own time zone.
-  const INSPECT_WHEN = { weekend: 'Inspect on a weekend', evening: 'Inspect after 5pm', either: 'Weekend or after 5pm' };
-  const inspectFits = (at, tz, when) => {
-    const parts = Object.fromEntries(dtf({ weekday: 'short', hour: 'numeric', hourCycle: 'h23', ...(tz ? { timeZone: tz } : {}) }).formatToParts(at).map((p) => [p.type, p.value]));
+  const INSPECT_WHEN = { weekend: 'Inspect on a weekend', evening: 'Inspect after 5pm', either: 'Weekend or after 5pm', mine: 'Inspect at my times' };
+  // "My times": comma- or line-separated entries of days and an optional time range, eg
+  // "Sat 9-13, Sun, weekdays 17:30-, Mon-Wed 7am-8:30am". No days means every day; no range
+  // means all day; an open end runs to midnight (or from it). null when an entry can't be read.
+  const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const dayOf = (w) => WEEKDAYS.indexOf(String(w).slice(0, 3).toLowerCase());
+  const isDayName = (x) => x.length >= 3 && DAY_NAMES.some((n) => n.startsWith(x) || `${n}s` === x); // sat, satur, saturday; not "sunburn"
+  const clockMin = (t, fallback) => {
+    if (!t) return fallback;
+    const m = t.match(/^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/i);
+    if (!m || +m[1] > 24 || +(m[2] || 0) > 59) return NaN;
+    const h = (+m[1] % 12) + (m[3] ? (m[3].toLowerCase() === 'pm' ? 12 : 0) : +m[1] >= 12 ? 12 : 0);
+    return Math.min(1440, (m[3] ? h : +m[1]) * 60 + +(m[2] || 0));
+  };
+  const TIME_RANGE = /(\d[\d:.]*\s*(?:am|pm)?)?\s*-\s*(\d[\d:.]*\s*(?:am|pm)?)?\s*$/;
+  const dayToken = (w, days) => {
+    const [a, b] = w.split('-'), all = WEEKDAYS.map((_, d) => d);
+    const one = (x) => (/^(weekdays?|workdays?)$/.test(x) ? [1, 2, 3, 4, 5] : /^weekends?$/.test(x) ? [0, 6]
+      : /^(daily|any|every|everyday|day)$/.test(x) ? all : isDayName(x) ? [dayOf(x)] : null);
+    if (b == null) { const ds = one(a); ds?.forEach((d) => days.add(d)); return !!ds; }
+    const x = dayOf(a), y = dayOf(b);
+    if (x < 0 || y < 0 || one(a)?.length !== 1 || one(b)?.length !== 1) return false;
+    for (let d = x; ; d = (d + 1) % 7) { days.add(d); if (d === y) return true; }
+  };
+  const parseFreeTimes = (text) => {
+    const out = [];
+    for (const raw of String(text || '').split(/[,;\n]/).map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+      const t = raw.match(TIME_RANGE), hasRange = !!t && !!(t[1] || t[2]);
+      const dayText = (hasRange ? raw.slice(0, t.index) : raw).replace(/\s*-\s*/g, '-').trim();
+      const days = new Set();
+      for (const w of dayText.split(/\s*(?:&|\/|\band\b|\s)\s*/).filter(Boolean)) if (!dayToken(w, days)) return null;
+      let from = hasRange ? clockMin(t[1]?.trim(), 0) : 0;
+      const to = hasRange ? clockMin(t[2]?.trim(), 1440) : 1440;
+      if (hasRange && t[1] && !/[ap]m/.test(t[1]) && /pm/.test(t[2] || '') && from < 720 && from + 720 < to) from += 720; // "6-8pm" is 6pm to 8pm
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || (!days.size && !hasRange)) return null;
+      out.push({ days: days.size ? days : new Set(WEEKDAYS.map((_, d) => d)), from, to });
+    }
+    return out.length ? out : null;
+  };
+  const inspectFits = (at, tz, when, free = null) => {
+    const parts = Object.fromEntries(dtf({ weekday: 'short', hour: 'numeric', minute: '2-digit', hourCycle: 'h23', ...(tz ? { timeZone: tz } : {}) }).formatToParts(at).map((p) => [p.type, p.value]));
+    if (when === 'mine') {
+      const d = dayOf(parts.weekday), min = (+parts.hour % 24) * 60 + +parts.minute;
+      return !!free?.some((w) => w.days.has(d) && min >= w.from && min < w.to);
+    }
     const weekend = parts.weekday === 'Sat' || parts.weekday === 'Sun', evening = +parts.hour >= 17;
     return when === 'weekend' ? weekend : when === 'evening' ? evening : weekend || evening;
   };
@@ -2269,6 +2312,7 @@
     if (cfg.from && cfg.to && cfg.from > cfg.to) return '"Available from" is after "Available to".';
     const wEnd = windowEnd(cfg.withinDays, now);
     if (cfg.from && wEnd && cfg.from > wEnd) return `"Available from" is after the "within" window (ends ${wEnd}).`;
+    if (cfg.inspectWhen === 'mine' && !parseFreeTimes(cfg.inspectFree)) return 'Inspections at "my times" needs times it can read, eg Sat 9-13, weekdays 17:30-.';
     if (cfg.anchor && !parseAnchor(cfg.anchor)) return 'Distance "from" needs coordinates in Australia, eg -33.87, 151.21 (right-click a spot in Google Maps to copy them).';
     if (cfg.priceMin !== '' && cfg.priceMax !== '' && num(cfg.priceMin) != null && num(cfg.priceMax) != null && +cfg.priceMin > +cfg.priceMax) return 'Min $/wk is above max $/wk.';
     return '';
@@ -2348,7 +2392,8 @@
     add('hideTaken', cfg.hideTaken, (r) => !r.taken);
     add('keyword', kw, (r) => kw(r.text || ''));
     add('inspectOn', insDay, (r) => (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)));
-    add('inspectWhen', INSPECT_WHEN[cfg.inspectWhen], (r) => (r.inspections || []).some((i) => i.at != null && i.at >= +now - INSPECT_GRACE_MS && inspectFits(i.at, tzOf(r), cfg.inspectWhen)));
+    const free = cfg.inspectWhen === 'mine' ? parseFreeTimes(cfg.inspectFree) : null;
+    add('inspectWhen', INSPECT_WHEN[cfg.inspectWhen] && (cfg.inspectWhen !== 'mine' || free), (r) => (r.inspections || []).some((i) => i.at != null && i.at >= +now - INSPECT_GRACE_MS && inspectFits(i.at, tzOf(r), cfg.inspectWhen, free)));
     add('building', bKey, (r) => buildingKey(r.address) === bKey);
     add('leaseMin', leaseNeed, (r) => { const l = leaseFromCode(r.lease); return !l || l.flexible || l.max >= leaseNeed; }); // a stated lease too short; unstated or flexible passes
     return tests;
@@ -2896,7 +2941,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3439,7 +3484,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
         <label>Inspection on<input type="date" id="rf-inspectOn"></label>
         <label title="Keeps listings with at least one upcoming inspection you can get to, in the listing's local time">Inspections I can make<select id="rf-inspectWhen">
-          <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option></select></label>
+          <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option><option value="mine">At my times…</option></select></label>
+        <label title="Days and times you can get to an inspection, in the listing's local time. Used by Inspections I can make: At my times">My inspection times<input type="text" id="rf-inspectFree" placeholder="eg Sat 9-13, Sun, weekdays 17:30-" spellcheck="false"></label>
         <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
         <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
         <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>

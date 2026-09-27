@@ -658,6 +658,26 @@ test('cash to move: move-in plus the overlap; sort puts unknowns last; CSV and C
   assert.doesNotMatch(core.compareHtml(out.slice(0, 2), { ...cfg, leaseEnd: '' }), /Cash to move/, 'only with a lease end (else it is Move-in)');
 });
 
+test('my inspection times: parsed, checked in the listing zone, filtered, and explained when unreadable', () => {
+  const w = (t) => core.parseFreeTimes(t)?.map((x) => [[...x.days].sort().join(''), x.from, x.to]);
+  assert.deepEqual(w('Sat 9-13, Sun, weekdays 17:30-'), [['6', 540, 780], ['0', 0, 1440], ['12345', 1050, 1440]]);
+  assert.deepEqual(w('Mon-Wed 7am-8:30am; Thu-Mon'), [['123', 420, 510], ['01456', 0, 1440]]);
+  assert.deepEqual(w('saturdays & sun 6-8pm'), [['06', 1080, 1200]], '"6-8pm" is evening');
+  assert.deepEqual(w('17:30-'), [['0123456', 1050, 1440]], 'no days: every day');
+  for (const bad of ['nonsense', 'sunburn 9-10', 'sat 13-9', 'sat 25-26', '']) assert.equal(core.parseFreeTimes(bad), null, bad);
+  const free = core.parseFreeTimes('Sat 9-13');
+  const sat10 = Date.UTC(2026, 8, 26, 0), sat14 = Date.UTC(2026, 8, 26, 4); // 10am and 2pm in Sydney
+  assert.equal(core.inspectFits(sat10, 'Australia/Sydney', 'mine', free), true);
+  assert.equal(core.inspectFits(sat14, 'Australia/Sydney', 'mine', free), false);
+  assert.equal(core.inspectFits(sat10, 'Australia/Perth', 'mine', free), false, 'Perth is 2 hours behind: 8am');
+  const now = new Date(Date.UTC(2026, 8, 23));
+  const rows = [{ id: 'ok', url: 'a', address: 'x NSW 2026', inspections: [{ at: sat10 }] }, { id: 'late', url: 'b', address: 'y NSW 2026', inspections: [{ at: sat14 }] }];
+  const cfg = { ...core.DEFAULT_CFG, inspectWhen: 'mine', inspectFree: 'Sat 9-13' };
+  assert.deepEqual(core.filterRows(rows, cfg, now).map((r) => r.id), ['ok']);
+  assert.match(core.cfgError({ ...cfg, inspectFree: 'whenever' }), /my times/);
+  assert.equal(core.activeFilters(cfg).find((f) => f.key === 'inspectWhen')?.label, 'Inspect at my times');
+});
+
 test('building filter matches the building exactly (2 Hall St is not 12 Hall St)', () => {
   const rows = [{ id: '1', url: 'a', address: '5/2 Hall St, Bondi NSW 2026' }, { id: '2', url: 'b', address: '3/12 Hall St, Bondi NSW 2026' }, { id: '3', url: 'c', address: '9/2 Hall St, Bondi NSW 2026' }];
   const key = core.buildingKey(rows[0].address);

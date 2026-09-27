@@ -2051,6 +2051,29 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await other.close(); await done(page); await ctx.close();
   });
 
+  // 58. Inspections at my times: "weekends" typed as my times matches the built-in Weekends;
+  // unreadable times explain themselves; Clear keeps the times.
+  await block('58', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    await page.click('#rf-more summary');
+    await page.selectOption('#rf-inspectWhen', 'weekend');
+    const weekend = await count(page);
+    await page.fill('#rf-inspectFree', 'weekends'); await page.dispatchEvent('#rf-inspectFree', 'change');
+    await page.selectOption('#rf-inspectWhen', 'mine');
+    await page.waitForFunction((n) => document.querySelectorAll('.rf-item').length === n, weekend);
+    assert.ok(await page.$$eval('.rf-achip', (cs) => cs.some((c) => /Inspect at my times/.test(c.textContent))), 'chip shown');
+    await page.fill('#rf-inspectFree', 'whenever'); await page.dispatchEvent('#rf-inspectFree', 'change');
+    await waitStatus(page, /my times/);
+    await page.fill('#rf-inspectFree', 'Sat 9-13'); await page.dispatchEvent('#rf-inspectFree', 'change');
+    await page.click('.rf-clear');
+    assert.equal(await page.inputValue('#rf-inspectWhen'), '');
+    assert.equal(await page.inputValue('#rf-inspectFree'), 'Sat 9-13', 'Clear keeps your times');
+    console.log('inspections at my times: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);
