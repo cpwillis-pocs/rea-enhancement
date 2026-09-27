@@ -3918,7 +3918,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     };
     narrow.addEventListener?.('change', () => { if (!panel.hidden) setOpen(true); });
     ui.setOpen = setOpen;
-    launch.addEventListener('click', () => { setOpen(true); if (!ui.placedNow) ui.run.focus(); }); // back where you were, else on Search
+    launch.addEventListener('click', () => {
+      // Clicked in the moment before startup has restored this search: open once it has, so the
+      // drawer lands on the listing you were on rather than on an empty list.
+      if (!panel.dataset.rfReady) { ui.openWhenReady = true; return; }
+      setOpen(true); if (!ui.placedNow) ui.run.focus(); // back where you were, else on Search
+    });
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
     const help = panel.querySelector('.rf-help'), helpBtn = panel.querySelector('.rf-keys');
     const toggleHelp = () => {
@@ -5762,6 +5767,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         step('backup nudge', nudgeBackup);
         step('annotate', ensureVisiblePage);
         ui.panel.dataset.rfReady = '1'; // every startup step has run (tests wait on it)
+        if (ui.openWhenReady) { ui.openWhenReady = false; ui.launch.click(); }
       }, 0);
     }, 0);
   }
