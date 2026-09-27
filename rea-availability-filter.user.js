@@ -2325,7 +2325,31 @@
     const subs = groupRents(uniq, (r) => String(r.suburb || '').trim());
     const bySuburb = subs.length > 1 ? subs.sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))
       .map(({ key, n, rents, ppb }) => ({ suburb: key, n, median: medianOf(rents), ppb: medianOf(ppb) })) : [];
-    return { n: uniq.length, median: medianOf(all), byBeds, bySuburb, byWeek: [...weeks, later, unknown] };
+    return { n: uniq.length, median: medianOf(all), byBeds, bySuburb, byAgency: agencyPatterns(uniq, now), byWeek: [...weeks, later, unknown] };
+  };
+  // Per agency, over the listings shown: how many, how many dropped their rent, relisted, or say
+  // they're taken while still up, and the median days listed. Counts, not a rating; only with
+  // two or more agencies, each with AGENCY_MIN+ listings.
+  const AGENCY_MIN = 2, AGENCY_ROWS = 10;
+  const agencyPatterns = (rows, now = new Date()) => {
+    const groups = new Map();
+    for (const r of rows) {
+      const k = agencyKey(r.agency);
+      if (!k) continue;
+      const g = groups.get(k) || { agency: r.agency, n: 0, dropped: 0, relisted: 0, taken: 0, days: [] };
+      g.n++;
+      const was = r.prevPrice ? parsePrice(r.prevPrice) : null;
+      if (Number.isFinite(was) && Number.isFinite(r.priceNum) && r.priceNum < was) g.dropped++;
+      if (r.relisted) g.relisted++;
+      if (r.taken) g.taken++;
+      const since = r.listed ?? r.firstSeen;
+      if (typeof since === 'number' && since <= +now) g.days.push(Math.floor((+now - since) / DAY_MS));
+      groups.set(k, g);
+    }
+    const out = [...groups.values()].filter((g) => g.n >= AGENCY_MIN);
+    if (out.length < 2) return [];
+    return out.sort((a, b) => b.n - a.n || a.agency.localeCompare(b.agency)).slice(0, AGENCY_ROWS)
+      .map(({ days, ...g }) => ({ ...g, medianDays: days.length ? Math.round(quantile(days.sort(asc), 0.5)) : null }));
   };
 
   // Dedupe by URL, preferring the exact-match copy over a surrounding-suburb one.
@@ -2942,6 +2966,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
       ${m.bySuburb.length ? `<div class="rf-market-t"><table><caption>By suburb</caption><thead><tr><th scope="col">Suburb</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${m.byAgency?.length ? `<div class="rf-market-t"><table><caption>By agency, in these listings</caption><thead><tr><th scope="col">Agency</th><th scope="col">Listings</th><th scope="col">Rent dropped</th><th scope="col">Relisted</th><th scope="col">Says taken</th><th scope="col">Median days listed</th></tr></thead>
+      <tbody>${m.byAgency.map((g) => `<tr><th scope="row">${esc(g.agency)}</th><td>${g.n}</td><td>${g.dropped}</td><td>${g.relisted}</td><td>${g.taken}</td><td>${g.medianDays ?? '–'}</td></tr>`).join('')}</tbody></table>
+      <div class="rf-meta">Counts from the listings shown, not a rating of the agency. Days listed are from REA's listed date, or when this browser first saw the listing.</div></div>` : ''}
       <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
         const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
         const inner = `<span>${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;

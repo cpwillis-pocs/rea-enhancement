@@ -699,6 +699,25 @@ test('applications close: read from the text, nudged near the deadline, exported
   assert.match(row.applyBy, /^\d{4}-10-03$/, 'toRow reads it');
 });
 
+test('market: agency patterns count drops, relists, taken and days listed; only with two agencies of 2+', () => {
+  const now = new Date(2026, 8, 23), d = (n) => +now - n * 864e5;
+  const rows = [
+    { id: '1', url: 'a', agency: 'Ray White', priceNum: 600, prevPrice: '$650 per week', listed: d(10) },
+    { id: '2', url: 'b', agency: 'Ray White', priceNum: 700, prevPrice: '$650 per week', listed: d(20), taken: 'deposit' },
+    { id: '3', url: 'c', agency: 'LJ Hooker', priceNum: 500, relisted: { price: '$520' }, firstSeen: d(3) },
+    { id: '4', url: 'd', agency: 'lj hooker', priceNum: 500 },
+    { id: '5', url: 'e', agency: 'Solo Realty', priceNum: 450 },
+  ];
+  const m = core.marketStats(rows, now);
+  assert.deepEqual(m.byAgency, [
+    { agency: 'LJ Hooker', n: 2, dropped: 0, relisted: 1, taken: 0, medianDays: 3 },
+    { agency: 'Ray White', n: 2, dropped: 1, relisted: 0, taken: 1, medianDays: 15 },
+  ], 'a rise is not a drop; one-listing agencies left out');
+  assert.match(core.marketHtml(m), /By agency, in these listings[\s\S]*not a rating of the agency/);
+  assert.deepEqual(core.marketStats(rows.slice(0, 2), now).byAgency, [], 'one agency: nothing to compare');
+  assert.doesNotMatch(core.marketHtml(core.marketStats(rows.slice(0, 2), now)), /By agency/);
+});
+
 test('building filter matches the building exactly (2 Hall St is not 12 Hall St)', () => {
   const rows = [{ id: '1', url: 'a', address: '5/2 Hall St, Bondi NSW 2026' }, { id: '2', url: 'b', address: '3/12 Hall St, Bondi NSW 2026' }, { id: '3', url: 'c', address: '9/2 Hall St, Bondi NSW 2026' }];
   const key = core.buildingKey(rows[0].address);
