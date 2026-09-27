@@ -12,6 +12,8 @@ const lint = (dir) => spawnSync(process.execPath, [path.join(__dirname, 'lint.js
 const copy = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rea-lint-'));
   fs.mkdirSync(path.join(dir, 'test'));
+  fs.mkdirSync(path.join(dir, '.github/workflows'), { recursive: true });
+  fs.copyFileSync(path.join(root, '.github/workflows/ci.yml'), path.join(dir, '.github/workflows/ci.yml'));
   for (const f of ['rea-availability-filter.user.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'SECURITY.md', 'PRIVACY.md']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
   for (const f of fs.readdirSync(__dirname).filter((x) => x.endsWith('.test.js'))) fs.copyFileSync(path.join(__dirname, f), path.join(dir, 'test', f));
   return dir;
@@ -42,4 +44,14 @@ test('lint catches header, changelog, privacy, storage and dynamic-code violatio
     assert.match(r.stderr, re);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('lint catches a Playwright version that differs from CI', () => {
+  const dir = copy();
+  const p = path.join(dir, 'package.json');
+  fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(/playwright@\d+\.\d+\.\d+/, 'playwright@1.0.0'));
+  const r = lint(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /playwright@1\.0\.0, CI pins/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

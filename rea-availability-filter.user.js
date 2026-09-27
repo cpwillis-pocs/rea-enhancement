@@ -2386,6 +2386,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // ------------------------------------------------------------------- ui
 
+  // Double-run guard: a second copy (an installed and a dev copy, or a fork) would draw a second
+  // drawer and fight over storage. The first one to load wins; the flag is set before any await.
+  if (window.__reaFilterLoaded || document.getElementById('rf-panel')) {
+    console.warn(`[reaFilter] another copy (${window.__reaFilterLoaded || 'unknown version'}) is already running on this page, so this one stops. Disable one of them in Tampermonkey.`);
+    return;
+  }
+  window.__reaFilterLoaded = (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev';
+
   // Clipboard with a fallback: the async API needs focus/permission, execCommand doesn't.
   async function copyText(text) {
     try { await navigator.clipboard.writeText(text); return true; } catch {

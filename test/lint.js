@@ -37,6 +37,11 @@ else if (vnum(news) > vnum(tag('version') || '0')) err(`WHATS_NEW.version ${news
 else if (!new RegExp(`^## ${news.replace(/\./g, '\\.')}$`, 'm').test(read('CHANGELOG.md'))) err(`WHATS_NEW.version ${news} has no CHANGELOG.md section`);
 if (!read('README.md').includes(`](${RAW})`)) err('README.md install link must point at the @downloadURL');
 for (const f of ['SECURITY.md', 'PRIVACY.md']) if (!read('README.md').includes(`](${f})`) || !fs.existsSync(path.join(root, f))) err(`${f} must exist and be linked from README.md`);
+// The Playwright version local runs install (npm run e2e:setup) is the one CI pins.
+const pwLocal = JSON.parse(read('package.json')).scripts?.['e2e:setup']?.match(/playwright@(\d+\.\d+\.\d+)/)?.[1];
+const ciPath = path.join(root, '.github/workflows/ci.yml');
+const pwCi = fs.existsSync(ciPath) ? fs.readFileSync(ciPath, 'utf8').match(/PLAYWRIGHT_VERSION:\s*(\S+)/)?.[1] : pwLocal;
+if (!pwLocal || pwLocal !== pwCi) err(`package.json e2e:setup installs playwright@${pwLocal}, CI pins ${pwCi}: keep them the same`);
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
 

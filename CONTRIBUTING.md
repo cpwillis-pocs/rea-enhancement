@@ -9,10 +9,13 @@ git clone <this repo>
 cd rea-enhancement
 npm run lint    # syntax + project invariants (header, changelog, privacy, storage keys)
 npm run check   # lint + unit tests, exactly what CI runs first
-npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js); needs `npm i --no-save playwright@1.56.1` (the version CI pins) + `npx playwright install chromium`
+npm run e2e:setup   # once: the Playwright version CI pins (lint keeps the two in step) + Chromium
+npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js)
 npm run coverage   # unit coverage of the pure half, then V8 coverage of the UI half across both e2e files -> coverage-e2e.txt
 npm run ci      # check + e2e, the whole gate locally
 ```
+
+**Trying changes in a real browser.** `npm run dev-stub` prints a small Tampermonkey script that `@require`s your working copy from disk. Install it as a new script (it has its own name, so it never replaces the real one), allow file URLs for Tampermonkey in the browser's extension settings, and disable the installed copy. If both run anyway, the second one to load logs a warning and stops, so you never get two drawers.
 
 `E2E_ARTIFACTS=dir` makes a failing e2e run save a screenshot and the drawer HTML of every open page, plus the sections that passed. `E2E_TIMEOUT_MS` (default 8 min) fails a hung run with the last passing section named. `COVERAGE_MIN=98` fails `npm run coverage` if UI line coverage drops below it.
 

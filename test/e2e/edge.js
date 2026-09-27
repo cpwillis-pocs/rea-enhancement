@@ -1538,6 +1538,22 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 44. Double-run guard: a second copy of the script on the same page warns and stops.
+  await block('44', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    const warned = [];
+    page.on('console', (m) => { if (m.type() === 'warning' && /another copy/.test(m.text())) warned.push(m.text()); });
+    await page.addScriptTag({ content: SCRIPT });
+    await page.waitForFunction(() => true);
+    assert.equal(await page.$$eval('#rf-panel', (els) => els.length), 1, 'one drawer');
+    assert.equal(await page.$$eval('#rf-launch', (els) => els.length), 1, 'one launcher');
+    assert.equal(warned.length, 1, 'the second copy says why it stopped');
+    await run(page);
+    console.log('double-run guard: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
