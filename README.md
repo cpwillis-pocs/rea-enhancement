@@ -116,6 +116,13 @@ npm run coverage   # unit + e2e line coverage
 node test/e2e/screenshots.js   # regenerate docs/screenshots
 ```
 
+More docs:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): setup, tests, CI, rules of thumb.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the script works, what it stores, and which versions to bump.
+- [docs/ROADMAP.md](docs/ROADMAP.md): current status, decisions taken, known limitations, ideas not built yet, and the release checklist.
+- [CHANGELOG.md](CHANGELOG.md): every release.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for layout, rules of thumb and the CI pipeline (which can also be run on demand from the Actions tab, eg to repeat the browser tests or regenerate screenshots). Screenshots use generated fixture data, not real listings.
 
 ## Disclaimer

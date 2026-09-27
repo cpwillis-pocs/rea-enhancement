@@ -1,0 +1,93 @@
+# Architecture
+
+How `rea-availability-filter.user.js` is put together, what it stores, and the version numbers that must move when you change things. For setup, tests and CI see [CONTRIBUTING.md](../CONTRIBUTING.md); for what changed when, see [CHANGELOG.md](../CHANGELOG.md); for status and open ideas, see [ROADMAP.md](ROADMAP.md).
+
+## One file, two halves
+
+The userscript is a single IIFE with `@grant none` and no dependencies. A `typeof window === 'undefined'` guard splits it:
+
+| Half | Contents | Tested by |
+|---|---|---|
+| **Pure** (above the guard) | Parsing REA's page data, text heuristics, filters and sorts, medians, route planning, exports (CSV/TSV/ICS/print), share links, and the storage stores (`rowStore`, `marksStore`, `snapshotStore`, `presetStore`, `healthStore`) with an injectable `storage` and clock. Exported with `module.exports`. | `test/*.test.js` (node:test) |
+| **UI** (below the `// ----- ui` marker) | The drawer, REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
+
+New logic goes in the pure half wherever possible, with a unit test.
+
+## Data flow
+
+1. **Read.** The results page embeds a hydration blob (`window.ArgonautExchange`, or the `<script>` tag if REA's app has already consumed it). `parseExchange` finds the search results by the known path (`resi-property_listing-experience-web` → `urqlClientCache` → `rentSearch.results`). If REA renames either, it falls back to any cache entry shaped like results (`exact.items` + `pagination`) and records that in `resultsPath`.
+2. **Crawl.** `fetchAllPages` reads page 1 from the page itself and later pages one at a time, with a jittered 600 ms gap, retry/backoff, 20 s timeouts and a 20-page cap. `pageMemo` shares fetched pages between a search, card annotation and Resume. A page failing after page 1 returns what was read, plus `failed`.
+3. **Rows.** `toRow` turns each listing into a flat row: dates, prices normalised to weekly, bond and move-in cost, amenities, heads-up clauses, lease term, apply-via, taken, by-appointment, inspections in the listing's time zone, coordinates, and folded text for keywords. Every field is optional; unknown paths are found by `discover` and reported by `reaFilter.probe()`.
+4. **Learn.** `learn` → `marksStore.observe` records sightings, price/date/feature changes, relists and cancelled inspections. It also refreshes the shortlist copy: search rows replace inspections and clauses, property pages merge.
+5. **Adopt.** `adopt` decorates rows with your marks, then works out suburb-scoped medians (`withMedians`) and building groups (`withBuildings`), and compares against the remembered snapshot (new / gone).
+6. **Show.** `applyFilters` (`filterRows` + `withScores` + `sorter`) drives `render`. It renders 50 at a time (`RENDER_CHUNK`) with an IntersectionObserver whose root is whatever scrolls: the drawer in side mode, the list when expanded. `annotate` badges REA's own cards and can fade the ones that don't match.
+
+REA's DOM is only ever appended to: one `.rf-badge` per `<article>` and `data-rf-*` attributes. The badge CSS resets host styles and uses `!important`, because REA's stylesheets can load after ours.
+
+## Storage
+
+All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces this, and Settings uses the prefix to measure the data and to **Delete all my data**.
+
+| Key | Where | Holds | Limits |
+|---|---|---|---|
+| `v1` | localStorage | Settings (`DEFAULT_CFG` keys, sanitised by type). `building` is never saved. | none |
+| `marks/v1` | localStorage | Per-listing marks (see below), plus hidden agencies (`ag`) and hidden suburbs (`sb`) | 5000 listings; unmarked ones are dropped 90 days after they were last seen |
+| `snapshots/v1` | localStorage | Remembered searches: slim rows, ids and baseline for "new since last visit", gone rows, `pin` | 3 searches (pinned kept first), 300 characters of text per field |
+| `presets/v1` | localStorage | Named filter presets, and the search each is bound to | none |
+| `health/v1` | localStorage | Moving average of how often each field is filled, for drift warnings | none |
+| `rows/<search>` | sessionStorage | This tab's results cache, versioned by `ROWS_VERSION` | 2 searches, 10 minutes |
+| `preset-visit`, `preset-prev/v1` | sessionStorage | "Bound preset applies once per visit", and the filters it replaced | none |
+| `lbar-min`, `wide`, `width`, `seen-version`, `remind-at` | localStorage | Listing bar minimised, expanded drawer, drawer width, last what's-new version, saved-search reminder time | none |
+
+A failed write of something you chose (marks, settings, presets) goes to `writeState`, and the UI shows a "storage full" banner until a later write succeeds.
+
+### Marks entry fields (`marks/v1` → `m[id]`)
+
+| Field | Meaning |
+|---|---|
+| `f`, `l`, `x` | First seen, last seen, found gone |
+| `s`, `st`, `d` | Shortlisted, when, summary copy for the cross-search Shortlist (`d.in` inspections, `d.w` heads-up, `d.tk` taken, `d.bp` by appointment…) |
+| `h`, `hr`, `ht`, `hp` | Hidden, reason, when hidden, weekly rent when hidden (used for "cheaper since you hid it") |
+| `n` | Note |
+| `as`, `ast`, `ck` | Application status and when set, checklist answers |
+| `o`, `rv` | Opened, reviewed |
+| `p`, `ps`, `pp`, `pps`, `pt`, `ph` | Price now, previous price, when it changed, price history |
+| `av`, `pav`, `avt`, `avd` | Availability day now and before, when it changed, direction |
+| `fs`, `pfs`, `fst` | Feature signature (amenity and heads-up bits, versioned by `FEAT_V`), previous signature, when it changed |
+| `rl` | The listing this one relists (same address) |
+| `li`, `nd`, `ic` | Last inspection that has passed, when "Did you inspect?" was answered, cancelled inspection `[when, label, at]` |
+
+`MARK_FIELDS` lists the fields a bulk action may change, so bulk Undo can restore them exactly. `keep()` decides what survives pruning and goes into backups: shortlisted, hidden, noted, or with an application status.
+
+## Versions that must move
+
+| Constant | Bump when | Why |
+|---|---|---|
+| `// @version` (header) | Any change to the script | Tampermonkey only auto-updates to a higher version. CI's version-bump job checks it on PRs, and lint checks CHANGELOG.md has a section for it. |
+| `WHATS_NEW.version` | A release users should hear about | Shows the one-time "Updated to…" note. Lint keeps it no higher than `@version` and with a CHANGELOG section. |
+| `ROWS_VERSION` | `toRow()` output changes shape | Invalidates old tab caches |
+| `FEAT_V` | `AMENITIES` or `WATCHOUTS` detection changes | Old feature signatures aren't compared, so no false "details changed". Only append to those lists: signatures are bit positions. |
+
+## Heuristics (text parsing)
+
+These are all pure and unit-tested, and all can be wrong. Each has a negative-case table in the tests.
+
+- **`parseAvail`:** now / immediately / vacant, ISO dates, "early/mid/end of Month", d/m/y, month names, and yearless d/m as a last resort (not "24/7", "x/7", "2/3 bed" or "1/2 price").
+- **`availFromText`:** skips "inspections / parking … available".
+- **`parsePrice`:** weekly, monthly, annual, fortnightly or nightly, taking the period after the second figure of a range.
+- **`leaseTermOf`:** the number must sit next to "lease" or "term".
+- **`takenOf`:**
+  - The headline can be terse ("DEPOSIT TAKEN").
+  - The description must say it has already happened.
+  - "Leased" only counts in the headline.
+- **`byApptOf`:** inspections by appointment.
+- **`amenitiesOf`:** 18 amenities, each with a negative pattern and a "feature: no" pattern.
+- **`watchOf`:** heads-up clauses, ignored when negated nearby ("no application fee").
+- **`buildingKey` / `addressKey`:** unit prefixes, and "address on request".
+
+## Tests at a glance
+
+- **Unit:** `test/*.test.js` (163 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
+- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (49 blocks, numbered 1–35 with lettered sub-blocks such as 24l); run just some with `E2E_ONLY=24l,35`.
+- **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files, and CI holds it at 98% or more.
+- **Lint:** `test/lint.js` enforces the project rules, and `test/lint.test.js` checks the lint itself.
