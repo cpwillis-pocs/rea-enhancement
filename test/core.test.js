@@ -850,3 +850,43 @@ test('calendar folding counts octets (accents, emoji) and photo peek image size'
   assert.equal(core.bigImg('https://i2.au.reastatic.net/345x260/abc/main.jpg'), 'https://i2.au.reastatic.net/800x600/abc/main.jpg');
   assert.equal(core.bigImg('https://i2.au.reastatic.net/other/main.jpg'), 'https://i2.au.reastatic.net/other/main.jpg');
 });
+
+test('floor size: internal m² from text, skipping land, balcony and courtyard areas', () => {
+  const cases = [
+    ['Spacious 85sqm apartment', 85], ['85 sq m internal', 85], ['approx. 110 m2 of living', 110], ['92m² over two levels', 92],
+    ['120 square metres of living space', 120], ['Internal 85sqm, balcony 12sqm', 85], ['85sqm internal + 12sqm balcony', 85],
+    ['Balcony 12sqm, internal 85sqm', 85], ['Sunny 14sqm balcony and 70sqm interior', 70], ['on a 600sqm block', null],
+    ['600 sqm land', null], ['Courtyard of 40sqm', null], ['2 bed, 1 bath, 1 car', null], ['12 m2', null], ['5000sqm estate', null],
+    ['Level 3, 75sqm, lift', 75],
+  ];
+  for (const [text, want] of cases) assert.equal(core.sqmFromText(text), want, text);
+});
+
+test('floor size: REA field first, the text as a fallback; filter, sort and export', () => {
+  const field = core.toRow(listing({ id: '146500901', propertySizes: { building: { displayValue: '1,020', sizeUnit: { displayValue: 'm²' } }, land: { displayValue: '600', sizeUnit: { displayValue: 'm²' } } }, description: '40sqm apartment' }), false);
+  assert.equal(field.sqm, 1020);
+  assert.equal(field.sqmFromText, false);
+  assert.equal(core.extractSqm({ propertySizes: { building: { displayValue: '2', sizeUnit: { displayValue: 'ha' } } } }), null, 'hectares not read as m²');
+  const text = core.toRow(listing({ id: '146500902', description: 'Bright 80sqm unit with a 10sqm balcony.' }), false);
+  assert.equal(text.sqm, 80);
+  assert.equal(text.sqmFromText, true);
+  const none = core.toRow(listing({ id: '146500903' }), false);
+  assert.equal(none.sqm, null);
+  const rows = [
+    { ...text, priceNum: 800 }, // $10/m²
+    { ...field, priceNum: 5100 }, // $5/m²
+    { ...none, priceNum: 300 },
+  ];
+  const cfg = { ...core.DEFAULT_CFG, sizeMin: '75' };
+  assert.deepEqual(core.filterRows(rows, cfg).map((r) => r.id), ['146500902', '146500901'], 'unknown size fails a minimum');
+  assert.ok(core.activeFilters(cfg).some((c) => c.label === '75+ m²'));
+  assert.equal(core.perSqm(rows[0]), 10);
+  const sorted = core.applyFilters(rows, { ...core.DEFAULT_CFG, sort: 'ppsqm' }).map((r) => r.id);
+  assert.deepEqual(sorted, ['146500901', '146500902', '146500903']);
+  const rev = core.applyFilters(rows, { ...core.DEFAULT_CFG, sort: 'ppsqm', sortDesc: true }).map((r) => r.id);
+  assert.deepEqual(rev, ['146500902', '146500901', '146500903'], 'unknown stays last reversed');
+  const tsv = core.toTsv([rows[0]]).split(/\r?\n/);
+  const head = tsv[0].split('\t'), vals = tsv[1].split('\t');
+  assert.equal(vals[head.indexOf('floor_m2')], '80');
+  assert.equal(vals[head.indexOf('rent_per_m2')], '10');
+});

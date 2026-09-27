@@ -55,7 +55,7 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 11;
+  const ROWS_VERSION = 12;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
@@ -642,7 +642,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken', 'byAppt']; // inspect/nextInspect: re-derived on load
+    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken', 'byAppt', 'sqm', 'sqmFromText']; // inspect/nextInspect: re-derived on load
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -684,6 +684,8 @@
     r.lng = typeof o?.lng === 'number' ? o.lng : null;
     r.photos = typeof o?.photos === 'number' ? o.photos : null;
     r.floorplan = typeof o?.floorplan === 'boolean' ? o.floorplan : null;
+    r.sqm = typeof o?.sqm === 'number' ? sqmOk(o.sqm) : o && 'sqm' in o ? null : sqmFromText([r.headline, r.text].join(' . ')); // saved before sizes were read
+    r.sqmFromText = r.sqm != null && (typeof o?.sqmFromText === 'boolean' ? o.sqmFromText : !(o && 'sqm' in o));
     const stored = o?.amen && typeof o.amen === 'object'
       ? Object.fromEntries(AMENITIES.map((a) => [a.id, o.amen[a.id] === 'yes' || o.amen[a.id] === 'no' ? o.amen[a.id] : null])) : null;
     r.amen = stored || amenitiesOf({ features: r.features, amenText: r.address ? r.text.replace(r.address.toLowerCase(), ' ') : r.text });
@@ -1216,6 +1218,40 @@
     return { photos, floorplan: plans == null ? null : plans > 0 };
   };
 
+  // Internal floor area in m²: REA's field when there is one, else the listing text. Land,
+  // balcony, courtyard, garage and similar areas are skipped, so "85sqm internal + 12sqm
+  // balcony" is 85 and "on a 600sqm block" is nothing.
+  const SQM_MIN = 15, SQM_MAX = 2000;
+  const sqmOk = (n) => (Number.isFinite(n) && n >= SQM_MIN && n <= SQM_MAX ? Math.round(n) : null);
+  const extractSqm = (listing) => {
+    const s = listing.propertySizes || listing.propertySize || {};
+    for (const v of [s.building, s.internal, s.floor, s.floorArea, listing.buildingSize, listing.floorArea, listing.floorSize, listing.internalArea]) {
+      if (v == null) continue;
+      const unit = String(v?.sizeUnit?.displayValue ?? v?.sizeUnit?.id ?? v?.unit ?? (typeof v === 'string' ? v : 'm2')).toLowerCase();
+      if (!/m2|m²|sqm|sq\s*m|square met/.test(unit)) continue; // hectares, acres, ft² are not converted
+      const n = sqmOk(parseFloat(String(v?.displayValue ?? v?.value ?? v).replace(/,/g, '')));
+      if (n != null) return n;
+    }
+    return null;
+  };
+  const SQM_RE = /(\d{2,4}(?:\.\d+)?)\s*(?:sq\.?\s*m(?:etres?|eters?)?(?![a-z])|m2(?![a-z\d])|m²|square\s*met(?:re|er)s?)/gi;
+  const SQM_NOT = /\b(?:land|block|lot|site|balcon(?:y|ies)|courtyard|terrace|garden|yard|backyard|garage|carport|deck|patio|outdoor|alfresco|rooftop|storage|storeroom|shed|pool)\b/;
+  const SQM_SPLIT = /[,.;+&()]|\band\b|\bplus\b|\bwith\b/;
+  const sqmFromText = (text) => {
+    const t = String(text || '');
+    for (const m of t.matchAll(SQM_RE)) {
+      const n = sqmOk(+m[1]);
+      if (n == null) continue;
+      // The words right next to the number say what was measured: "12sqm balcony", "balcony 12sqm", "600sqm block".
+      const after = t.slice(m.index + m[0].length, m.index + m[0].length + 30).toLowerCase().split(SQM_SPLIT)[0];
+      const before = t.slice(Math.max(0, m.index - 30), m.index).toLowerCase().split(SQM_SPLIT).pop();
+      if (!SQM_NOT.test(after) && !SQM_NOT.test(before)) return n;
+    }
+    return null;
+  };
+  const perSqm = (r) => (Number.isFinite(r.priceNum) && r.sqm > 0 ? Math.round((r.priceNum / r.sqm) * 100) / 100 : null);
+  const sqmLabel = (r) => (r.sqm ? `${r.sqm} m²${r.sqmFromText ? ' (from text)' : ''}` : '');
+
   // Amenities from feature labels + description. Negations are checked first, so "no pets"
   // is 'no' rather than matching "pets". State per amenity: 'yes' | 'no' | null (unknown).
   const AMEN_NO = String.raw`\s*[:?\-]\s*(?:no|none|n)\b`; // key/value style: "Pets allowed: No"
@@ -1517,6 +1553,9 @@
     row.taken = takenOf(row.headline, str(listing.description));
     row.byAppt = !row.inspections.length && byApptOf(said);
     row.lease = leaseCode(leaseTermOf(said));
+    const field = extractSqm(listing);
+    row.sqm = field ?? sqmFromText([row.headline, str(listing.description), ...row.features].join(' . '));
+    row.sqmFromText = field == null && row.sqm != null;
     if (!row.avail) { // REA's field missing or unreadable: the description often says it
       const t = availFromText(said);
       if (t) { row.avail = t; row.available = `${dtf({ day: 'numeric', month: 'short', year: 'numeric' }).format(t)} (from text)`; row.availFromText = true; }
@@ -1609,7 +1648,7 @@
 
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
-    priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
+    priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
     annotate: true, dimCards: true, compact: false, onlyStarred: false, showHidden: false,
     remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '', theme: '',
@@ -1623,7 +1662,7 @@
 
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
-  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'type', 'keyword',
+  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'type', 'keyword',
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
@@ -1636,6 +1675,7 @@
     avail: (a, b) => byAvail(a, b) || byPrice(a, b),
     price: (a, b) => byPrice(a, b) || byAvail(a, b),
     ppb: (a, b) => a.ppb - b.ppb || byAvail(a, b),
+    ppsqm: (a, b) => (perSqm(a) ?? Infinity) - (perSqm(b) ?? Infinity) || byAvail(a, b),
     beds: (a, b) => (+b.beds || 0) - (+a.beds || 0) || byPrice(a, b),
     // Newest first: REA's listed date when present, else when this browser first saw it.
     listed: (a, b) => (b.listed ?? b.firstSeen ?? -Infinity) - (a.listed ?? a.firstSeen ?? -Infinity) || byAvail(a, b),
@@ -1649,7 +1689,7 @@
   // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
   // Reversed sorts keep listings without the value last (a "Contact agent" rent isn't the dearest).
   const SORT_UNKNOWN = {
-    avail: (r) => !(r.avail instanceof Date), price: (r) => !Number.isFinite(r.priceNum), ppb: (r) => !Number.isFinite(r.ppb), beds: (r) => r.beds === '',
+    avail: (r) => !(r.avail instanceof Date), price: (r) => !Number.isFinite(r.priceNum), ppb: (r) => !Number.isFinite(r.ppb), ppsqm: (r) => perSqm(r) == null, beds: (r) => r.beds === '',
     listed: (r) => r.listed == null && r.firstSeen == null, inspect: (r) => r.nextInspect == null, value: (r) => r.vsMedian == null,
     distance: (r) => r.km == null, fit: (r) => !r.fit, allnear: (r) => worstKm(r) == null, match: (r) => r.score == null,
   };
@@ -1758,12 +1798,12 @@
   const CHIP_LABELS = {
     from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
     priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
-    bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, type: (v) => v,
+    bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, sizeMin: (v) => `${v}+ m²`, type: (v) => v,
     keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, inspectWhen: (v) => INSPECT_WHEN[v] || '', hideNoImage: () => 'Has a photo', hideTaken: () => 'Not taken',
     exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet', unreviewedOnly: () => 'Not reviewed', leaseMin: (v) => `Lease ${v}+ mo`, onePerBuilding: () => 'One per building', building: (v) => `Building: ${v.split('|')[1] || 'one building'}`,
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
-  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'maxKm', 'withinDays', 'leaseMin'];
+  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'maxKm', 'withinDays', 'leaseMin'];
   const activeFilters = (cfg) => {
     const out = [];
     for (const k of FILTER_KEYS) {
@@ -1921,7 +1961,7 @@
     // saved setting never goes stale the way a fixed date does.
     const w = windowEndDate(cfg.withinDays, now);
     if (w && (!to || w < to)) to = w;
-    const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax), upMax = num(cfg.upfrontMax);
+    const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax), upMax = num(cfg.upfrontMax), sizeMin = num(cfg.sizeMin);
     const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
     const amenReq = Object.entries(parseAmenCfg(cfg.amenities));
@@ -1952,6 +1992,7 @@
       .filter((r) => (pMin == null || (Number.isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
       .filter((r) => upMax == null || (r.upfront ?? Infinity) <= upMax) // unknown bond fails a move-in cap
       .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
+      .filter((r) => sizeMin == null || (r.sqm != null && r.sqm >= sizeMin)) // unknown size fails a minimum
       .filter((r) => !types.length || types.includes(r.type))
       .filter((r) => !cfg.hideNoImage || r.img)
       .filter((r) => !cfg.hideTaken || !r.taken)
@@ -2013,7 +2054,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
@@ -2021,7 +2062,7 @@
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : r[k];
+      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -2320,6 +2361,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     'inspections', 'inspectionTimes', 'openHomes', 'inspectionsAndAuctions.inspections',
     'dateListed', 'listedDate', 'listingDate', 'dateFirstListed', 'listedAt',
     'address.location', 'listingCompany.name', 'agency.name', 'propertyFeatures', 'features', 'media.images', 'media.floorplans',
+    'propertySizes', 'buildingSize', 'floorArea',
   ];
   const probe = (listing) => {
     const out = Object.fromEntries(PROBE_PATHS.map((p) => {
@@ -2337,7 +2379,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, pauseGate, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2801,6 +2843,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
           <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
           <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
+          <label title="Internal floor area, from REA's details or the listing text; listings that don't say are left out">Min m²<input type="number" min="0" max="2000" step="5" id="rf-sizeMin" inputmode="numeric"></label>
         </div>
         <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
           <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
@@ -2879,6 +2922,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <option value="avail">Available date</option>
           <option value="price">Price</option>
           <option value="ppb">Price per bed</option>
+          <option value="ppsqm">Price per m²</option>
           <option value="beds">Most beds</option>
           <option value="inspect">Next inspection</option>
           <option value="listed">Newest first</option>
@@ -4126,6 +4170,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
     ['Move-in', (r) => (Number.isFinite(r.upfront) ? money(r.upfront) : ''), (r) => r.upfront, 'min'],
     ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
+    ['Size', (r) => sqmLabel(r).replace(' (from text)', ''), (r) => -(r.sqm || 0), 'min'],
+    ['Per m²', (r) => (perSqm(r) != null ? `$${perSqm(r)}` : ''), (r) => perSqm(r) ?? Infinity, 'min'],
     ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
     ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
     ['Places', (r) => placesLabel(r), (r) => worstKm(r) ?? Infinity, 'min'],
@@ -4223,7 +4269,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}${r.taken ? `<span class="rf-tag rf-taken" title="Going by the listing text">${esc(TAKEN_LABELS[r.taken])}</span>` : ''}${r.cheaperBy ? `<span class="rf-tag rf-new" title="You hid it at a higher rent">$${r.cheaperBy} cheaper since you hid it</span>` : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
-          ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
+          ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', sqmLabel(r), r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${metaLine([r.agency, sl && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
           ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : ''].filter(Boolean), ' rf-sec')}

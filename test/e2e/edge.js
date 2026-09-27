@@ -1520,6 +1520,24 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     console.log('theme setting, forced colours: ok');
   });
 
+  // 43. Floor size: REA's field shown on the listing, Min m² leaves out listings that don't say,
+  // and Price per m² sorts by it.
+  await block('43', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
+    await run(page);
+    assert.match(await page.textContent('.rf-item[data-id="146500002"] .rf-meta'), /85 m²/);
+    await page.click('.rf-more:not(.rf-settings) summary');
+    await page.fill('#rf-sizeMin', '80');
+    await waitStatus(page, /^1 of \d+ listings match/);
+    assert.match(await page.textContent('.rf-active'), /80\+ m²/);
+    await page.fill('#rf-sizeMin', '');
+    await page.selectOption('#rf-sort', 'ppsqm');
+    assert.equal(await page.$eval('.rf-item', (el) => el.dataset.id), '146500002', 'the one listing with a size sorts first');
+    console.log('floor size: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
