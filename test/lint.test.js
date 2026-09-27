@@ -84,3 +84,14 @@ test('npm run release bumps the version, stubs the changelog and updates the doc
   assert.equal(r2.status, 1, 'refuses a lower version');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('CI change classifier: docs skip everything, unit-only skips e2e, e2e-only runs one Node, the script runs all', () => {
+  const { classify } = require('./ci-changes');
+  assert.deepEqual(classify(['README.md', 'docs/ROADMAP.md', 'docs/screenshots/map.jpg', '.github/ISSUE_TEMPLATE/idea.md']), { unit: false, e2e: false, nodes: [20, 22, 24] });
+  assert.deepEqual(classify(['test/core.test.js', 'test/shapes/live.json', 'CHANGELOG.md']), { unit: true, e2e: false, nodes: [20, 22, 24] });
+  assert.deepEqual(classify(['test/e2e/edge.js']), { unit: true, e2e: true, nodes: [20] });
+  assert.deepEqual(classify(['test/e2e/fixtures.js']).nodes, [20, 22, 24], 'fixtures are shared with unit tests');
+  for (const f of ['rea-availability-filter.user.js', 'package.json', '.github/workflows/ci.yml', 'test/helpers.js', 'test/lint.js']) {
+    assert.deepEqual(classify(['README.md', f]), { unit: true, e2e: true, nodes: [20, 22, 24] }, f);
+  }
+});

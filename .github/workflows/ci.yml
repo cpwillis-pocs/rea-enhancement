@@ -37,27 +37,28 @@ env:
   FORCE_COLOR: 1
 
 jobs:
-  # Docs-only PRs (Markdown, docs/, screenshots, issue templates) skip the unit and e2e jobs.
-  # A job skipped by its `if` counts as passing for required checks; paths-ignore would leave
-  # them pending instead. On-demand runs always count as code.
+  # What a PR needs, from the files it changes (test/ci-changes.js): docs-only PRs skip unit and
+  # e2e, unit-test-only PRs skip e2e, e2e-only PRs run unit on Node 20 only. A job skipped by its
+  # `if` counts as passing for required checks; paths-ignore would leave them pending instead.
+  # On-demand runs always run everything.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      code: ${{ steps.diff.outputs.code }}
+      unit: ${{ steps.diff.outputs.unit }}
+      e2e: ${{ steps.diff.outputs.e2e }}
+      nodes: ${{ steps.diff.outputs.nodes }}
     steps:
       - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          code=$(git diff --name-only "$BASE" HEAD | grep -Ev '(\.md$|^docs/|^LICENSE$|^\.github/ISSUE_TEMPLATE/|^\.github/pull_request_template\.md$)' || true)
-          echo "changed code: ${code:-none}"
-          [ -n "$code" ] && echo "code=true" >> "$GITHUB_OUTPUT" || echo "code=false" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" != "pull_request" ]; then printf 'unit=true\ne2e=true\nnodes=[20,22,24]\n' >> "$GITHUB_OUTPUT"; exit 0; fi
+          git diff --name-only "$BASE" HEAD | tee changed.txt
+          node test/ci-changes.js < changed.txt | tee -a "$GITHUB_OUTPUT"
 
   lint:
     if: github.event_name != 'workflow_dispatch' || inputs.suite != 'screenshots' # every suite but screenshots builds on it
@@ -72,14 +73,14 @@ jobs:
         run: npm run lint
 
   unit:
-    if: needs.changes.outputs.code == 'true' && (github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","unit"]'), inputs.suite))
+    if: needs.changes.outputs.unit == 'true' && (github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","unit"]'), inputs.suite))
     needs: [lint, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22, 24] # engines.node is >=20
+        node: ${{ fromJSON(needs.changes.outputs.nodes) }} # engines.node is >=20; e2e-only PRs test Node 20 only
     env:
       TZ: ${{ matrix.node == 20 && 'America/Los_Angeles' || 'Australia/Sydney' }} # dates must not depend on the runner's zone
     steps:
@@ -106,7 +107,7 @@ jobs:
           retention-days: 14
 
   e2e:
-    if: needs.changes.outputs.code == 'true' && (github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","e2e"]'), inputs.suite))
+    if: needs.changes.outputs.e2e == 'true' && (github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","e2e"]'), inputs.suite))
     needs: [lint, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 25
