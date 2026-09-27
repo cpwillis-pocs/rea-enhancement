@@ -586,7 +586,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'bound type survives page load');
     await page.evaluate(() => { const el = document.querySelector('#rf-type'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); });
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     assert.equal(await page.inputValue('#rf-type'), '', 'bound preset applies once per visit, not over edits');
     console.log('presets names/type: ok');
     await done(page); await ctx.close();
@@ -606,7 +606,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
     await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 3000 });
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.waitForFunction(() => !/required/.test(document.querySelector('[data-amen=pets]').getAttribute('aria-label')), null, { timeout: 3000 });
     assert.doesNotMatch(await pets(), /required/, 'previous filters restored after reload');
@@ -1071,7 +1071,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForSelector('#rf-remind');
     await page.click('#rf-remind [data-r=check]');
     await waitStatus(page, /Checked 1 saved search/, 30000);
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.clock.runFor(300);
     assert.equal(await page.$('#rf-remind'), null, 'not again the same day');
     console.log('saved-search reminder: ok');
@@ -1132,7 +1132,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(cols >= 2, 'results in columns');
     const [ctrlRight, listLeft] = await page.evaluate(() => [document.querySelector('.rf-controls').getBoundingClientRect().right, document.querySelector('.rf-list').getBoundingClientRect().left]);
     assert.ok(ctrlRight <= listLeft + 1, 'filters beside the results');
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     assert.ok(await page.$('#rf-panel.rf-full'), 'remembered');
     await page.focus('.rf-tabs [data-view=results]'); await page.keyboard.press('e');
@@ -1163,7 +1163,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.fill('#rf-keyword', 'dishwasher'); await page.dispatchEvent('#rf-keyword', 'change');
     assert.ok(either > await count(page), 'a|b matches more than a alone');
     assert.doesNotMatch(await status(page), /saved \(shortened\) text/, 'fresh results: no note');
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     await waitStatus(page, /listings match/);
     assert.match(await status(page), /saved \(shortened\) text; Refresh/, 'restored results: note shown');
@@ -1195,7 +1195,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await page.textContent('.rf-news'), /Updated to \d+\.\d+\.\d+\./);
     await page.click('.rf-news button');
     assert.ok(await page.$('.rf-news[hidden]'));
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     assert.ok(await page.$('.rf-news[hidden]'), 'not again');
     console.log("what's new: ok");
@@ -1221,7 +1221,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-achip:has-text("Apartment")');
     assert.equal(await count(page), byType.Unit, 'removing one chip keeps the other type');
     assert.equal(await page.getAttribute('.rf-types [data-ptype="Apartment"]', 'aria-pressed'), 'false', 'type chip follows');
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     assert.equal(await page.inputValue('#rf-type'), 'Unit', 'remembered');
     await page.click('#rf-launch');
     assert.ok(await page.$('.rf-types [data-ptype="Unit"][aria-pressed=true]'), 'picked type shown before results load');
@@ -1371,7 +1371,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(await page.$('#rf-panel.rf-two'));
     await page.focus('.rf-resize'); await page.keyboard.press('ArrowRight');
     assert.ok(Math.abs(await page.$eval('#rf-panel', (p) => p.offsetWidth) - 760) < 3, 'arrow keys resize');
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     assert.ok(Math.abs(await page.$eval('#rf-panel', (p) => p.offsetWidth) - 760) < 3, 'width remembered');
     console.log('compact, peek, reviewed, keys, reverse sort, resize, semantics, cheaper since hidden: ok');
@@ -1413,7 +1413,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const id = await page.$$eval('.rf-item', (e) => e[42].dataset.id); // well down the list
     await page.focus(`.rf-item[data-id="${id}"]`);
     await page.clock.runFor(600);
-    const reopen = async () => { await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch'); await page.click('#rf-launch'); };
+    const reopen = async () => { await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' }); await page.click('#rf-launch'); };
     await reopen();
     await page.waitForFunction((i) => document.activeElement?.dataset?.id === i, id, { timeout: 3000 });
     const inView = await page.$eval(`.rf-item[data-id="${id}"]`, (el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; });
@@ -1456,7 +1456,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const id = await page.$$eval('.rf-item', (e) => e[4].dataset.id);
     await page.focus(`.rf-item[data-id="${id}"]`);
     await page.clock.runFor(600);
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     await page.click('[data-view=shortlist]');
     assert.equal(await page.evaluate(() => document.activeElement?.dataset?.id), id, 'the shortlisted listing you were on');
@@ -1724,7 +1724,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     });
     await page.click('.rf-market-btn');
     assert.match(await page.textContent('.rf-market .rf-trend'), /^Trend: 2-bed median \$950 → \$\d+ over 5 weeks · 20 → 36 listings$/);
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch'); await page.click('.rf-saved summary');
     assert.match(await page.textContent('.rf-saved .rf-trend'), /2-bed median \$950 → /);
     console.log('rent trend: ok');
