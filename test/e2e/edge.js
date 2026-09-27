@@ -799,16 +799,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const url = `${ORIGIN}/property-unit-nsw-bondi-146500101`;
     const page = await open(ctx, url);
-    page.on('dialog', (d) => d.accept('ask about parking'));
     await page.waitForSelector('#rf-lbar');
     assert.ok(await page.isHidden('#rf-launch'), 'drawer launcher stays off listing pages');
     await page.click('#rf-lbar [data-l=s]');
     assert.match(await page.textContent('#rf-lbar [data-l=s]'), /Shortlisted/);
     await page.selectOption('#rf-lbar [data-l=as]', 'applied');
     await page.click('#rf-lbar [data-l=n]');
-    assert.match(await page.textContent('#rf-lbar .rf-lbar-note'), /ask about parking/);
+    await page.keyboard.type('draft');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$('#rf-lbar .rf-lbar-edit'), null, 'Esc cancels');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.l), 'n', 'focus back on Note');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.getAttribute('#rf-lbar .rf-lbar-edit', 'aria-label'), 'Private note for this listing');
+    await page.keyboard.type('ask about');
+    await page.keyboard.press('Shift+Enter');
+    await page.clock.fastForward(61000); // a redraw doesn't eat what's half-typed
+    await page.keyboard.type('parking');
+    await page.keyboard.press('Enter');
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-note'), /ask about\s+parking/);
     const stored = await marks(page).then((m) => m['146500101']);
-    assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
+    assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about\nparking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
     const lshape = JSON.parse(await page.evaluate(() => window.reaFilter.shape()));
     assert.equal(lshape.kind, 'listing', 'shape() on a property page is that listing');
@@ -839,7 +849,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.goto(SEARCH); await page.addScriptTag({ content: SCRIPT });
     assert.equal(await page.$('#rf-lbar'), null, 'bar only on listing pages');
     await page.click('#rf-launch'); await page.click('[data-view=shortlist]');
-    assert.match(await page.textContent('.rf-list'), /ask about parking/);
+    assert.match(await page.textContent('.rf-list'), /ask about\s+parking/);
     console.log('listing page bar: ok');
     await done(page); await ctx.close();
   });

@@ -3158,6 +3158,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-toast{right:20px;bottom:72px;max-width:min(360px,calc(100vw - 32px))}
   #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
   #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
+  .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
   #rf-lbar button[aria-pressed=true]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
@@ -5441,6 +5442,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
     if (!id) { bar?.remove(); return; }
     if (onlyIfMoved && bar?.dataset.id === id) return; // same listing (eg a gallery ?query): keep focus
+    if (bar?._editing && bar.dataset.id === id) return; // a note half-typed isn't redrawn away
     const focusSel = bar?.contains(document.activeElement) ? lbarFocusSel(document.activeElement) : null;
     if (!bar) {
       bar = Object.assign(document.createElement('div'), { id: 'rf-lbar' });
@@ -5517,6 +5519,33 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <div class="rf-lbar-checks">${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
   }
+  // The note is edited in the bar (multi-line, themed, read by screen readers as a labelled
+  // field): Enter saves, Shift+Enter is a new line, Esc cancels; focus goes back to Note.
+  // Redraws (the minute tick, another tab) wait until it's closed.
+  function editBarNote(bar, id, r) {
+    const open = bar.querySelector('.rf-lbar-edit');
+    if (open) return open.focus();
+    const ta = Object.assign(document.createElement('textarea'), { className: 'rf-lbar-edit', maxLength: NOTE_MAX, value: r.note || '',
+      placeholder: 'Enter to save, Shift+Enter for a new line, Esc to cancel' });
+    ta.setAttribute('aria-label', 'Private note for this listing');
+    bar.querySelector('.rf-lbar-note')?.remove();
+    bar.querySelector('[data-l=min]').after(ta);
+    bar._editing = true;
+    ta.focus();
+    const finish = (save) => {
+      if (!bar._editing) return;
+      bar._editing = false;
+      if (save && ta.value !== (r.note || '')) { marks.setNote(id, ta.value); mirrorSoon(); }
+      renderListingBar();
+      bar.querySelector('[data-l=n]')?.focus();
+    };
+    ta.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // typing isn't a shortcut
+      if (e.key === 'Escape') finish(false);
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+    });
+    ta.addEventListener('blur', () => finish(true));
+  }
   function onListingBar(e) {
     const bar = e.currentTarget, id = bar.dataset.id, r = bar._row;
     const el = e.target.closest('[data-l]');
@@ -5536,11 +5565,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       renderListingBar();
       return bar.querySelector(`[data-ck="${CSS.escape(el.dataset.ck)}"]`)?.focus();
     }
-    else if (k === 'n') {
-      const text = window.prompt('Private note for this listing:', r.note || '');
-      if (text == null) return;
-      marks.setNote(id, text);
-    }
+    else if (k === 'n') return editBarNote(bar, id, r);
     renderListingBar();
     bar.querySelector(`[data-l="${k}"]`)?.focus();
   }
