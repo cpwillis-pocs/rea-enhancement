@@ -1854,9 +1854,35 @@
     delete st[chip.amen];
     return { ...cfg, amenities: amenCfgString(st) };
   };
+  // How many more listings each chip's removal would show. One pass over the rows: a listing
+  // counts for a chip when that chip's test is the only one it fails. Chips whose removal
+  // changes other tests (dates, types) or a set-level step (one per building) re-filter instead.
+  const REFILTER_TAGS = new Set(['from', 'to', 'withinDays', 'type', 'building', 'onePerBuilding']);
+  const chipTag = (chip) => (chip.amen ? `amen:${chip.amen}` : chip.watch ? `watch:${chip.watch}` : chip.key);
   const removedBy = (rows, cfg, now = new Date()) => {
-    const base = filterRows(rows, cfg, now).length;
-    return activeFilters(cfg).map((chip) => ({ ...chip, removes: filterRows(rows, without(cfg, chip), now).length - base }));
+    cfg = { ...DEFAULT_CFG, ...cfg };
+    const chips = activeFilters(cfg);
+    const setLevel = cfg.onePerBuilding && !cfg.building;
+    const tests = rowTests(cfg, now);
+    const only = new Map();
+    let base = 0;
+    if (!setLevel) {
+      for (const r of prepRows(rows, cfg)) {
+        let failed = null, many = false;
+        for (const [tag, t] of tests) {
+          if (t(r)) continue;
+          if (failed != null && failed !== tag) { many = true; break; }
+          failed = tag;
+        }
+        if (failed == null) base++;
+        else if (!many) only.set(failed, (only.get(failed) || 0) + 1);
+      }
+    } else base = filterRows(rows, cfg, now).length;
+    return chips.map((chip) => {
+      const tag = chipTag(chip);
+      const removes = setLevel || REFILTER_TAGS.has(tag) ? filterRows(rows, without(cfg, chip), now).length - base : only.get(tag) || 0;
+      return { ...chip, removes };
+    });
   };
 
   // Market view: rent spread per bed count and when listings become available, over the
@@ -1974,8 +2000,9 @@
     return withScores(kept, cfg).sort(sorter(cfg.sort, cfg.sortDesc));
   }
 
-  function filterRows(rows, cfg, now = new Date()) {
-    cfg = { ...DEFAULT_CFG, ...cfg };
+  // Every per-row test filterRows applies, tagged with the filter it belongs to (a cfg key, or
+  // amen:<id> / watch:<id> for one amenity or heads-up chip), so removedBy can count in one pass.
+  const rowTests = (cfg, now) => {
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
     let to = cfg.to ? new Date(cfg.to + 'T23:59:59') : null;
     // Rolling window ("within 4 weeks") tightens the upper bound relative to today, so a
@@ -1983,45 +2010,55 @@
     const w = windowEndDate(cfg.withinDays, now);
     if (w && (!to || w < to)) to = w;
     const pMin = num(cfg.priceMin), pMax = num(cfg.priceMax), upMax = num(cfg.upfrontMax), sizeMin = num(cfg.sizeMin);
-    const mins = [['beds', num(cfg.bedsMin)], ['baths', num(cfg.bathsMin)], ['cars', num(cfg.carsMin)]].filter(([, v]) => v != null);
     const kw = cfg.keyword.trim() ? keywordTest(cfg.keyword) : null;
-    const amenReq = Object.entries(parseAmenCfg(cfg.amenities));
-    const noWatch = watchIds(cfg.noWatch);
     const bKey = cfg.building.split('|')[0], leaseNeed = num(cfg.leaseMin), types = typeList(cfg.type); // building is "key|label" from "N in this building"
-    // Distance depends on cfg.anchor, so it is (re)computed here for every caller.
     const anchor = parseAnchor(cfg.anchor), kmMax = num(cfg.maxKm);
-    // Memoised per anchor: removedBy() re-filters once per chip with the same point.
-    const places = parsePlaces(cfg.places);
-    for (const r of rows) setDistances(r, cfg, anchor, places);
     const insDay = !!cfg.inspectOn;
     const sameDay = (ms, r) => ymdIn(ms, tzOf(r)) === cfg.inspectOn; // the listing's calendar day, like the planner
-    const kept = dedupe(rows)
-      .filter((r) => (cfg.exactOnly ? !r.surrounding : true))
-      .filter((r) => cfg.showHidden || !ruledOut(r))
-      .filter((r) => !cfg.floorplanOnly || r.floorplan === true)
-      .filter((r) => cfg.showGone || !r.gone)
-      .filter((r) => !cfg.newOnly || isFresh(r))
-      .filter((r) => !cfg.changedOnly || !!(r.prevPrice || r.prevAvail || r.featChange))
-      .filter((r) => !cfg.unopenedOnly || !r.openedAt)
-      .filter((r) => !cfg.unreviewedOnly || !r.reviewedAt)
-      .filter((r) => !noWatch.length || !String(r.watch || '').split(',').some((id) => noWatch.includes(id)))
-      .filter((r) => !cfg.staleOnly || (r.listed instanceof Date && now - r.listed > STALE_MS))
-      .filter((r) => kmMax == null || !anchor || (r.km != null && r.km <= kmMax)) // no location fails a distance cap
-      .filter((r) => amenReq.every(([id, st]) => (st === 'yes' ? r.amen?.[id] === 'yes' : r.amen?.[id] !== 'yes')))
-      .filter((r) => !cfg.onlyStarred || r.starred)
-      .filter((r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to))
-      .filter((r) => (pMin == null || (Number.isFinite(r.priceNum) && r.priceNum >= pMin)) && (pMax == null || r.priceNum <= pMax))
-      .filter((r) => upMax == null || (r.upfront ?? Infinity) <= upMax) // unknown bond fails a move-in cap
-      .filter((r) => mins.every(([k, v]) => r[k] !== '' && +r[k] >= v))
-      .filter((r) => sizeMin == null || (r.sqm != null && r.sqm >= sizeMin)) // unknown size fails a minimum
-      .filter((r) => !types.length || types.includes(r.type))
-      .filter((r) => !cfg.hideNoImage || r.img)
-      .filter((r) => !cfg.hideTaken || !r.taken)
-      .filter((r) => !kw || kw(r.text || ''))
-      .filter((r) => !insDay || (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)))
-      .filter((r) => !INSPECT_WHEN[cfg.inspectWhen] || (r.inspections || []).some((i) => i.at != null && i.at >= +now - INSPECT_GRACE_MS && inspectFits(i.at, tzOf(r), cfg.inspectWhen)))
-      .filter((r) => !bKey || buildingKey(r.address) === bKey)
-      .filter((r) => { const l = leaseNeed ? leaseFromCode(r.lease) : null; return !l || l.flexible || l.max >= leaseNeed; }); // a stated lease too short; unstated or flexible passes
+    const tests = [];
+    const add = (tag, on, fn) => { if (on) tests.push([tag, fn]); };
+    add('exactOnly', cfg.exactOnly, (r) => !r.surrounding);
+    add('showHidden', !cfg.showHidden, (r) => !ruledOut(r));
+    add('floorplanOnly', cfg.floorplanOnly, (r) => r.floorplan === true);
+    add('showGone', !cfg.showGone, (r) => !r.gone);
+    add('newOnly', cfg.newOnly, (r) => isFresh(r));
+    add('changedOnly', cfg.changedOnly, (r) => !!(r.prevPrice || r.prevAvail || r.featChange));
+    add('unopenedOnly', cfg.unopenedOnly, (r) => !r.openedAt);
+    add('unreviewedOnly', cfg.unreviewedOnly, (r) => !r.reviewedAt);
+    for (const id of watchIds(cfg.noWatch)) add(`watch:${id}`, true, (r) => !String(r.watch || '').split(',').includes(id));
+    add('staleOnly', cfg.staleOnly, (r) => r.listed instanceof Date && now - r.listed > STALE_MS);
+    add('maxKm', kmMax != null && anchor, (r) => r.km != null && r.km <= kmMax); // no location fails a distance cap
+    for (const [id, st] of Object.entries(parseAmenCfg(cfg.amenities))) add(`amen:${id}`, true, st === 'yes' ? (r) => r.amen?.[id] === 'yes' : (r) => r.amen?.[id] !== 'yes');
+    add('onlyStarred', cfg.onlyStarred, (r) => r.starred);
+    add('date', true, (r) => (r.avail ? (!from || r.avail >= from) && (!to || r.avail <= to) : !from && !to));
+    add('priceMin', pMin != null, (r) => Number.isFinite(r.priceNum) && r.priceNum >= pMin);
+    add('priceMax', pMax != null, (r) => r.priceNum <= pMax);
+    add('upfrontMax', upMax != null, (r) => (r.upfront ?? Infinity) <= upMax); // unknown bond fails a move-in cap
+    for (const [k, key] of [['beds', 'bedsMin'], ['baths', 'bathsMin'], ['cars', 'carsMin']]) {
+      const v = num(cfg[key]);
+      add(key, v != null, (r) => r[k] !== '' && +r[k] >= v);
+    }
+    add('sizeMin', sizeMin != null, (r) => r.sqm != null && r.sqm >= sizeMin); // unknown size fails a minimum
+    add('type', types.length, (r) => types.includes(r.type));
+    add('hideNoImage', cfg.hideNoImage, (r) => r.img);
+    add('hideTaken', cfg.hideTaken, (r) => !r.taken);
+    add('keyword', kw, (r) => kw(r.text || ''));
+    add('inspectOn', insDay, (r) => (r.inspections || []).some((i) => i.at != null && sameDay(i.at, r)));
+    add('inspectWhen', INSPECT_WHEN[cfg.inspectWhen], (r) => (r.inspections || []).some((i) => i.at != null && i.at >= +now - INSPECT_GRACE_MS && inspectFits(i.at, tzOf(r), cfg.inspectWhen)));
+    add('building', bKey, (r) => buildingKey(r.address) === bKey);
+    add('leaseMin', leaseNeed, (r) => { const l = leaseFromCode(r.lease); return !l || l.flexible || l.max >= leaseNeed; }); // a stated lease too short; unstated or flexible passes
+    return tests;
+  };
+  // Distance depends on cfg.anchor, so it is (re)computed for every caller (memoised per anchor).
+  const prepRows = (rows, cfg) => {
+    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
+    for (const r of rows) setDistances(r, cfg, anchor, places);
+    return dedupe(rows);
+  };
+  function filterRows(rows, cfg, now = new Date()) {
+    cfg = { ...DEFAULT_CFG, ...cfg };
+    const tests = rowTests(cfg, now);
+    const kept = prepRows(rows, cfg).filter((r) => tests.every(([, t]) => t(r)));
     return cfg.onePerBuilding && !cfg.building ? onePerBuilding(kept) : kept;
   }
 

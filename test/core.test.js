@@ -890,3 +890,31 @@ test('floor size: REA field first, the text as a fallback; filter, sort and expo
   assert.equal(vals[head.indexOf('floor_m2')], '80');
   assert.equal(vals[head.indexOf('rent_per_m2')], '10');
 });
+
+test('removedBy: the one-pass counts match re-filtering without each chip, over many filter mixes', () => {
+  const { pageResults } = require('./e2e/fixtures');
+  const rows = [1, 2, 3].flatMap((n) => core.rowsFrom(pageResults(n, { extras: true })));
+  rows[0].starred = true; rows[3].hidden = true; rows[5].openedAt = 1; rows[7].sqm = 90; rows[8].sqm = 60;
+  const without = (cfg, chip) => {
+    if (chip.ptype) return { ...cfg, type: cfg.type.split(',').filter((t) => t !== chip.ptype).join(',') };
+    if (chip.watch) return { ...cfg, noWatch: cfg.noWatch.split(',').filter((id) => id !== chip.watch).join(',') };
+    if (chip.amen) return { ...cfg, amenities: cfg.amenities.split(',').filter((a) => a.replace(/^-/, '') !== chip.amen).join(',') };
+    return { ...cfg, [chip.key]: core.DEFAULT_CFG[chip.key] };
+  };
+  const options = {
+    priceMax: ['', '900', '1200'], priceMin: ['', '700'], bedsMin: ['', '2'], carsMin: ['', '1'], sizeMin: ['', '70'],
+    type: ['', 'Apartment', 'Apartment,House'], keyword: ['', 'pets', '-beach'], amenities: ['', 'pets', '-pets', 'dishwasher,-pets'],
+    noWatch: ['', 'water', 'water,clean'], hideTaken: [false, true], onlyStarred: [false, true], unopenedOnly: [false, true],
+    from: ['', '2026-10-10'], withinDays: ['', '28'], leaseMin: ['', '12'], onePerBuilding: [false, true], exactOnly: [false, true],
+  };
+  let seed = 7;
+  const pick = (a) => a[(seed = (seed * 1103515245 + 12345) % 2147483648) % a.length];
+  const now = new Date(2026, 8, 23);
+  for (let i = 0; i < 300; i++) {
+    const cfg = { ...core.DEFAULT_CFG, ...Object.fromEntries(Object.entries(options).map(([k, v]) => [k, pick(v)])) };
+    const base = core.filterRows(rows, cfg, now).length;
+    for (const chip of core.removedBy(rows, cfg, now)) {
+      assert.equal(chip.removes, core.filterRows(rows, without(cfg, chip), now).length - base, `${chip.label} with ${JSON.stringify(cfg)}`);
+    }
+  }
+});
