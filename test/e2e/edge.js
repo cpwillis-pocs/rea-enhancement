@@ -1147,12 +1147,21 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
-  // 32. What's new: shown once after an update (never on a first install), dismissed for good.
+  // 32. What's new: a welcome on a first install until a search completes (or it's dismissed),
+  // then shown once after an update, dismissed for good.
   await block('32', async () => {
     const fresh = await browser.newContext();
     const first = await open(fresh);
     await first.click('#rf-launch');
-    assert.ok(await first.$('.rf-news[hidden]'), 'first install: no note');
+    await first.waitForSelector('.rf-news:not([hidden])');
+    assert.match(await first.textContent('.rf-news'), /Welcome\..*Search all pages.*stays in this browser/);
+    assert.equal(await first.evaluate(() => localStorage.getItem('rea-avail-filter/seen-version')), null, 'not seen until used');
+    await first.click('#rf-run'); await waitStatus(first, /listings match/);
+    assert.ok(await first.$('.rf-news[hidden]'), 'a completed search ends the welcome');
+    assert.ok(await first.evaluate(() => localStorage.getItem('rea-avail-filter/seen-version')), 'and records the version');
+    await first.reload(); await first.addScriptTag({ content: SCRIPT }); await first.waitForSelector('#rf-launch');
+    await first.click('#rf-launch');
+    assert.ok(await first.$('.rf-news[hidden]'), 'no welcome the second time');
     await done(first); await fresh.close();
     const ctx = await browser.newContext();
     await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/seen-version')) localStorage.setItem('rea-avail-filter/seen-version', '2.17.0'); });

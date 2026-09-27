@@ -3332,14 +3332,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     sortDir.setAttribute('aria-pressed', String(!!cfg.sortDesc));
     sortDir.addEventListener('click', () => { sortDesc.checked = !sortDesc.checked; sortDesc.dispatchEvent(new Event('change', { bubbles: true })); });
     expandBtn.addEventListener('click', () => setWide(!panel.classList.contains('rf-full')));
-    // What's new since the version you last saw (never on a first install).
+    // A first install gets a welcome until it's dismissed or a search completes; after that,
+    // what's new since the version you last saw.
     const seen = keyStore(storageOr('localStorage'), SEEN_KEY);
     const news = panel.querySelector('.rf-news');
-    if (!seen.get()) seen.set(WHATS_NEW.version);
-    else if (verNum(seen.get()) < verNum(WHATS_NEW.version)) {
-      news.querySelector('.rf-news-msg').innerHTML = `<strong>Updated to ${esc(WHATS_NEW.version)}.</strong> ${WHATS_NEW.items.map(esc).join(' ')}`;
+    const showNews = (title, items) => {
+      news.querySelector('.rf-news-msg').innerHTML = `<strong>${esc(title)}</strong> ${items.map(esc).join(' ')}`;
       news.hidden = false;
-    }
+    };
+    if (!seen.get()) showNews('Welcome.', WELCOME);
+    else if (verNum(seen.get()) < verNum(WHATS_NEW.version)) showNews(`Updated to ${WHATS_NEW.version}.`, WHATS_NEW.items);
+    const welcomed = !seen.get();
+    ui.newsSeen = () => { if (!seen.get()) { seen.set(WHATS_NEW.version); if (welcomed) news.hidden = true; } };
     news.querySelector('button').addEventListener('click', () => { news.hidden = true; seen.set(WHATS_NEW.version); });
     helpBtn.addEventListener('click', toggleHelp);
     wireKeys(panel, { launch, narrow, help, toggleHelp, setOpen, expandBtn });
@@ -4455,6 +4459,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
         : snap?.evicted.length ? `Stopped remembering ${snap.evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : '');
       adopt(key, res.rows, res.truncated, '', snap, true);
+      ui.newsSeen?.();
     } catch (err) {
       if (id !== runId || ctrl.signal.aborted) return;
       cache = null;
@@ -4538,12 +4543,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const WIDTH_KEY = `${TOOL_PREFIX}width`; // side drawer width you dragged it to
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
-  // with @version and the changelog). A first install records the version without a note.
+  // with @version and the changelog). A first install gets WELCOME instead.
   const WHATS_NEW = { version: '2.23.0', items: [
     'The drawer reopens on the listing you were on after a reload.',
     'Tags say "Pets welcome" or "Pets on application", the heating type, and "Water efficient".',
     'Compact list (d), photo peek (p), resizable drawer and reviewed marks arrived in 2.22.',
   ] };
+  const WELCOME = [
+    'Set a date (or leave it blank) and press Search all pages to read every page of this search.',
+    "Star and hide work here and on REA's own cards.",
+    'Everything stays in this browser.',
+  ];
   const SEEN_KEY = `${TOOL_PREFIX}seen-version`;
   const verNum = (v) => String(v || '0').split('.').reduce((n, x) => n * 1000 + (+x || 0), 0);
   const wideKey = keyStore(storageOr('localStorage'), WIDE_KEY);
