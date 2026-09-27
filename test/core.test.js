@@ -957,8 +957,10 @@ test('toIcs: GEO for mapping apps, and a cancelled session goes out cancelled un
   const at = Date.UTC(2026, 8, 26, 0, 30), gone = Date.UTC(2026, 8, 27, 0, 30);
   const ics = core.toIcs([{ id: '146500001', address: '1 Test St', lat: -33.8915, lng: 151.2767, inspections: [{ at, label: 'Sat' }], inspectCancelledAt: gone }], now);
   assert.match(ics, /GEO:-33\.891500;151\.276700/);
-  assert.match(ics, new RegExp(`UID:146500001-${gone}@rea-enhancement\\r\\n[\\s\\S]*?SEQUENCE:1\\r\\nSTATUS:CANCELLED\\r\\nSUMMARY:Cancelled: inspection 1 Test St`));
+  assert.match(ics, new RegExp(`UID:146500001-${gone}@rea-enhancement\\r\\n[\\s\\S]*?SEQUENCE:${Math.floor(now / 60000)}\\r\\nSTATUS:CANCELLED\\r\\nSUMMARY:Cancelled: inspection 1 Test St`));
   assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 2);
+  const later = core.toIcs([{ id: '146500001', inspections: [{ at: gone, label: 'back on' }] }], now + 3600000);
+  assert.match(later, new RegExp(`SEQUENCE:${Math.floor((now + 3600000) / 60000)}`), 'a reinstated session outranks the cancellation');
   assert.doesNotMatch(core.toIcs([{ id: '1', inspections: [{ at, label: 'x' }] }], now), /GEO:/, 'no coordinates, no GEO');
 });
 
@@ -973,4 +975,7 @@ test('nextStop: the next shortlisted inspection today, not this listing, with di
   assert.equal(nx.km, 1.1);
   assert.equal(nx.leaveBy, at(11, 5), 'at least PLAN_MIN_GAP minutes before');
   assert.equal(core.nextStop(rows, here, at(12, 30)), null, 'nothing left today');
+  for (const dead of [{ gone: true }, { hidden: true }, { appStatus: 'declined' }, { taken: 'deposit' }]) {
+    assert.equal(core.nextStop([here, { ...rows[1], ...dead }, rows[2]], here, at(10, 20)).r.id, 'c', JSON.stringify(dead));
+  }
 });

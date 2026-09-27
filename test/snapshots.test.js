@@ -194,3 +194,21 @@ test('snapshots are stored packed (column names once, no URL prefixes), read bac
   old.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [KEY]: { at: 1e12, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500001', price: '$700 per week' }] } } }));
   assert.equal(core.snapshotStore(old, () => 1e12).get(KEY).rows[0].priceNum, 700);
 });
+
+test('size budget counts no-longer-listed rows at their stored (packed) size, and a pasted packed entry imports', () => {
+  let t = 1e12;
+  const m = mem();
+  const st = core.snapshotStore(m, () => t);
+  const long = 'Sunny unit with a dishwasher. '.repeat(10), addr = 'x'.repeat(200);
+  const mk = (base) => Array.from({ length: 800 }, (_, i) => core.toRow(listing({ id: String(base + i), description: long, address: { suburb: 'Bondi', display: { fullAddress: `${i} ${addr}` } },
+    _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${base + i}` } } }), false));
+  st.save(KEY, mk(146530000), false);
+  t += 48 * H;
+  st.save(KEY, mk(146540000), false);
+  assert.ok(m.getItem('rea-avail-filter/snapshots/v1').length <= core.SNAP_ENTRY_BUDGET + 1000, 'within budget once gone rows are dropped');
+  const packed = JSON.parse(m.getItem('rea-avail-filter/snapshots/v1')).s[KEY];
+  assert.equal(packed.f, 2);
+  const other = core.snapshotStore(mem(), () => t);
+  assert.equal(other.importData({ [KEY]: packed }), 1);
+  assert.equal(other.get(KEY).rows.length, 800, 'rows unpacked, not an empty search');
+});

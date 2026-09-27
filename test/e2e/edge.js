@@ -1761,7 +1761,15 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.keyboard.press('c');
     await page.waitForFunction(() => navigator.clipboard.readText().then((t) => t.length > 20));
     assert.match(await page.evaluate(() => navigator.clipboard.readText()), /per week/);
-    console.log('list keys PgDn/PgUp/Home/End/c: ok');
+    // AZERTY and similar: "2" is typed with Shift, and must still set the status, not a rating.
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
+    const sid = await page.$eval('.rf-item', (el) => el.dataset.id);
+    await page.click('[data-view=shortlist]');
+    await page.focus(`.rf-item[data-id="${sid}"]`);
+    await page.evaluate(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: '2', code: 'Digit2', shiftKey: true, bubbles: true })));
+    await page.waitForFunction((i) => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m[i].as === 'inspected', sid);
+    assert.equal((await marks(page))[sid].rt, undefined, 'no rating from a typed digit');
+    console.log('list keys PgDn/PgUp/Home/End/c, AZERTY digits: ok');
     await done(page); await ctx.close();
   });
 
@@ -1801,12 +1809,17 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
       localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
         146500101: { f: 1, l: 1, s: 1, st: 1, d: d(146500101, '1 Hall St, Bondi NSW 2026', -33.8915, 0) },
         146500222: { f: 1, l: 1, s: 1, st: 1, d: d(146500222, '5 Beach Rd, Bondi NSW 2026', -33.9005, t + 75 * 60000) },
+        146500333: { f: 1, l: 1, s: 1, st: 1, d: d(146500333, '9 Roscoe St, Bondi NSW 2026', -33.8915, t + 150 * 60000) },
+        146500444: { f: 1, l: 1, s: 1, st: 1, as: 'declined', d: d(146500444, '2 Gone Ave, Bondi NSW 2026', -33.8915, t + 100 * 60000) },
       } }));
     }, FIXED.getTime());
     const page = await open(ctx, `${ORIGIN}/property-unit-nsw-bondi-146500101`);
     await page.waitForSelector('#rf-lbar .rf-lbar-next');
     assert.match(await page.textContent('#rf-lbar .rf-lbar-next'), /^Next: 11:15\s?am 5 Beach Rd · 1 km · leave by 11:05\s?am$/i);
     assert.match(await page.getAttribute('#rf-lbar .rf-lbar-next a', 'href'), /146500222$/);
+    await page.clock.fastForward(80 * 60000); // past 11:15: the bar moves on by itself (a declined one is skipped)
+    await page.waitForFunction(() => /9 Roscoe St/.test(document.querySelector('#rf-lbar .rf-lbar-next')?.textContent || ''));
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-next'), /^Next: 12:30\s?pm 9 Roscoe St/i);
     console.log('next stop: ok');
     await done(page); await ctx.close();
   });

@@ -863,7 +863,9 @@
       trim(entry.rows, (r) => { r.text = ''; r.headline = clip(r.headline, LITE_HEADLINE); r.features = r.features.slice(0, 8); });
       trim(entry.gone, (g) => { g.text = ''; g.features = []; });
       trim(entry.rows, (r) => { r.features = []; r.headline = ''; });
-      while (entry.gone.length && size > SNAP_ENTRY_BUDGET) size -= JSON.stringify(entry.gone.pop()).length + 1;
+      // Stored sizes are packed sizes: measure a gone row the way it will be stored.
+      const keys = [...new Set([...entry.rows, ...entry.gone].flatMap((r) => Object.keys(r)))];
+      while (entry.gone.length && size > SNAP_ENTRY_BUDGET) size -= JSON.stringify(packRows([entry.gone.pop()], keys)[0]).length + 1;
       return true;
     };
     const newSince = (ids, baseIds) => {
@@ -941,8 +943,9 @@
         const d = load();
         let n = 0;
         const okIds = (a) => (Array.isArray(a) ? a.map(String).filter(isListingId) : null);
-        for (const [k, e] of Object.entries(src)) {
-          if (!isSearchKey(k) || !e || typeof e !== 'object' || typeof e.at !== 'number') continue;
+        for (const [k, raw] of Object.entries(src)) {
+          if (!isSearchKey(k) || !raw || typeof raw !== 'object' || typeof raw.at !== 'number') continue;
+          const e = unpackEntry(raw); // a pasted stored copy is packed
           if (d.s[k] && d.s[k].at >= e.at) continue; // keep the newer copy
           const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, IMPORT_ROWS_MAX).map(fatRow).filter((r) => r.url);
           d.s[k] = {
@@ -1195,7 +1198,7 @@
   const BOT_KINDS = new Set(['forbidden', 'rate', 'challenge']);
   function parseListingPage(html, id, { status = 200, redirectedTo = '' } = {}) {
     if (status === 404 || status === 410) return { status: 'gone' };
-    if (redirectedTo && !/\/property-/.test(new URL(redirectedTo).pathname)) return { status: 'gone' }; // bounced to a search
+    if (redirectedTo) { let path = ''; try { path = new URL(redirectedTo).pathname; } catch { /* not a URL: treat as bounced */ } if (!/\/property-/.test(path)) return { status: 'gone' }; } // bounced to a search
     const m = html.match(EXCHANGE_RE);
     if (!m) return { status: 'unknown' };
     try {
@@ -2381,7 +2384,7 @@
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : r[k];
+      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : k === 'rating' ? r.rating || '' : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -2420,6 +2423,9 @@
   // reminders in imported files).
   const geo = (r) => (Number.isFinite(r.lat) && Number.isFinite(r.lng) ? `GEO:${r.lat.toFixed(6)};${r.lng.toFixed(6)}` : '');
   const toIcs = (rows, now = Date.now(), { alarm = 0 } = {}) => {
+    // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
+    // and then reinstated is live again when the newer file is imported.
+    const seq = Math.floor(now / 60000);
     const events = [];
     const seen = new Set();
     for (const r of rows) {
@@ -2429,7 +2435,7 @@
         if (seen.has(uid)) continue;
         seen.add(uid);
         events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`,
-          `DURATION:PT${INSPECT_MINUTES}M`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
+          `DURATION:PT${INSPECT_MINUTES}M`, `SEQUENCE:${seq}`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
           `LOCATION:${icsText(r.address)}`, geo(r), r.url ? `URL:${r.url}` : '',
           `DESCRIPTION:${icsText([r.price, r.available && `Available ${r.available}`, r.agency, r.applyVia && `Apply via ${r.applyVia}`, leaseText(r.lease), r.appStatus && `Status: ${r.appStatus}`, r.note].filter(Boolean).join(' | '))}`,
           ...(alarm > 0 ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(`Inspection: ${r.address || 'rental'}`)}`, `TRIGGER:-PT${Math.round(alarm)}M`, 'END:VALARM'] : []),
@@ -2445,7 +2451,7 @@
       if (seen.has(uid)) continue;
       seen.add(uid);
       events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(at)}`, `DURATION:PT${INSPECT_MINUTES}M`,
-        'SEQUENCE:1', 'STATUS:CANCELLED', `SUMMARY:${icsText(`Cancelled: inspection ${r.address || 'rental'}`)}`, `LOCATION:${icsText(r.address)}`, geo(r), 'END:VEVENT'].filter(Boolean));
+        `SEQUENCE:${seq}`, 'STATUS:CANCELLED', `SUMMARY:${icsText(`Cancelled: inspection ${r.address || 'rental'}`)}`, `LOCATION:${icsText(r.address)}`, geo(r), 'END:VEVENT'].filter(Boolean));
     }
     if (!events.length) return '';
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
@@ -2482,7 +2488,8 @@
     const tz = tzOf(here), day = ymdIn(now, tz);
     let best = null;
     for (const r of rows) {
-      if (r.id === here.id) continue;
+      // Not this one, and not a dead end: taken down, hidden, declined or already taken.
+      if (r.id === here.id || r.gone || r.hidden || r.appStatus === 'declined' || r.taken) continue;
       for (const i of r.inspections || []) {
         if (typeof i.at !== 'number' || i.at <= now || ymdIn(i.at, tzOf(r)) !== day) continue;
         if (!best || i.at < best.at) best = { r, at: i.at, label: i.label };
@@ -3424,11 +3431,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const i = cur ? items.indexOf(cur) : -1;
     const move = (d) => { const n = items[Math.max(0, Math.min(items.length - 1, i + d))] || items[0]; n.focus(); n.scrollIntoView({ block: 'nearest' }); if (ui.peekId) ui.showPeek(n); };
     const act = (a) => (cur || items[0]).querySelector(`[data-act="${a}"]`)?.click();
-    if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { // Shift+1-5: rate a shortlisted listing
+    // Shift+1-5 rates a shortlisted listing, but only where Shift+digit doesn't type the digit:
+    // on AZERTY and similar layouts that is how 1-5 (application status) are typed.
+    if (e.shiftKey && /^Digit[1-5]$/.test(e.code) && !/^[0-9]$/.test(e.key)) {
       const it = cur || items[0], b = it?.querySelector(`[data-act=rate][data-v="${e.code.slice(5)}"]`);
-      if (!b) return false;
-      b.click();
-      return true;
+      if (b) { b.click(); return true; }
     }
     switch (e.key) {
       case 'j': case 'ArrowDown': if (cur && e.key === 'j' && ui.view !== 'shortlist') markReviewed(cur); move(i < 0 ? 0 : 1); return true;
@@ -4114,7 +4121,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.planIcs = (btn) => {
       if (!ui.planDay) return;
       const day = ui.planDay;
-      let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day) }));
+      let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
+        inspectCancelledAt: typeof r.inspectCancelledAt === 'number' && ymdIn(r.inspectCancelledAt, tzOf(r)) === day ? r.inspectCancelledAt : null })); // this day's cancellations only
       if (btn.dataset.planIcs === 'route') { // just the suggested sessions
         const picked = [...bestRoute(planDay(rows, day)).picked];
         rows = rows.map((r) => ({ ...r, inspections: r.inspections.filter((i) => picked.some((x) => x.r.id === r.id && x.at === i.at)) })).filter((r) => r.inspections.length);
@@ -4214,6 +4222,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         fillPresets();
         renderSaved();
         refreshMarks();
+        ui.restoreUndo = true;
         offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
           keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
           marks.invalidate();
@@ -5262,6 +5271,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
   // At an inspection, with the listing open on your phone: the checklist and the facts worth
   // checking, folded away until opened (the bar stays the size it is).
+  // While there is a next stop, redraw the bar each minute (and on coming back to the tab), so
+  // "leave by" and the next listing stay current while you stand in an inspection.
+  let lbarTimer = 0;
+  const lbarTick = (on) => {
+    clearInterval(lbarTimer);
+    lbarTimer = on ? setInterval(() => { if (!document.hidden && document.getElementById('rf-lbar')) renderListingBar(); }, 60000) : 0;
+  };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && lbarTimer && document.getElementById('rf-lbar')) renderListingBar(); });
   function lbarDetails(r, open) {
     setDistances(r, cfg, parseAnchor(cfg.anchor), parsePlaces(cfg.places));
     const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
@@ -5274,7 +5291,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const sl = marks.shortlist(), mine = sl.find((x) => x.id === r.id);
     const nx = nextStop(sl, Number.isFinite(r.lat) || !mine ? r : { ...r, lat: mine.lat, lng: mine.lng }); // the page may not say where it is; the shortlist copy does
     const clockAt = (ms) => dtf({ hour: 'numeric', minute: '2-digit', ...(tzOf(r) ? { timeZone: tzOf(r) } : {}) }).format(ms);
-    const next = nx ? `<div class="rf-lbar-info rf-lbar-next">Next: <a href="${esc(safeUrl(nx.r.url))}">${esc(clockAt(nx.at))} ${esc(String(nx.r.address || '').split(',')[0])}</a>${nx.km != null ? ` · ${nx.km} km · leave by ${esc(clockAt(nx.leaveBy))}` : ''}</div>` : '';
+    const leave = nx?.leaveBy == null ? '' : nx.leaveBy <= Date.now() ? ' · leave now' : ` · leave by ${esc(clockAt(nx.leaveBy))}`;
+    const next = nx ? `<div class="rf-lbar-info rf-lbar-next">Next: <a href="${esc(safeUrl(nx.r.url))}">${esc(clockAt(nx.at))} ${esc(String(nx.r.address || '').split(',')[0])}</a>${nx.km != null ? ` · ${nx.km} km` : ''}${leave}</div>` : '';
+    lbarTick(!!nx);
     return `${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks">${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
@@ -5620,6 +5639,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       step('sync', () => window.addEventListener('storage', (e) => {
         // Another tab changed the shortlist/hidden/notes: pick it up here.
         if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
+      // A restore's Undo puts back what was stored before it: after another tab has written, that
+      // would silently undo the other tab too, so the offer goes.
+      if ((e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) && ui.restoreUndo) {
+        ui.restoreUndo = false;
+        ui.status.querySelector('.rf-undo')?.remove();
+      }
       if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
         // Settings saved in another tab: take its display settings (places, checklist, weights,
         // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.

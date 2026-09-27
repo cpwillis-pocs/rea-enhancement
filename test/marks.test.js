@@ -677,3 +677,10 @@ test('a backup cannot point the shortlist at another site: links must be REA, im
   assert.deepEqual(rows['146500002'], ['https://www.realestate.com.au/property-unit-nsw-bondi-146500002', 'https://i2.au.reastatic.net/345x260/a.jpg']);
   assert.equal(rows['146500001'], undefined, 'no REA link: not shown at all');
 });
+
+test('exports leave an unrated listing blank, not 0', () => {
+  const [head, a, b] = core.toTsv([{ id: '1', rating: 0 }, { id: '2', rating: 4 }]).split(/\r?\n/).map((l) => l.split('\t'));
+  const i = head.indexOf('my_rating');
+  assert.equal(a[i], '');
+  assert.equal(b[i], '4');
+});
