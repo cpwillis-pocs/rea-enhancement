@@ -39,11 +39,11 @@ write('docs/ARCHITECTURE.md', read('docs/ARCHITECTURE.md')
   .replace(/\(\d+ tests\)/, `(${unit} tests)`)
   .replace(/\(\d+ blocks, numbered 1–\d+/, `(${blocks} blocks, numbered 1–${top}`));
 
-// Drift checks are only as good as the shapes they compare against: say when there is no real
-// one (from npm run live) or the newest is old.
+// Drift checks are only as good as the shapes they compare against: say when the newest real one
+// (from npm run live) is old. None yet is fine while the repo is private and live runs are optional.
 const SHAPE_MAX_DAYS = 60;
 const live = fs.readdirSync(path.join(root, 'test/shapes')).map((f) => f.match(/^live-(?:listing-)?(\d{4}-\d{2}-\d{2})\.json$/)?.[1]).filter(Boolean).sort();
-const shapeNote = !live.length ? 'no real shape saved yet: run npm run live and commit what it saves'
+const shapeNote = !live.length ? ''
   : (Date.now() - Date.parse(live.at(-1))) / 864e5 > SHAPE_MAX_DAYS ? `the newest real shape is from ${live.at(-1)}: run npm run live` : '';
 if (shapeNote) console.warn(`release: warning: ${shapeNote}`);
 console.log(`release: ${cur} -> ${next}; ${unit} unit tests, ${blocks} e2e blocks (1–${top}).
@@ -52,4 +52,4 @@ Still to do:
   2. For a release worth announcing, update WHATS_NEW in the script (at most 3 lines).
   3. If the UI changed visibly: npm run screenshots.
   4. Bump ROWS_VERSION / FEAT_V if test/versions.test.js says so.
-  5. npm run ci, COVERAGE_MIN=98 npm run coverage, npm run live; then commit and push.`);
+  5. npm run ci, COVERAGE_MIN=98 npm run coverage (npm run live is optional); then commit and push.`);

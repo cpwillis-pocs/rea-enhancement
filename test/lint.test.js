@@ -75,10 +75,11 @@ test('npm run release bumps the version, stubs the changelog and updates the doc
   fs.mkdirSync(path.join(dir, 'docs')); fs.mkdirSync(path.join(dir, 'test/e2e'));
   for (const f of ['docs/ROADMAP.md', 'docs/ARCHITECTURE.md', 'test/e2e/edge.js']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
   fs.mkdirSync(path.join(dir, 'test/shapes'));
+  fs.writeFileSync(path.join(dir, 'test/shapes/live-2020-01-01.json'), '{}');
   const env = { ...process.env, RELEASE_ROOT: dir, RELEASE_ALLOW_DIRTY: '1', RELEASE_UNIT_COUNT: '321' }; // no nested test run
   const r = spawnSync(process.execPath, [path.join(__dirname, 'release.js'), '99.0.0'], { env, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /no real shape saved yet/, 'warns when drift checks have nothing real to compare');
+  assert.match(r.stderr, /newest real shape is from 2020-01-01/, 'warns when the real shape is stale');
   assert.match(fs.readFileSync(path.join(dir, 'rea-availability-filter.user.js'), 'utf8'), /@version\s+99\.0\.0/);
   assert.match(fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8'), /^## 99\.0\.0\n\n- \n/m);
   assert.match(fs.readFileSync(path.join(dir, 'docs/ROADMAP.md'), 'utf8'), /Where it stands \(v99\.0\.0\)[\s\S]*321 unit tests/);
