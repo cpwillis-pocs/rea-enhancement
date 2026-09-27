@@ -9,8 +9,9 @@ git clone <this repo>
 cd rea-enhancement
 npm run lint    # syntax + project invariants (header, changelog, privacy, storage keys)
 npm run check   # lint + unit tests, exactly what CI runs first
-npm run e2e:setup   # once: the Playwright version CI pins (lint keeps the two in step) + Chromium
-npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js)
+npm run e2e:setup   # once: the Playwright and axe-core versions CI pins (lint keeps them in step) + Chromium
+npm run e2e     # Chromium: main flow (smoke.js), edge paths (edge.js), accessibility (a11y.js)
+npm run a11y    # just the accessibility check: axe-core over each drawer view and the listing bar, light and dark
 npm run coverage   # unit coverage of the pure half, then V8 coverage of the UI half across both e2e files -> coverage-e2e.txt
 npm run ci      # check + e2e, the whole gate locally
 ```
@@ -30,7 +31,7 @@ npm run ci      # check + e2e, the whole gate locally
 | lint | `npm run lint` | first, on every run except the on-demand `screenshots` suite |
 | changes | decides whether the PR touches code: a PR that changes only Markdown, `docs/`, `LICENSE` or issue templates skips unit and e2e (a skipped job counts as passing for required checks) | PR, on demand |
 | unit | unit tests on Node 20 (in Los Angeles time, so dates can't depend on the runner's zone), 22 and 24, with a JUnit report | PR, on demand `all`/`unit` |
-| e2e | `smoke.js` and `edge.js` in parallel, `edge.js` running 3 blocks at a time (`E2E_JOBS=3`); failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
+| e2e | `smoke.js`, `edge.js` and `a11y.js` (axe-core, fails on serious/critical findings in the script's own UI) in parallel, `edge.js` running 3 blocks at a time (`E2E_JOBS=3`); failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
 | coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | on demand `all`/`coverage` (run `npm run coverage` locally for new UI code) |
 | screenshots | regenerates `docs/screenshots` and uploads them (nothing committed) | on demand `screenshots` |
 | version-bump | a script change must raise `@version` | PR |

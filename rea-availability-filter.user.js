@@ -3014,6 +3014,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   [data-rf-id][data-rf-pos]{position:relative}
   [data-rf-id][data-rf-match="0"]{opacity:.35;transition:opacity .15s}
+  @media (prefers-reduced-motion: reduce){ [data-rf-id][data-rf-match="0"],#rf-panel *,#rf-lbar *{transition:none!important;animation:none!important} }
   [data-rf-id][data-rf-match="0"]:hover{opacity:1}
   /* On REA's cards: its own CSS (which may load after ours) mustn't size or pad our tags: reset, then !important. */
   .rf-badge,.rf-badge *{all:unset!important;box-sizing:border-box!important}

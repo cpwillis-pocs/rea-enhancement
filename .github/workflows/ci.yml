@@ -33,6 +33,7 @@ concurrency:
 
 env:
   PLAYWRIGHT_VERSION: 1.56.1
+  AXE_VERSION: 4.13.0 # test-only, for a11y.js; never shipped
   FORCE_COLOR: 1
 
 jobs:
@@ -112,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        file: [smoke, edge] # independent, so they run in parallel
+        file: [smoke, edge, a11y] # independent, so they run in parallel
     env:
       E2E_ARTIFACTS: e2e-artifacts
       E2E_TIMEOUT_MS: '600000'
@@ -125,6 +126,9 @@ jobs:
       - uses: ./.github/actions/setup-playwright
         with:
           version: ${{ env.PLAYWRIGHT_VERSION }}
+      - name: axe-core (a11y only)
+        if: matrix.file == 'a11y'
+        run: npm install --no-save --no-audit --no-fund "axe-core@$AXE_VERSION"
       - name: e2e ${{ matrix.file }} (x${{ inputs.repeat || '1' }})
         run: |
           n=${{ inputs.repeat || '1' }}

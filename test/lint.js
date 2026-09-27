@@ -42,6 +42,9 @@ const pwLocal = JSON.parse(read('package.json')).scripts?.['e2e:setup']?.match(/
 const ciPath = path.join(root, '.github/workflows/ci.yml');
 const pwCi = fs.existsSync(ciPath) ? fs.readFileSync(ciPath, 'utf8').match(/PLAYWRIGHT_VERSION:\s*(\S+)/)?.[1] : pwLocal;
 if (fs.existsSync(ciPath) && /live\.js|npm run live/.test(fs.readFileSync(ciPath, 'utf8'))) err('CI must not run the live check (test/live.js hits the real REA site)');
+const axeLocal = JSON.parse(read('package.json')).scripts?.['e2e:setup']?.match(/axe-core@(\d+\.\d+\.\d+)/)?.[1];
+const axeCi = fs.existsSync(ciPath) ? fs.readFileSync(ciPath, 'utf8').match(/AXE_VERSION:\s*(\S+)/)?.[1] : axeLocal;
+if (axeLocal !== axeCi) err(`package.json e2e:setup installs axe-core@${axeLocal}, CI pins ${axeCi}: keep them the same`);
 if (!pwLocal || pwLocal !== pwCi) err(`package.json e2e:setup installs playwright@${pwLocal}, CI pins ${pwCi}: keep them the same`);
 // Docs that go stale at release time (npm run release updates them).
 const roadmapPath = path.join(root, 'docs/ROADMAP.md'), archPath = path.join(root, 'docs/ARCHITECTURE.md'), edgePath = path.join(root, 'test/e2e/edge.js');

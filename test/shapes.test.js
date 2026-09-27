@@ -27,6 +27,7 @@ for (const f of files) {
     const rates = core.fillRates([row]);
     for (const k of shape.expect?.fill || []) assert.equal(rates[k], 1, `${k} is read`);
     for (const [k, v] of Object.entries(shape.expect?.row || {})) assert.deepEqual(row[k], v, `row.${k}`);
+    assert.ok(core.PROBE_PATHS.includes('price.display'), 'PROBE_PATHS lists what the script reads');
     const probed = core.probe(listing);
     assert.ok(Object.values(probed).some((v) => v !== '(missing)'), 'probe finds known paths');
   });
