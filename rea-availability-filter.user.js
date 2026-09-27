@@ -59,7 +59,7 @@
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
-    'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope']; // bump when toRow() shape changes
+    'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope', 'buildingN', 'buildingAddr', 'alsoListed']; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROW_INFINITE = ['priceNum', 'ppb', 'upfront', 'bondNum']; // "unknown" numbers held as Infinity
   const ROWS_TTL_MS = 10 * 60 * 1000;
@@ -162,7 +162,9 @@
     },
     // sessionStorage (~5MB) is shared with REA's own code, so keep it small: at most
     // ROWS_KEEP searches, and the keyword blob truncated (full text stays in memory).
-    set(key, rows, truncated) {
+    // `later(fn)` runs the write: the UI passes a next-task scheduler, so the results paint
+    // before this tab's cache is written. The rows are copied now, as they are.
+    set(key, rows, truncated, later = (fn) => fn()) {
       const slim = rows.map((r) => {
         const o = { ...r, text: r.text?.length > ROWS_TEXT_MAX ? r.text.slice(0, ROWS_TEXT_MAX) : r.text };
         for (const k of ROW_RUNTIME) delete o[k]; // rebuilt by decorate/score/distance after restore
@@ -183,15 +185,17 @@
         }
         return out.sort((a, b) => b[1] - a[1]); // newest first
       };
-      try {
-        ours().forEach(([k, at], i) => { if (i >= ROWS_KEEP - 1 || now() - at > ROWS_TTL_MS) storage.removeItem(k); });
-        put();
-      } catch {
-        try { // quota: drop every other cached search and retry once
-          for (const [k] of ours()) storage.removeItem(k);
+      later(() => {
+        try {
+          ours().forEach(([k, at], i) => { if (i >= ROWS_KEEP - 1 || now() - at > ROWS_TTL_MS) storage.removeItem(k); });
           put();
-        } catch { /* unavailable */ }
-      }
+        } catch {
+          try { // quota: drop every other cached search and retry once
+            for (const [k] of ours()) storage.removeItem(k);
+            put();
+          } catch { /* unavailable */ }
+        }
+      });
     },
   });
 
@@ -784,6 +788,14 @@
       } catch { /* corrupt */ }
       return { v: 1, s: {} };
     };
+    // The stored string, built from each entry's cached JSON: a pin or a second save of one
+    // search doesn't re-stringify the other two. Same bytes as JSON.stringify(d).
+    const entryJson = new WeakMap();
+    const stringify = (d) => `{"v":${JSON.stringify(d.v ?? 1)},"s":{${Object.entries(d.s).map(([k, e]) => {
+      let j = entryJson.get(e);
+      if (j === undefined) entryJson.set(e, (j = JSON.stringify(e)));
+      return `${JSON.stringify(k)}:${j}`;
+    }).join(',')}}}`;
     // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
     // lists, then give up. Returns the keys it stopped remembering.
     const persist = (d) => {
@@ -791,11 +803,11 @@
       const evicted = order().slice(SNAP_MAX);
       for (const k of evicted) delete d.s[k];
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { const out = JSON.stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return { evicted, ok: true }; } catch {
+        try { const out = stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return { evicted, ok: true }; } catch {
           memo = null;
           const ks = order(); // pinned first here too, and whatever goes is reported
           if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) { delete d.s[k]; evicted.push(k); }
-          else for (const k of ks) d.s[k].gone = [];
+          else for (const k of ks) { d.s[k].gone = []; entryJson.delete(d.s[k]); }
         }
       }
       return { evicted, ok: false };
@@ -872,6 +884,7 @@
         const d = load();
         if (!d.s[key]) return false;
         if (on) d.s[key].pin = 1; else delete d.s[key].pin;
+        entryJson.delete(d.s[key]);
         return persist(d).ok;
       },
       clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
@@ -1528,8 +1541,10 @@
   const leaseLabel = (l) => (!l ? '' : l.flexible ? 'Flexible lease' : l.min === l.max ? `Lease ${l.min} mo` : `Lease ${l.min}–${l.max} mo`);
   const leaseText = (code) => leaseLabel(leaseFromCode(code));
 
-  const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
-  const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
+  const WATCH_BY_ID = new Map(WATCHOUTS.map((w) => [w.id, w]));
+  const watchIds = (v) => String(v || '').split(',').filter((id) => WATCH_BY_ID.has(id));
+  const watchList = (r) => watchIds(r.watch).map((id) => WATCH_BY_ID.get(id));
+  const watchTags = (r) => watchList(r).map((w) => w.label);
 
   // "Why this tag?": the words around the first match, so a wrong tag can be seen for what it
   // read (and turned into a test case). Text is the row's folded text, so quotes are lowercase.
@@ -1559,7 +1574,7 @@
     const quote = feat ? '' : evidenceOf(r.text, a.pos);
     return [amenDetail(a.id, r.text) || a.yes, feat ? `From REA's feature list: ${feat}` : quote ? `From the listing text: "${quote}"` : r.text ? NO_PHRASE : '', a.id, quote];
   });
-  const watchTagItems = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)).filter(Boolean).map((w) => {
+  const watchTagItems = (r) => watchList(r).map((w) => {
     const quote = evidenceOf(r.text, w.re);
     return [w.label, quote ? `From the listing text: "${quote}". Worth asking the agent.` : r.text ? NO_PHRASE : '', w.id, quote];
   });
@@ -1574,6 +1589,15 @@
       }
     }
     return '';
+  };
+  // Per row, reused while its text and tags are unchanged: tooltips were 60% of rendering a listing.
+  const tagMemo = new WeakMap();
+  const tagItemsOf = (r) => {
+    let m = tagMemo.get(r);
+    if (!m || m.text !== r.text || m.amen !== r.amen || m.watch !== r.watch || m.features !== r.features) {
+      tagMemo.set(r, (m = { text: r.text, amen: r.amen, watch: r.watch, features: r.features, am: amenityTagItems(r), wt: watchTagItems(r) }));
+    }
+    return m;
   };
   // "Copy as test case": each tag's phrase in the unit tests' table format.
   const testCaseText = (r) => [...amenityTagItems(r), ...watchTagItems(r)].filter(([, , , q]) => q)
@@ -1980,7 +2004,7 @@
       } else if (k === 'type') {
         for (const t of typeList(v)) out.push({ key: k, ptype: t, label: t });
       } else if (k === 'noWatch') {
-        for (const id of watchIds(v)) out.push({ key: k, watch: id, label: `No ${WATCHOUTS.find((w) => w.id === id).label.toLowerCase()}` });
+        for (const id of watchIds(v)) out.push({ key: k, watch: id, label: `No ${WATCH_BY_ID.get(id).label.toLowerCase()}` });
       } else if (k !== 'maxKm' || parseAnchor(cfg.anchor)) out.push({ key: k, label: CHIP_LABELS[k] ? CHIP_LABELS[k](v) : k });
     }
     return out;
@@ -2709,7 +2733,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       grid-template-areas:"head head" "tabs status" "ctrl news" "ctrl partial" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
     .rf-full>.rf-head{grid-area:head} .rf-full>.rf-tabs{grid-area:tabs} .rf-full>.rf-sl-bar{grid-area:ctrl;align-self:stretch;align-content:flex-start} /* one of the two shows */
     .rf-full>.rf-controls{grid-area:ctrl;max-height:none;min-height:0;align-content:start;border-bottom:0;border-right:1px solid var(--rf-line)}
-    .rf-full>.rf-help{grid-area:help} .rf-full>.rf-share-in{grid-area:share} .rf-full>.rf-warnbar{grid-area:warn}
+    .rf-full>.rf-help{grid-area:help} .rf-full>.rf-share-in,.rf-full>.rf-restore-in{grid-area:share} .rf-full>.rf-warnbar{grid-area:warn}
     .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-partial{grid-area:partial} .rf-full>.rf-news{grid-area:news} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
     .rf-full>.rf-tabs,.rf-full>.rf-sl-bar{border-right:1px solid var(--rf-line)}
     .rf-full .rf-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));align-content:start;gap:4px 12px;padding:8px 12px}
@@ -2833,8 +2857,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-achip{font-size:11px;padding:3px 8px}
   .rf-achip span{color:var(--rf-soft);font-weight:400}
   .rf-preset{font:12px system-ui,sans-serif;padding:6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:100%}
-  .rf-share-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
-  .rf-share-in .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
+  .rf-share-in,.rf-restore-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
+  .rf-share-in .rf-btn,.rf-restore-in .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-planner{padding:8px 12px}
@@ -3210,7 +3234,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>v</dt><dd>map on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
       <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
     </div>
-    <div class="rf-share-in rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
+    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
       <span class="rf-share-msg"></span>
       <button class="rf-btn" data-share="add">Add to my shortlist</button>
@@ -3886,8 +3910,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     // A dot: back to the list, on that listing (rendering more of the list if it is further down).
     ui.mapPick = (id) => {
       setView2(false, false);
+      const at = (ui.rows || []).findIndex((r) => r.id === id); // render down to it in one pass
+      ui.keepShown = at >= 0 ? Math.ceil((at + 1) / RENDER_CHUNK) * RENDER_CHUNK : 0;
       showResults();
-      for (let n = 0; !itemEl(id) && n < 40 && ui.list.querySelector('.rf-more-btn'); n++) renderMore();
+      ui.keepShown = 0;
       const el = itemEl(id);
       if (el) { el.focus(); el.scrollIntoView({ block: 'center' }); }
     };
@@ -4617,7 +4643,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     function itemHtml(r, i) {
       const kq = cfg.keyword.trim() ? keywordEvidence(r.text, cfg.keyword) : '';
       const name = [r.price, r.address, r.available && r.available !== '-' ? `available ${r.available.replace(/^available\s*/i, '')}` : ''].filter(Boolean).join(', ');
-      const am = amenityTagItems(r), wt = watchTagItems(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
+      const { am, wt } = tagItemsOf(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       const na = sl ? needsAction(r, now) : '';
       return `
       <div tabindex="-1" role="article" aria-posinset="${offset + i + 1}" aria-setsize="${total}" aria-label="${esc(`${offset + i + 1} of ${total}: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
@@ -4651,7 +4677,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${r.starred && sl ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];
-        return `<button type="button" class="rf-chip" data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
+        return checkBtn(k, v, 'class="rf-chip"');
       }).join('')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
@@ -4893,7 +4919,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const moved = resultsPath.fallback ? [`results are now under ${resultsPath.key}.${resultsPath.field}`] : [];
       const drift = [...moved, ...drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`)];
       setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
-      store.set(key, res.rows, res.truncated);
+      store.set(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0));
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
         : snap?.evicted.length ? `Stopped remembering ${snap.evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : '');
@@ -5110,7 +5136,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ...watchTags(r), placesLabel(r) || kmLabel(r)].filter(Boolean);
     const checks = checklistItems(cfg.checklist).map((k) => {
       const v = r.checks?.[k];
-      return `<button type="button" data-l="ck" data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
+      return checkBtn(k, v, 'data-l="ck"');
     }).join('');
     return `<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist and details</summary>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
@@ -5139,6 +5165,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
+  // One checklist item: unknown -> ✓ good -> ✗ problem.
+  const checkBtn = (k, v, attrs) => `<button type="button" ${attrs} data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
   const hideWord = (r) => (r.resurfaced ? 'Hide again' : r.hidden ? 'Unhide' : 'Hide');
   // Named per listing, so a screen reader's button list isn't 25 identical "Shortlist"s.
   const cardActsHtml = (r) => {
@@ -5454,6 +5482,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           const moved = DISPLAY_PREFS.filter((k) => k !== 'sort' && k !== 'sortDesc' && stored[k] !== cfg[k]); // each tab keeps its own sort
           if (!moved.length) return;
           for (const k of moved) cfgBase[k] = stored[k];
+          if (moved.length === 1 && moved[0] === 'theme') { // nothing to re-render
+            cfg = { ...cfg, theme: stored.theme };
+            const sel = ui.panel.querySelector('#rf-theme'); if (sel) sel.value = stored.theme;
+            return applyTheme();
+          }
           ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
         }
       }));
@@ -5467,15 +5500,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ui.setOpen(true);
         setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
       });
-      step('restore', restore);
-      step('listing bar', () => {
-        renderListingBar();
-        window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
-      });
-      step('saved', renderSaved);
-      step('remind', remindSaved);
-      step('backup nudge', nudgeBackup);
-      step('annotate', ensureVisiblePage);
+      // Restoring remembered results (parse, rebuild rows, render) is the rest of the cost: its own task too.
+      setTimeout(() => {
+        step('restore', restore);
+        step('listing bar', () => {
+          renderListingBar();
+          window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
+        });
+        step('saved', renderSaved);
+        step('remind', remindSaved);
+        step('backup nudge', nudgeBackup);
+        step('annotate', ensureVisiblePage);
+        ui.panel.dataset.rfReady = '1'; // every startup step has run (tests wait on it)
+      }, 0);
     }, 0);
   }
 })();

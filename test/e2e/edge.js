@@ -38,6 +38,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.goto(url);
     if (before) await before(page);
     await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached', timeout: 5000 }).catch(() => {}); // startup runs over three tasks
     return page;
   };
   const done = async (page) => { await cov.collect(page, SCRIPT); await page.close(); };
@@ -579,7 +580,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.selectOption('.rf-preset', 'a:-3-bed');
     assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'applying a "-" name applies, not deletes');
     await page.evaluate(() => sessionStorage.removeItem('rea-avail-filter/preset-visit'));
-    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'bound type survives page load');
     await page.evaluate(() => { const el = document.querySelector('#rf-type'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
