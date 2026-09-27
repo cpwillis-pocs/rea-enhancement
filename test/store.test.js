@@ -206,3 +206,19 @@ test('backupCfg: your own settings only, sanitised', () => {
   assert.deepEqual(out, { theme: 'dark', checklist: 'Damp' }, 'filters, bad types, bad sorts and unknown keys dropped');
   assert.deepEqual(core.backupCfg(null), {});
 });
+
+test('restore: never carries Remember results, says what it will change, and an old "gone" mark does not stick to a live listing', () => {
+  assert.equal('remember' in core.backupCfg({ remember: false, theme: 'dark' }), false, 'Remember off in a backup must not delete remembered searches here');
+  const data = { app: 'rea-enhancement', kind: 'marks', m: { 146500001: { s: 1 }, 146500002: { h: 1 }, bad: { s: 1 } },
+    snapshots: { 'https://www.realestate.com.au/rent/in-bondi/list-1': {} }, presets: [{ name: 'a', cfg: {} }], cfg: { theme: 'dark', places: '', remember: false } };
+  assert.deepEqual(core.backupSummary(data, { ...core.DEFAULT_CFG }), { listings: 2, shortlisted: 1, hidden: 1, searches: 1, presets: 1, settings: ['theme'] });
+  let t = 1000;
+  const m = core.marksStore(memStorage(), () => t);
+  const live = core.toRow(listing({ id: '146500003' }), false);
+  t = 5000; m.observe([live]);
+  const d = { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500003', a: '1 Test St' };
+  m.importJson({ app: 'rea-enhancement', kind: 'marks', m: { 146500003: { s: 1, x: 2000, d }, 146500004: { s: 1, x: 2000, d: { ...d, u: d.u.replace('3', '4') } } } });
+  const gone = Object.fromEntries(m.shortlist().map((r) => [r.id, r.gone]));
+  assert.equal(gone['146500003'], false, 'seen live after the backup said gone');
+  assert.equal(gone['146500004'], true, 'never seen here: the backup is believed');
+});

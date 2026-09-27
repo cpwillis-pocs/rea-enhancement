@@ -193,6 +193,9 @@ const html = (n) => {
   // Wipe, then restore from the backup file.
   await page.evaluate(() => localStorage.removeItem('rea-avail-filter/marks/v1'));
   await page.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
+  await page.waitForSelector('.rf-restore-in:not([hidden])');
+  assert.match(await page.textContent('.rf-restore-msg'), /^Restore 1 listing \(1 shortlisted, 0 hidden\)/);
+  await page.click('[data-restore=yes]');
   await page.waitForFunction(() => /Restored 1 listing/.test(document.querySelector('.rf-status').textContent));
   assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
   await page.click('[data-view=results]');

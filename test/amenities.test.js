@@ -113,6 +113,9 @@ test('why this tag: the sentence each tag was read from, keyword matches, and te
     ['no match here', /pool/, ''], ['', /pool/, ''],
   ];
   for (const [text, re, want] of cases) assert.equal(core.evidenceOf(text, re), want, text);
+  // One feature per line, or a long hyphenated run: the quote still contains what matched.
+  for (const text of ['stunning features\nreverse-cycle\nfloorboards\ntimber\ndishwasher\ngas cooktop\nbuilt-ins',
+    'features: split-system-air-conditioning/dishwasher/gas-cooking and a big yard with lots of room to spare']) assert.match(core.evidenceOf(text, /dishwasher/), /dishwasher/, text);
   const r = core.toRow(listing({ id: '146500111', description: 'Sunny unit. Pets considered on application. Water usage charged to tenant.' }), false);
   const [pets] = core.amenityTagItems(r);
   assert.deepEqual(pets.slice(0, 2), ['Pets on application', 'From the listing text: "pets considered on application"']);
@@ -120,5 +123,6 @@ test('why this tag: the sentence each tag was read from, keyword matches, and te
   assert.match(core.amenityTagItems(withFeature).find((t) => t[2] === 'dishwasher')[1], /^From REA's feature list: Dishwasher/);
   assert.equal(core.keywordEvidence(r.text, '-studio "on application"|garden'), 'pets considered on application');
   assert.equal(core.keywordEvidence(r.text, '-pets'), '', 'excluded terms are not "matched"');
+  assert.equal(core.keywordEvidence(r.text, '-"no pets" sunny'), 'sunny unit', 'words of an excluded phrase are not matches');
   assert.equal(core.testCaseText(r), `["pets considered on application", 'pets'],\n["water usage charged to tenant", 'water'],`);
 });

@@ -156,3 +156,17 @@ test('pauseGate: trips for PAUSE_MS, then lifts; bad or past values mean not pau
   now = 5000; m.setItem('rea-avail-filter/paused', '4000'); assert.equal(g.until(), 0); assert.equal(m.getItem('rea-avail-filter/paused'), null, 'expired value removed');
   g.trip(5); g.clear(); assert.equal(g.until(), 0);
 });
+
+test('classifyPage: one answer for every fetcher, a removed listing is not a bot check', () => {
+  const blob = page(results());
+  const t = (o) => core.classifyPage(o);
+  assert.equal(t({ status: 200, html: blob }), 'ok');
+  assert.equal(t({ status: 200, html: '<html>verify you are human</html>' }), 'challenge');
+  assert.equal(t({ status: 403 }), 'forbidden');
+  assert.equal(t({ status: 429 }), 'rate');
+  assert.equal(t({ status: 500 }), 'error');
+  assert.equal(t({ status: 404, listing: true }), 'gone');
+  assert.equal(t({ status: 404 }), 'error', 'a search page 404 is not "gone"');
+  assert.equal(t({ status: 200, html: '<main>home</main>', redirectedTo: 'https://www.realestate.com.au/', listing: true }), 'gone', 'bounced to the home page: removed');
+  assert.equal(t({ status: 200, html: '<html>x</html>', redirectedTo: 'https://www.realestate.com.au/property-unit-nsw-bondi-1', listing: true }), 'challenge');
+});

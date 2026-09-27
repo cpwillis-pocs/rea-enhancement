@@ -135,7 +135,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(await page.evaluate(() => +localStorage.getItem('rea-avail-filter/paused') > Date.now()));
     blocked = false; hits.length = 0;
     await page.click('.rf-partial [data-resume]');
-    await page.waitForFunction(() => /Paused/.test(document.querySelector('.rf-partial').textContent));
+    await waitStatus(page, /^Paused:/);
+    assert.ok(await page.$('.rf-partial:not([hidden]) [data-resume]'), 'Resume stays offered');
     assert.deepEqual(hits, [], 'nothing fetched while paused');
     await page.evaluate(() => localStorage.removeItem('rea-avail-filter/paused')); // the 10 minutes are up
     await page.click('.rf-partial [data-resume]');
@@ -1637,10 +1638,21 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const fresh = await browser.newContext();
     const p2 = await open(fresh);
     await p2.click('#rf-launch'); await p2.click('[data-view=shortlist]');
-    await p2.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+    await p2.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...data, cfg: { ...data.cfg, remember: false } })) });
+    await p2.waitForSelector('.rf-restore-in:not([hidden])');
+    assert.match(await p2.textContent('.rf-restore-msg'), /1 listing \(1 shortlisted, 0 hidden\), 1 saved search, and replace your checklist, theme\?/);
+    assert.equal(Object.values((await marks(p2)) || {}).filter((e) => e.s).length, 0, 'nothing merged before you say so');
+    await p2.click('[data-restore=yes]');
     await waitStatus(p2, /Restored 1 listing, 1 saved search and your settings from backup/);
     assert.equal(await p2.evaluate(() => document.documentElement.dataset.rfTheme), 'dark');
-    assert.equal(JSON.parse(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).checklist, 'Damp, Noise');
+    const saved = JSON.parse(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/v1')));
+    assert.equal(saved.checklist, 'Damp, Noise');
+    assert.notEqual(saved.remember, false, "a backup made with Remember off doesn't turn it off here");
+    assert.ok(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), 'remembered searches kept');
+    await p2.click('.rf-status .rf-undo');
+    await waitStatus(p2, /^Restore undone/);
+    assert.equal(await p2.evaluate(() => 'rfTheme' in document.documentElement.dataset), false, 'settings back');
+    assert.equal(await p2.$$eval('.rf-item', (e) => e.length), 0, 'shortlist back to empty');
     await done(p2); await fresh.close();
     const many = await browser.newContext();
     await many.addInitScript(() => {
@@ -1648,7 +1660,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
       for (let i = 0; i < 5; i++) m[146500010 + i] = { f: 1, l: 1, s: 1, st: 1, d: { u: `https://www.realestate.com.au/property-unit-nsw-bondi-${146500010 + i}`, a: `${i} Hall St, Bondi NSW 2026` } };
       if (!localStorage.getItem('rea-avail-filter/marks/v1')) localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m }));
     });
+    const lp = await open(many, `${ORIGIN}/property-unit-nsw-bondi-146500101`);
+    await lp.waitForSelector('#rf-lbar');
+    assert.equal(await lp.evaluate(() => localStorage.getItem('rea-avail-filter/backup-nudge-at')), null, 'not used up on a listing page, where it would not be seen');
+    await done(lp);
     const p3 = await open(many);
+    assert.equal(await p3.evaluate(() => localStorage.getItem('rea-avail-filter/backup-nudge-at')), null, 'nor before the drawer opens');
     await p3.click('#rf-launch');
     await p3.waitForFunction(() => /5 listings shortlisted and never backed up/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''));
     await p3.reload(); await p3.addScriptTag({ content: SCRIPT }); await p3.waitForSelector('#rf-launch');
@@ -1717,6 +1734,25 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-market-btn'); await page.click('.rf-map-btn');
     assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'false', 'map and market are one at a time');
     console.log('map view: ok');
+    await done(page); await ctx.close();
+  });
+
+  // 51. The documented list keys nothing else presses: PgDn/PgUp by 5, g/Home and G/End, c copies.
+  await block('51', async () => {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const page = await open(ctx);
+    await run(page);
+    const pos = () => page.evaluate(() => [...document.querySelectorAll('.rf-item')].indexOf(document.activeElement));
+    await page.focus('.rf-item');
+    await page.keyboard.press('PageDown'); assert.equal(await pos(), 5);
+    await page.keyboard.press('PageUp'); assert.equal(await pos(), 0);
+    await page.keyboard.press('End'); assert.equal(await pos(), (await count(page)) - 1);
+    await page.keyboard.press('g'); assert.equal(await pos(), 0);
+    await page.keyboard.press('G'); await page.keyboard.press('Home'); assert.equal(await pos(), 0);
+    await page.keyboard.press('c');
+    await page.waitForFunction(() => navigator.clipboard.readText().then((t) => t.length > 20));
+    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /per week/);
+    console.log('list keys PgDn/PgUp/Home/End/c: ok');
     await done(page); await ctx.close();
   });
 

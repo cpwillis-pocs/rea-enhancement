@@ -595,10 +595,11 @@
         let n = 0;
         for (const [id, e] of Object.entries(src.m)) {
           if (!isListingId(id) || !e || typeof e !== 'object') continue;
+          const seenHere = m[id]?.l; // before entry() creates it: a new entry isn't a sighting
           const cur = entry(m, id);
           if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
           if (e.h) { cur.h = 1; if (HIDE_REASONS.includes(e.hr)) cur.hr = e.hr; }
-          if (typeof e.x === 'number') cur.x = e.x;
+          if (typeof e.x === 'number' && !(seenHere > e.x)) cur.x = e.x; // seen live here since: not gone
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
@@ -1122,6 +1123,19 @@
   }
   // -> { status: 'ok', listing } | { status: 'gone' } | { status: 'unknown' }
   const EXCHANGE_RE = /window\.ArgonautExchange=(\{.*?\});?<\/script>/s;
+  // What a fetched REA page is, for every fetcher alike: 'ok', 'gone' (removed, or bounced off
+  // /property- for a listing), 'forbidden' (403) or 'rate' (429): bot checks; 'challenge': a 200
+  // without REA's page data; 'error': anything else. A redirect off the listing is checked before
+  // the page data, since REA's home page has none either.
+  const classifyPage = ({ status = 200, html = '', redirectedTo = '', listing = false } = {}) => {
+    if (status === 403) return 'forbidden';
+    if (status === 429) return 'rate';
+    if (listing && (status === 404 || status === 410)) return 'gone';
+    if (listing && redirectedTo) { try { if (!/\/property-/.test(new URL(redirectedTo).pathname)) return 'gone'; } catch { return 'gone'; } }
+    if (status < 200 || status >= 300) return 'error';
+    return EXCHANGE_RE.test(html) ? 'ok' : 'challenge';
+  };
+  const BOT_KINDS = new Set(['forbidden', 'rate', 'challenge']);
   function parseListingPage(html, id, { status = 200, redirectedTo = '' } = {}) {
     if (status === 404 || status === 410) return { status: 'gone' };
     if (redirectedTo && !/\/property-/.test(new URL(redirectedTo).pathname)) return { status: 'gone' }; // bounced to a search
@@ -1528,9 +1542,13 @@
     // The sentence it sits in, clipped to EVIDENCE_W either side at a word boundary.
     let a = Math.max(0, m.index - EVIDENCE_W), b = Math.min(t.length, m.index + m[0].length + EVIDENCE_W);
     const stop = t.slice(a, m.index).search(/[.!?;](?=[^.!?;]*$)/);
-    if (stop >= 0) a += stop + 1; else if (a > 0) a = t.indexOf(' ', a) + 1 || a;
+    if (stop >= 0) a += stop + 1;
+    else if (a > 0) { const ws = t.slice(a, m.index).search(/\s/); if (ws >= 0) a += ws + 1; } // a word boundary, never past the match
+    a = Math.min(a, m.index);
     const end = t.slice(m.index + m[0].length, b).search(/[.!?;]/);
-    if (end >= 0) b = m.index + m[0].length + end; else if (b < t.length) b = t.lastIndexOf(' ', b) > m.index + m[0].length ? t.lastIndexOf(' ', b) : b;
+    const after = m.index + m[0].length;
+    if (end >= 0) b = after + end;
+    else if (b < t.length) { const tail = t.slice(after, b), ws = Math.max(tail.lastIndexOf(' '), tail.lastIndexOf('\n'), tail.lastIndexOf('\t')); if (ws >= 0) b = after + ws; }
     const cut = /[.!?;]\s*$/.test(t.slice(0, a)) || a === 0 ? '' : '…', more = b >= t.length || /^[.!?;]/.test(t.slice(b)) ? '' : '…';
     return `${cut}${t.slice(a, b).replace(/\s+/g, ' ').trim()}${more}`;
   };
@@ -1547,7 +1565,7 @@
   });
   // With a keyword filter on: where the first wanted term was found.
   const keywordEvidence = (text, keyword) => {
-    const terms = String(keyword || '').match(/"[^"]+"|\S+/g) || [];
+    const terms = fold(keyword).match(/-?"[^"]+"|\S+/g) || []; // tokenised as keywordTest does, so -"no pets" is one exclusion
     for (const term of terms) {
       if (term.startsWith('-')) continue;
       for (const alt of term.replace(/"/g, '').split('|')) {
@@ -1783,7 +1801,23 @@
   // keyword: null) falls back to the default instead of throwing on every render.
   // Settings a backup carries: your own setup (places, checklist, template, weights, theme…),
   // not this search's filters. Restored through sanitizeCfg, so a hand-edited file can't break it.
-  const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok).map((k) => [k, ok[k]])); };
+  // Not `remember`/`remindSaved`: restoring a backup made with Remember off must not delete this
+  // browser's remembered searches.
+  const BACKUP_CFG_SKIP = new Set(['remember', 'remindSaved']);
+  const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
+  // What a restore would do, shown before anything is merged.
+  const SETTING_NAMES = { places: 'places', checklist: 'checklist', enquiry: 'enquiry template', leaseEnd: 'lease end', income: 'income', theme: 'theme', anchor: 'distance point',
+    wRent: 'weights', wTiming: 'weights', wDist: 'weights', wMovein: 'weights', icsAlarm: 'calendar reminder', compact: 'compact list', annotate: 'card badges', dimCards: 'card fading', sort: 'sort', sortDesc: 'sort' };
+  const backupSummary = (data, cur) => {
+    const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
+    const c = backupCfg(data?.cfg);
+    return {
+      listings: m.length, shortlisted: m.filter(([, e]) => e.s).length, hidden: m.filter(([, e]) => e.h).length,
+      searches: isObj(data?.snapshots) ? Object.keys(data.snapshots).filter(isSearchKey).length : 0,
+      presets: Array.isArray(data?.presets) ? data.presets.filter((p) => isObj(p) && typeof p.name === 'string').length : 0,
+      settings: [...new Set(Object.keys(c).filter((k) => c[k] !== cur[k]).map((k) => SETTING_NAMES[k] || k))],
+    };
+  };
   const sanitizeCfg = (c) => (c && typeof c === 'object'
     ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))).map((k) => [k, c[k]]))
     : {});
@@ -2580,7 +2614,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3176,6 +3210,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>v</dt><dd>map on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
       <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
     </div>
+    <div class="rf-share-in rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
       <span class="rf-share-msg"></span>
       <button class="rf-btn" data-share="add">Add to my shortlist</button>
@@ -3586,6 +3621,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }
     };
     const setOpen = (open) => {
+      if (open && ui.backupNudge) { ui.backupNudge(); ui.backupNudge = null; }
       if (!open) ui.closePeek?.();
       panel.hidden = !open;
       launch.setAttribute('aria-expanded', String(open));
@@ -4001,15 +4037,44 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (f.size > BACKUP_MAX_BYTES) throw new Error('File too large for a backup.');
         let data;
         try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
+        if (data?.app !== 'rea-enhancement' || data?.kind !== 'marks' || !isObj(data.m)) throw new Error('Not an rea-enhancement backup.');
+        // Say what it will do first: a restore merges into what's here and can change settings.
+        const sm = backupSummary(data, cfg);
+        const parts = [plural(sm.listings, 'listing') + (sm.listings ? ` (${sm.shortlisted} shortlisted, ${sm.hidden} hidden)` : ''),
+          cfg.remember && sm.searches ? plural(sm.searches, 'saved search', 'es') : '', sm.presets ? plural(sm.presets, 'preset') : ''].filter(Boolean);
+        restoreIn.querySelector('.rf-restore-msg').textContent = `Restore ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
+        restoreIn.hidden = false;
+        ui.pendingRestore = data;
+        restoreIn.querySelector('[data-restore=yes]').focus();
+      } catch (err) { setStatus(err.message, true); }
+    });
+    const restoreIn = panel.querySelector('.rf-restore-in');
+    restoreIn.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-restore]');
+      if (!b) return;
+      const data = ui.pendingRestore;
+      restoreIn.hidden = true;
+      ui.pendingRestore = null;
+      if (b.dataset.restore !== 'yes' || !data) return setStatus('Restore cancelled.');
+      // Undo puts the three stores and the settings back exactly as they were.
+      const ls = storageOr('localStorage'), keys = [MARKS_KEY, SNAP_KEY, PRESETS_KEY];
+      const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
+      try {
         const n = marks.importJson(data);
-        const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
-        presets.importData(data.presets);
         const c = backupCfg(data.cfg);
         if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
+        const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
+        presets.importData(data.presets);
         fillPresets();
         renderSaved();
         refreshMarks();
-        setStatus(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`);
+        offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
+          keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
+          marks.invalidate();
+          ui.applyCfg(cfgBefore);
+          fillPresets(); renderSaved(); refreshMarks();
+          setStatus('Restore undone.');
+        });
       } catch (err) { setStatus(err.message, true); }
     });
 
@@ -4098,10 +4163,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           if (ctrl.signal.aborted) throw err;
           tally.unknown++; continue;
         }
-        // A 403, a second 429, or a page with no data at all (a challenge page) stops everything.
-        const challenge = res.ok && !EXCHANGE_RE.test(html);
-        if (res.status === 403 || res.status === 429 || challenge) {
-          tripPause(botCheck(`Re-check: ${challenge ? 'challenge page' : `HTTP ${res.status}`}`));
+        // A 403, a second 429, or a page with no data that isn't a removed listing stops everything.
+        const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
+        if (BOT_KINDS.has(kind)) {
+          tripPause(botCheck(`Re-check: ${kind === 'challenge' ? 'challenge page' : `HTTP ${res.status}`}`));
           throw pausedErr(pause.until());
         }
         const out = parseListingPage(html, r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
@@ -4791,8 +4856,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // come from pageMemo, without a pause).
   async function run(force = false, { resume = false } = {}) {
     if (!force && restoreSession()) return;
-    // Refresh during a bot-check pause would drop the pages already read and then fail: keep them.
-    if (force && !resume && pause.until()) return setStatus(pausedErr(pause.until()).message, true);
+    // Refresh or Resume during a bot-check pause would drop what's read (and the Resume notice)
+    // and then fail: keep them.
+    if (force && pause.until()) return setStatus(pausedErr(pause.until()).message, true);
     showPartial(null);
     runCtrl?.abort();
     const ctrl = runCtrl = new AbortController();
@@ -4957,8 +5023,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const nudgeBackup = () => {
     const now = Date.now(), gap = BACKUP_NUDGE_DAYS * DAY_MS, nudged = keyStore(storageOr('localStorage'), BACKUP_NUDGE_KEY);
     const n = marks.counts().starred;
-    if (n < BACKUP_NUDGE_MIN || now - (+backupAt.get() || 0) < gap || now - (+nudged.get() || 0) < gap) return;
-    nudged.set(String(now));
+    if (!isSearchPage(location.href) || n < BACKUP_NUDGE_MIN || now - (+backupAt.get() || 0) < gap || now - (+nudged.get() || 0) < gap) return;
+    ui.backupNudge = () => nudged.set(String(Date.now())); // counted as shown once the drawer is open
+    if (!ui.panel.hidden) ui.backupNudge();
     setWarn('backup', `${n} listings shortlisted and ${backupAt.get() ? `last backed up ${ago(now - +backupAt.get())}` : 'never backed up'}. Browser storage can be cleared: Shortlist → More → Backup keeps a copy.`);
   };
   const REMIND_EVERY_MS = DAY_MS;
@@ -5024,7 +5091,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (r.partial && bar._fetching !== id && !pause.until()) {
       bar._fetching = id;
       fetch(location.href, { credentials: 'include', signal: withTimeout(null, FETCH_TIMEOUT_MS) })
-        .then((res) => { if (res.status === 403 || res.status === 429) tripPause(botCheck(`listing page: HTTP ${res.status}`)); return res.ok ? res.text() : ''; })
+        .then(async (res) => {
+          const html = res.ok ? await res.text() : '';
+          const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
+          if (BOT_KINDS.has(kind)) tripPause(botCheck(`listing page: ${kind}`));
+          return kind === 'ok' ? html : '';
+        })
         .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
         .catch(() => {}).finally(() => { if (bar._fetching === id) bar._fetching = null; if (bar.dataset.id !== id && bar._row?.partial) renderListingBar(); });
     }
