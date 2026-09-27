@@ -26,7 +26,7 @@ npm run ci      # check + e2e, the whole gate locally
 |---|---|---|
 | lint | `npm run lint` | always (first) |
 | unit | unit tests on Node 20 (in Los Angeles time, so dates can't depend on the runner's zone), 22 and 24, with a JUnit report | PR, on demand `all`/`unit` |
-| e2e | `smoke.js` and `edge.js` in parallel; failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
+| e2e | `smoke.js` and `edge.js` in parallel, `edge.js` running 3 blocks at a time (`E2E_JOBS=3`); failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
 | coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | on demand `all`/`coverage` (run `npm run coverage` locally for new UI code) |
 | screenshots | regenerates `docs/screenshots` and uploads them (nothing committed) | on demand `screenshots` |
 | version-bump | a script change must raise `@version` | PR |

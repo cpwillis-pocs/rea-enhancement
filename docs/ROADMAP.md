@@ -2,7 +2,7 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.23.0)
+## Where it stands (v2.24.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
@@ -13,9 +13,9 @@ The project went from a single-purpose availability-date filter (1.0.0) to a ful
 | **Deciding** | Shortlist across searches with notes, checklist, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text. |
 | **Inspecting** | Inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders, after-inspection prompts, cancelled-inspection notices. |
 | **Returning** | Remembered and pinned searches with new / gone listings, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
-| **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload) or expanded near full screen. Full keyboard control, dark mode, phone layout, screen-reader labels, badges and quick actions on REA's own cards, a bar on listing pages. |
-| **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>`, drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a one-time what's-new note after updates. |
-| **Project** | 165 unit tests, 51 e2e scenario blocks plus a smoke flow (`E2E_JOBS=4` runs the edge suite in about half the time), 98%+ UI line coverage, a lint for privacy and storage rules, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Full keyboard control, dark mode, phone layout, screen-reader labels, badges and quick actions on REA's own cards, a bar on listing pages. |
+| **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a one-time what's-new note after updates. |
+| **Project** | 165 unit tests, 53 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -46,14 +46,13 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 
 ## Ideas not built yet
 
-All six ideas from the previous list were built in 2.23.0: keep my place across reloads, cards without `<article>`, `reaFilter.shape()`, the `build()` split (941 → 713 lines: `panelHtml()`, `wireResize()`, `wirePeek()`), parallel e2e (`E2E_JOBS`), and finer text understanding. Smaller follow-ups that remain, none needing new permissions or non-REA network access:
+Nothing is queued. Everything from the audits that fits the project's constraints has been built, or appears under "Decisions already taken" above. The last round (2.24.0):
+- a banner when REA's result cards can't be recognised;
+- the Shortlist tab keeping your place across reloads;
+- keyboard and list-click wiring moved out of `build()`, now 537 lines, down from 941 two releases ago;
+- CI running the edge browser tests three blocks at a time.
 
-1. **Warn when no cards are recognised.** `selfcheck()` reports `cards: 0 found (none)`, but there is no banner. It needs care: on a slow page the cards arrive after the script starts.
-2. **Keep my place in the Shortlist tab across reloads.** Results remember the listing you were on; the Shortlist tab only keeps its place while the page is open.
-3. **Split `build()` further.** Keyboard handling and the list's click delegation share closure state (`fields`, `read`/`write`, `onChange`, the press deferral), so they need explicit parameters to move out.
-4. **Use `E2E_JOBS` in CI.** It would shorten the e2e job, but local runs are the proving ground for now. CI keeps one block at a time for easier failure reading.
-
-When you build one, move it into the CHANGELOG, update this page, and add its e2e block number to [ARCHITECTURE.md](ARCHITECTURE.md#tests-at-a-glance).
+New ideas are welcome as issues. Check the decisions and limitations above first, then add an entry here with its value, size and risk before building it.
 
 ## Releasing
 

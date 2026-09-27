@@ -41,7 +41,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
 - **Expand** (⤢ in the drawer's header, or e): near full screen, with the filters in a left column and results in a grid of cards; remembered until you shrink it again. Or drag the drawer's left edge to any width (two results per row from 760px).
 - **Compact list** (Settings, or d): small photos and the key facts, about twice as many listings on screen.
-- **Back where you were**: reload the page or come back to the search and the drawer opens on the listing you were on (same filters and sort).
+- **Back where you were**: reload the page or come back to the search and the drawer opens on the listing you were on (same filters and sort); the Shortlist tab does the same.
 - **Photo peek**: p or Space (or hover a thumbnail) shows a large photo; j/k flip through listings with it open.
 - **Reviewed**: going past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed; **Not reviewed yet** (More filters) and "reviewed 34 of 150" in the status line keep your place across visits.
 - **Hidden for the price?** Give "price" as the reason and the listing comes back, tagged "$110 cheaper since you hid it", if its rent drops. Reasons can be set or changed later from a hidden listing's ⋯ menu.
@@ -95,7 +95,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ## When REA changes something
 
-REA's data format is undocumented and changes. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, or a field is always empty, open DevTools on a results page and run:
+REA's data format is undocumented and changes. If the badges on REA's cards stop appearing, the drawer shows a banner saying the cards weren't recognised. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, or a field is always empty, open DevTools on a results page and run:
 
 ```js
 reaFilter.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue

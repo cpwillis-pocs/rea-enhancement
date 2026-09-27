@@ -9,7 +9,7 @@ The userscript is a single IIFE with `@grant none` and no dependencies. A `typeo
 | Half | Contents | Tested by |
 |---|---|---|
 | **Pure** (above the guard) | Parsing REA's page data, text heuristics, filters and sorts, medians, route planning, exports (CSV/TSV/ICS/print), share links, and the storage stores (`rowStore`, `marksStore`, `snapshotStore`, `presetStore`, `healthStore`) with an injectable `storage` and clock. Exported with `module.exports`. | `test/*.test.js` (node:test) |
-| **UI** (below the `// ----- ui` marker) | The drawer (`panelHtml()` is its markup; `build()` wires it, with `wireResize()` and `wirePeek()` split out), REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
+| **UI** (below the `// ----- ui` marker) | The drawer (`panelHtml()` is its markup; `build()` wires it, with `wireKeys()`, `wireList()`, `wireResize()` and `wirePeek()` split out), REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
 
 New logic goes in the pure half wherever possible, with a unit test.
 
@@ -22,7 +22,7 @@ New logic goes in the pure half wherever possible, with a unit test.
 5. **Adopt.** `adopt` decorates rows with your marks, then works out suburb-scoped medians (`withMedians`) and building groups (`withBuildings`), and compares against the remembered snapshot (new / gone).
 6. **Show.** `applyFilters` (`filterRows` + `withScores` + `sorter`) drives `render`. It renders 50 at a time (`RENDER_CHUNK`) with an IntersectionObserver whose root is whatever scrolls: the drawer in side mode, the list when expanded. `annotate` badges REA's own cards and can fade the ones that don't match.
 
-REA's DOM is only ever appended to: one `.rf-badge` per result card and `data-rf-*` attributes. Cards are REA's `<article>`s. If there are none, `cardsOnPage` climbs from each `/property-` link to the largest ancestor that still holds only that listing (`selfcheck()` reports which way it found them). The badge CSS resets host styles and uses `!important`, because REA's stylesheets can load after ours.
+REA's DOM is only ever appended to: one `.rf-badge` per result card and `data-rf-*` attributes. Cards are REA's `<article>`s. If there are none, `cardsOnPage` climbs from each `/property-` link to the largest ancestor that still holds only that listing (`selfcheck()` reports which way it found them). If a list page has listings but no card can be recognised for 8 seconds, the drawer shows a warning banner. The badge CSS resets host styles and uses `!important`, because REA's stylesheets can load after ours.
 
 ## Storage
 
@@ -37,7 +37,7 @@ All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces 
 | `health/v1` | localStorage | Moving average of how often each field is filled, for drift warnings | none |
 | `rows/<search>` | sessionStorage | This tab's results cache, versioned by `ROWS_VERSION` | 2 searches, 10 minutes |
 | `preset-visit`, `preset-prev/v1` | sessionStorage | "Bound preset applies once per visit", and the filters it replaced | none |
-| `place` | sessionStorage | Per search: the listing you were on, how many were shown, and the filters it applies to | 10 searches |
+| `place` | sessionStorage | Per search (and one for the Shortlist tab): the listing you were on, how many were shown, and the filters it applies to | 10 entries |
 | `lbar-min`, `wide`, `width`, `seen-version`, `remind-at` | localStorage | Listing bar minimised, expanded drawer, drawer width, last what's-new version, saved-search reminder time | none |
 
 A failed write of something you chose (marks, settings, presets) goes to `writeState`, and the UI shows a "storage full" banner until a later write succeeds.
@@ -90,6 +90,6 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 ## Tests at a glance
 
 - **Unit:** `test/*.test.js` (165 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
-- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (51 blocks, numbered 1–37 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`).
+- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (53 blocks, numbered 1–39 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files, and CI holds it at 98% or more.
 - **Lint:** `test/lint.js` enforces the project rules, and `test/lint.test.js` checks the lint itself.

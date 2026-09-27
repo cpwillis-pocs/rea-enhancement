@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.24.0
+
+- The **Shortlist** tab also reopens on the listing you were on after a reload (as long as its status filter and search box are the same).
+- If REA changes its result cards so the script can't find them, the drawer now says so ("badges and card buttons are off; the drawer still works") instead of the badges quietly disappearing.
+- Internals: keyboard handling and the list's click handling moved out of `build()` (now 537 lines, from 941 two releases ago). CI runs the edge browser tests three at a time.
+
 ## 2.23.0
 
 - **Back where you were**: reloading the page or coming back to a search opens the drawer on the listing you were on, as long as the filters and sort are the same (a different list starts at the top).
