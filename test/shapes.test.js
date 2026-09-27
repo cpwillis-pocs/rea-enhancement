@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 require('./clock');
 const core = require('../rea-availability-filter.user.js');
-const { results, listingFromShape } = require('./helpers');
+const { results, listingFromShape, shapeDiff } = require('./helpers');
 
 const DIR = path.join(__dirname, 'shapes');
 const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.json')).sort();
@@ -31,3 +31,13 @@ for (const f of files) {
     assert.ok(Object.values(probed).some((v) => v !== '(missing)'), 'probe finds known paths');
   });
 }
+
+test('shapeDiff: paths added, removed and changed kind (lengths of text ignored)', () => {
+  const a = { price: { display: '$750 per week' }, id: 'string(9)', media: { images: ['url', '(3 items)'] }, old: 'number' };
+  const b = { price: { display: '$700 per week' }, id: 'string(12)', media: { images: [] }, fresh: 'boolean' };
+  const d = shapeDiff(a, b);
+  assert.deepEqual(d.added, ['fresh']);
+  assert.deepEqual(d.removed, ['old']);
+  assert.deepEqual(d.changed, ['media.images[]: url -> empty']);
+  assert.deepEqual(shapeDiff(a, a), { added: [], removed: [], changed: [] });
+});

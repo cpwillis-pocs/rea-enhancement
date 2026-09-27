@@ -15,6 +15,8 @@ try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm
 
 const URL_ = process.env.LIVE_URL || 'https://www.realestate.com.au/rent/in-bondi,+nsw+2026/list-1';
 const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'rea-availability-filter.user.js'), 'utf8');
+const { shapeDiff } = require('./helpers');
+const { PROBE_PATHS } = require('../rea-availability-filter.user.js');
 const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something REA changed is worth a look
 
 (async () => {
@@ -45,9 +47,22 @@ const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something RE
     if (process.env.LIVE_SAVE !== '0') {
       const shape = JSON.parse(await page.evaluate(() => window.reaFilter.shape()));
       const fill = Object.keys(rates).filter((k) => rates[k] === 1 && ['availability', 'price', 'photos', 'agency'].includes(k));
-      const file = path.join(__dirname, 'shapes', `live-${new Date().toISOString().slice(0, 10)}.json`);
-      fs.writeFileSync(file, `${JSON.stringify({ note: `npm run live on ${URL_.replace(/\?.*/, '')}`, expect: { fill }, ...shape }, null, 1)}\n`);
-      console.log(`shape saved: ${path.relative(process.cwd(), file)} (check it has nothing personal before committing)`);
+      // Compare with the newest saved shape: save only when REA's structure moved, and fail when
+      // a path the script reads (PROBE_PATHS) has gone.
+      const dir = path.join(__dirname, 'shapes');
+      const last = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f, fs.statSync(path.join(dir, f)).mtimeMs]).sort((a, b) => b[1] - a[1])[0]?.[0];
+      const diff = last ? shapeDiff(JSON.parse(fs.readFileSync(path.join(dir, last), 'utf8')).listing, shape.listing) : null;
+      if (diff) {
+        console.log(`--- shape vs ${last}: ${diff.added.length} added, ${diff.removed.length} removed, ${diff.changed.length} changed`);
+        for (const [k, list] of Object.entries(diff)) for (const x of list.slice(0, 30)) console.log(`  ${k}: ${x}`);
+        const lost = PROBE_PATHS.filter((p) => diff.removed.some((r) => r === p || r.startsWith(`${p}.`) || r.startsWith(`${p}[]`)));
+        if (lost.length) problems.push(`paths the script reads are gone: ${lost.join(', ')}`);
+      }
+      if (!diff || diff.added.length || diff.removed.length || diff.changed.length) {
+        const file = path.join(dir, `live-${new Date().toISOString().slice(0, 10)}.json`);
+        fs.writeFileSync(file, `${JSON.stringify({ note: `npm run live on ${URL_.replace(/\?.*/, '')}`, expect: { fill }, ...shape }, null, 1)}\n`);
+        console.log(`shape saved: ${path.relative(process.cwd(), file)} (check it has nothing personal before committing)`);
+      } else console.log('shape unchanged since the last saved one: nothing saved');
     }
   } catch (e) {
     problems.push(`${e.message.split('\n')[0]}`);

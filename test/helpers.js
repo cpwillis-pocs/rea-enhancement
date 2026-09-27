@@ -69,4 +69,21 @@ const listingFromShape = (v, key = '', path = '') => {
   return v;
 };
 
-module.exports = { listing, results, exchange, page, memStorage, listingFromShape };
+// Paths in a shape and what each holds ("string(12)" and "string(9)" are both "string").
+const shapePaths = (v, pre = '', out = new Map()) => {
+  if (Array.isArray(v)) { if (v.length) shapePaths(v[0], `${pre}[]`, out); else out.set(`${pre}[]`, 'empty'); return out; }
+  if (v && typeof v === 'object') { for (const [k, x] of Object.entries(v)) shapePaths(x, pre ? `${pre}.${k}` : k, out); return out; }
+  out.set(pre, typeof v === 'string' ? v.replace(/^string\(\d+\)$/, 'string').replace(/^(?!url$|iso-date$|number$|boolean$|string$).*/, 'text') : String(v));
+  return out;
+};
+// Two reaFilter.shape() listings compared: paths added, removed, or holding another kind of value.
+const shapeDiff = (a, b) => {
+  const pa = shapePaths(a), pb = shapePaths(b);
+  return {
+    added: [...pb.keys()].filter((k) => !pa.has(k)).sort(),
+    removed: [...pa.keys()].filter((k) => !pb.has(k)).sort(),
+    changed: [...pa.keys()].filter((k) => pb.has(k) && pa.get(k) !== pb.get(k)).map((k) => `${k}: ${pa.get(k)} -> ${pb.get(k)}`).sort(),
+  };
+};
+
+module.exports = { listing, results, exchange, page, memStorage, listingFromShape, shapeDiff };
