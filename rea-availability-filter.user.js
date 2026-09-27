@@ -232,8 +232,12 @@
   // and keeps the rest of the stored summary.
   const mergeSummary = (old, next) => ({ ...(isObj(old) ? old : {}),
     ...Object.fromEntries(Object.entries(next).filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && !v.length))) });
+  // Stored and restored links are REA's and images REA's CDN only, so a crafted backup can't make
+  // the shortlist, Compare or a printout load anything from elsewhere.
+  const reaUrl = (u) => (/^https:\/\/www\.realestate\.com\.au\//.test(safeUrl(u)) ? u : '');
+  const reaImg = (u) => (/^https:\/\/([\w-]+\.)*reastatic\.net\//.test(safeUrl(u)) ? u : '');
   const summary = (r) => ({
-    u: safeUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: safeUrl(r.img),
+    u: reaUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: reaImg(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
     in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
@@ -304,7 +308,7 @@
   const agencyKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
-    url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
+    url: reaUrl(d.u), address: d.a, price: d.p, available: d.v, img: reaImg(d.i), type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
     inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
@@ -1134,8 +1138,15 @@
     return { until, trip(ms = PAUSE_MS) { const t = now() + ms; k.set(String(t)); return t; }, clear: () => k.clear() };
   };
 
+  // No page data: a bot check (a short interstitial, or one that says so) pauses fetching; a
+  // full-size REA page without it means REA changed its format, which pausing would only hide.
+  const CHALLENGE_WORDS = /captcha|verify (?:that )?you(?:'re| are) (?:a )?human|are you a robot|access denied|unusual traffic|just a moment|incapsula|kasada|perimeterx|cf-chl/i;
+  const FORMAT_MIN_CHARS = 20000; // REA's real pages are hundreds of KB; interstitials a few KB
+  const looksLikeFormatChange = (html) => String(html).length >= FORMAT_MIN_CHARS && !CHALLENGE_WORDS.test(html);
+  const formatChange = (msg) => Object.assign(new Error(msg), { format: true });
   function extractResults(html) {
     const m = html.match(EXCHANGE_RE);
+    if (!m && looksLikeFormatChange(html)) throw formatChange("REA's results page loaded, but its data isn't where the script reads it: REA may have changed its format.");
     if (!m) throw botCheck('Hydration blob missing - probably a bot-check interstitial. Reload the page and retry.');
     return parseExchange(JSON.parse(m[1]));
   }
@@ -1168,7 +1179,7 @@
     return null;
   }
   // -> { status: 'ok', listing } | { status: 'gone' } | { status: 'unknown' }
-  const EXCHANGE_RE = /window\.ArgonautExchange=(\{.*?\});?<\/script>/s;
+  const EXCHANGE_RE = /window\.ArgonautExchange\s*=\s*(\{.*?\})\s*;?\s*<\/script>/s; // spacing tolerated
   // What a fetched REA page is, for every fetcher alike: 'ok', 'gone' (removed, or bounced off
   // /property- for a listing), 'forbidden' (403) or 'rate' (429): bot checks; 'challenge': a 200
   // without REA's page data; 'error': anything else. A redirect off the listing is checked before
@@ -1179,7 +1190,7 @@
     if (listing && (status === 404 || status === 410)) return 'gone';
     if (listing && redirectedTo) { try { if (!/\/property-/.test(new URL(redirectedTo).pathname)) return 'gone'; } catch { return 'gone'; } }
     if (status < 200 || status >= 300) return 'error';
-    return EXCHANGE_RE.test(html) ? 'ok' : 'challenge';
+    return EXCHANGE_RE.test(html) ? 'ok' : looksLikeFormatChange(html) ? 'format' : 'challenge';
   };
   const BOT_KINDS = new Set(['forbidden', 'rate', 'challenge']);
   function parseListingPage(html, id, { status = 200, redirectedTo = '' } = {}) {
@@ -3112,7 +3123,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   let runId = 0; // bumped on navigation so an in-flight run can't write stale rows
   let ui = null;
 
-  const exchangeScript = () => [...document.scripts].find((sc) => sc.textContent.includes('window.ArgonautExchange='));
+  const exchangeScript = () => [...document.scripts].find((sc) => /window\.ArgonautExchange\s*=/.test(sc.textContent));
 
   // The document we were loaded with already holds one page of results; after SPA
   // navigation it is stale, which the key/page match in fetchAllPages guards against.
@@ -4300,6 +4311,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         }
         // A 403, a second 429, or a page with no data that isn't a removed listing stops everything.
         const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
+        if (kind === 'format') formatWarn("A listing page loaded, but its data isn't where the script reads it: REA may have changed its format.");
         if (BOT_KINDS.has(kind)) {
           tripPause(botCheck(`Re-check: ${kind === 'challenge' ? 'challenge page' : `HTTP ${res.status}`}`));
           throw pausedErr(pause.until());
@@ -4533,7 +4545,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (msg) warnings[kind] = msg; else delete warnings[kind];
     const text = Object.values(warnings).join(' ');
     ui.warnbar.hidden = !text || ui.warnDismissed === text;
-    ui.warnbar.querySelector('.rf-report').hidden = !(warnings.drift || warnings.cards || warnings.schema);
+    ui.warnbar.querySelector('.rf-report').hidden = !(warnings.drift || warnings.cards || warnings.schema || warnings.format);
     ui.warnbar.querySelector('.rf-warn-msg').textContent = text;
   };
   const setStatus = (msg, isErr) => {
@@ -5074,7 +5086,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     clearTimeout(pauseTimer);
     if (t) pauseTimer = setTimeout(showPause, t - Date.now() + 1000);
   };
-  const tripPause = (e) => { if (!e?.botCheck) return; pause.trip(); logError(`paused: ${e.message}`); showPause(); };
+  const tripPause = (e) => {
+    if (e?.format) return formatWarn(e.message);
+    if (!e?.botCheck) return;
+    pause.trip(); logError(`paused: ${e.message}`); showPause();
+  };
+  // A page that loaded but has no data where the script reads it: say so (with Copy report)
+  // rather than pause, which would look like a bot check and never get reported.
+  const formatWarn = (msg) => { logError(`format: ${msg}`); setWarn('format', `${msg} Copy report, then paste it into an issue on the script's GitHub page.`); };
   const getPage = (url, opts) => {
     const hit = pageMemo.get(url);
     // An entry whose run was aborted is about to reject; don't hand it to a new caller.
@@ -5234,6 +5253,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           const html = res.ok ? await res.text() : '';
           const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
           if (BOT_KINDS.has(kind)) tripPause(botCheck(`listing page: ${kind}`));
+          if (kind === 'format') formatWarn("This listing page's data isn't where the script reads it: REA may have changed its format.");
           return kind === 'ok' ? html : '';
         })
         .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })

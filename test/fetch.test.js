@@ -170,3 +170,15 @@ test('classifyPage: one answer for every fetcher, a removed listing is not a bot
   assert.equal(t({ status: 200, html: '<main>home</main>', redirectedTo: 'https://www.realestate.com.au/', listing: true }), 'gone', 'bounced to the home page: removed');
   assert.equal(t({ status: 200, html: '<html>x</html>', redirectedTo: 'https://www.realestate.com.au/property-unit-nsw-bondi-1', listing: true }), 'challenge');
 });
+
+test('format change vs bot check: spacing is tolerated, a full REA page without data is a format change, an interstitial is a bot check', () => {
+  const spaced = page(results({ exact: [listing()] })).replace('window.ArgonautExchange=', 'window.ArgonautExchange = ');
+  assert.equal(core.classifyPage({ html: spaced }), 'ok');
+  assert.equal(core.extractResults(spaced).exact.items.length, 1);
+  const big = `<html><head><title>Rent in Bondi</title></head><body>${'<div class="card">listing</div>'.repeat(1000)}<script>window.__NEXT_DATA__={}</script></body></html>`;
+  assert.equal(core.classifyPage({ html: big }), 'format');
+  assert.throws(() => core.extractResults(big), (e) => e.format === true && !e.botCheck);
+  assert.equal(core.classifyPage({ html: '<html>Please verify you are human</html>' }), 'challenge');
+  assert.equal(core.classifyPage({ html: `${big}<p>Please complete the CAPTCHA</p>` }), 'challenge', 'a big page that says it is a check');
+  assert.throws(() => core.extractResults('<html>x</html>'), (e) => e.botCheck === true);
+});

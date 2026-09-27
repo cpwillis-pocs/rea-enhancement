@@ -1811,6 +1811,27 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 54. A format change isn't a bot check: page 2 with spaces around the "=" still reads; page 3
+  // as a full-size page with no data shows the format warning with Copy report, and nothing pauses.
+  await block('54', async () => {
+    const ctx = await browser.newContext();
+    const base = serve([], { pages: 3 });
+    const page = await open(ctx, SEARCH, { route: async (route) => {
+      const u = route.request().url();
+      if (/list-2/.test(u)) return route.fulfill({ status: 200, contentType: 'text/html', body: reaPage(2, { pages: 3 }).replace('window.ArgonautExchange=', 'window.ArgonautExchange = ') });
+      if (/list-3/.test(u)) return route.fulfill({ status: 200, contentType: 'text/html', body: `<html><body>${'<div class="card">listing</div>'.repeat(1000)}</body></html>` });
+      return base(route);
+    } });
+    await page.click('#rf-launch'); await page.click('#rf-run');
+    await page.waitForSelector('.rf-partial:not([hidden])');
+    assert.match(await page.textContent('.rf-partial'), /Read 2 of 3 pages/, 'page 2 with a spaced blob was read');
+    assert.match(await page.textContent('.rf-warn-msg'), /may have changed its format/);
+    assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
+    assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/paused')), null, 'not a bot check: nothing paused');
+    console.log('format change vs bot check: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

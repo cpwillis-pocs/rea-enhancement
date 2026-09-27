@@ -666,3 +666,14 @@ test('rating: 1-5 on a listing, the same number again clears it, and it survives
   assert.equal(bad.shortlist()[0].rating, 0, 'out of range is dropped');
   assert.ok(core.toCsv([{ ...m.shortlist()[0], rating: 2 }]).split(/\r?\n/)[0].includes('my_rating'));
 });
+
+test('a backup cannot point the shortlist at another site: links must be REA, images REA\'s CDN', () => {
+  const m = core.marksStore(mem());
+  m.importJson({ app: 'rea-enhancement', kind: 'marks', m: {
+    146500001: { s: 1, d: { u: 'https://evil.example/x', i: 'https://x.example/p.png', a: 'a' } },
+    146500002: { s: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500002', i: 'https://i2.au.reastatic.net/345x260/a.jpg', a: 'b' } },
+  } });
+  const rows = Object.fromEntries(m.shortlist().map((r) => [r.id, [r.url, r.img]]));
+  assert.deepEqual(rows['146500002'], ['https://www.realestate.com.au/property-unit-nsw-bondi-146500002', 'https://i2.au.reastatic.net/345x260/a.jpg']);
+  assert.equal(rows['146500001'], undefined, 'no REA link: not shown at all');
+});
