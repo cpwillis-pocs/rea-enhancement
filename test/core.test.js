@@ -639,6 +639,25 @@ test('lease fit: overlap cost, gap nights, sort', () => {
   assert.deepEqual(core.applyFilters(rows, { ...core.DEFAULT_CFG, leaseEnd: '2026-10-10', sort: 'fit' }, now).map((r) => r.id), ['exact', 'over', 'gap']);
 });
 
+test('cash to move: move-in plus the overlap; sort puts unknowns last; CSV and Compare carry it', () => {
+  const now = new Date(2026, 8, 23);
+  const rows = [
+    { id: 'over', url: 'a', avail: new Date(2026, 9, 5), priceNum: 700, upfront: 3500 }, // 6 days overlap = 600
+    { id: 'gap', url: 'b', avail: new Date(2026, 9, 20), priceNum: 700, upfront: 3900 },
+    { id: 'unknown', url: 'c', avail: new Date(2026, 9, 20), priceNum: 700 },
+  ];
+  const cfg = { ...core.DEFAULT_CFG, leaseEnd: '2026-10-10', sort: 'cash' };
+  const out = core.applyFilters(rows, cfg, now);
+  assert.deepEqual(out.map((r) => r.id), ['gap', 'over', 'unknown']);
+  assert.equal(core.cashToMove(out[1]), 4100);
+  assert.equal(core.cashToMove(out[2]), null);
+  assert.deepEqual(core.applyFilters(rows, { ...cfg, sortDesc: true }, now).map((r) => r.id), ['over', 'gap', 'unknown'], 'reversed: unknown still last');
+  const [head, line] = core.toCsv([out[1]]).split('\n');
+  assert.equal(line.split(',')[head.split(',').indexOf('cash_to_move')], '4100');
+  assert.match(core.compareHtml(out.slice(0, 2), cfg), /Cash to move<\/th><td class="rf-best">\$3,900<\/td><td>\$4,100/);
+  assert.doesNotMatch(core.compareHtml(out.slice(0, 2), { ...cfg, leaseEnd: '' }), /Cash to move/, 'only with a lease end (else it is Move-in)');
+});
+
 test('building filter matches the building exactly (2 Hall St is not 12 Hall St)', () => {
   const rows = [{ id: '1', url: 'a', address: '5/2 Hall St, Bondi NSW 2026' }, { id: '2', url: 'b', address: '3/12 Hall St, Bondi NSW 2026' }, { id: '3', url: 'c', address: '9/2 Hall St, Bondi NSW 2026' }];
   const key = core.buildingKey(rows[0].address);

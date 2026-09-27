@@ -42,3 +42,34 @@ test('shapeDiff: paths added, removed and changed kind (lengths of text ignored)
   assert.deepEqual(d.changed, ['media.images[]: url -> empty']);
   assert.deepEqual(shapeDiff(a, a), { added: [], removed: [], changed: [] });
 });
+
+// One REA rename or type change should blank one field, not lose the row: for every path the
+// script reads, delete it or give it the wrong kind of value, and the listing must still parse.
+const KEEP = new Set(['id', '_links.canonical.href']);
+const mutate = (obj, p, fn) => {
+  const keys = p.split('.'), last = keys.pop();
+  const parent = keys.reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), obj);
+  if (!parent || typeof parent !== 'object' || !(last in parent)) return false;
+  fn(parent, last);
+  return true;
+};
+for (const f of files) {
+  test(`shape ${f}: each read path can go missing or change kind without losing the row`, () => {
+    const shape = JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8'));
+    let tried = 0;
+    for (const p of core.PROBE_PATHS.filter((x) => !KEEP.has(x))) {
+      for (const [what, fn] of [['missing', (o, k) => delete o[k]], ['a number', (o, k) => { o[k] = 7; }], ['null', (o, k) => { o[k] = null; }],
+        ['text', (o, k) => { o[k] = 'x'; }], ['an object', (o, k) => { o[k] = { x: 1 }; }]]) {
+        const listing = listingFromShape(shape.listing);
+        if (!mutate(listing, p, fn)) continue;
+        tried++;
+        let row;
+        assert.doesNotThrow(() => { [row] = core.rowsFrom(results({ exact: [listing] })); }, `${p} as ${what}`);
+        assert.ok(row, `${p} as ${what}: still a row`);
+        assert.match(row.id, /^\d{6,}$/, `${p} as ${what}: keeps its id`);
+        assert.match(row.url, /^https:\/\/www\.realestate\.com\.au\//, `${p} as ${what}: keeps its link`);
+      }
+    }
+    assert.ok(tried > 20, `mutated ${tried} paths`);
+  });
+}
