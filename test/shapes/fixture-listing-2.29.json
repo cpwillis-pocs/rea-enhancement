@@ -1,0 +1,57 @@
+{
+ "note": "Synthetic baseline for property pages: the e2e fixture listing page, as reaFilter.shape() prints it there. Real ones come from npm run live.",
+ "expect": {
+  "fill": [
+   "availability",
+   "price"
+  ],
+  "row": {
+   "available": "12 Oct 2026",
+   "priceNum": 999
+  }
+ },
+ "script": "2.29.0",
+ "kind": "listing",
+ "listing": {
+  "_links": {
+   "canonical": {
+    "href": "url"
+   }
+  },
+  "address": {
+   "display": {
+    "fullAddress": "string(26)"
+   },
+   "suburb": "string(5)"
+  },
+  "availableDate": {
+   "display": "Available 12 Oct 2026"
+  },
+  "bond": {
+   "display": "$3,000"
+  },
+  "generalFeatures": {
+   "bathrooms": {
+    "value": "number"
+   },
+   "bedrooms": {
+    "value": "number"
+   },
+   "parkingSpaces": {
+    "value": "number"
+   }
+  },
+  "id": "string(9)",
+  "media": {
+   "mainImage": {
+    "templatedUrl": "url"
+   }
+  },
+  "price": {
+   "display": "$999 per week"
+  },
+  "propertyType": {
+   "display": "Apartment"
+  }
+ }
+}

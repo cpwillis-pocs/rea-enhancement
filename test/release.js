@@ -39,6 +39,13 @@ write('docs/ARCHITECTURE.md', read('docs/ARCHITECTURE.md')
   .replace(/\(\d+ tests\)/, `(${unit} tests)`)
   .replace(/\(\d+ blocks, numbered 1–\d+/, `(${blocks} blocks, numbered 1–${top}`));
 
+// Drift checks are only as good as the shapes they compare against: say when there is no real
+// one (from npm run live) or the newest is old.
+const SHAPE_MAX_DAYS = 60;
+const live = fs.readdirSync(path.join(root, 'test/shapes')).map((f) => f.match(/^live-(?:listing-)?(\d{4}-\d{2}-\d{2})\.json$/)?.[1]).filter(Boolean).sort();
+const shapeNote = !live.length ? 'no real shape saved yet: run npm run live and commit what it saves'
+  : (Date.now() - Date.parse(live.at(-1))) / 864e5 > SHAPE_MAX_DAYS ? `the newest real shape is from ${live.at(-1)}: run npm run live` : '';
+if (shapeNote) console.warn(`release: warning: ${shapeNote}`);
 console.log(`release: ${cur} -> ${next}; ${unit} unit tests, ${blocks} e2e blocks (1–${top}).
 Still to do:
   1. Write the CHANGELOG.md section (a "- " stub is there).

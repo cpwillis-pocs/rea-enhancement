@@ -3208,6 +3208,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const guard = (name, fn) => function guarded(...args) { try { return fn.apply(this, args); } catch (e) { noteError(name, e); return undefined; } };
   const presets = presetStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
+  let rawListingSample = null; // a property page's listing, for shape() there (it is shaped differently)
 
   // The drawer's markup. Only module constants go in, so it is built once and wired up by build().
   const panelHtml = () => `
@@ -5221,9 +5222,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (!isObj(ex)) {
       const tag = exchangeScript();
       ex = tag ? parseListingPage(tag.outerHTML, id).listing ?? null : null;
-      if (ex) return safeRow(ex, false);
+      if (ex) { rawListingSample = ex; return safeRow(ex, false); }
     }
     const l = ex ? findListing(unpackJson(ex), id) : null;
+    if (l) rawListingSample = l;
     return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: '', price: '', inspections: [], partial: true };
   }
   // Minimised state is remembered: the bar can sit over REA's own buttons on small screens.
@@ -5332,7 +5334,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           if (kind === 'format') formatWarn("This listing page's data isn't where the script reads it: REA may have changed its format.");
           return kind === 'ok' ? html : '';
         })
-        .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
+        .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok') rawListingSample = out.listing; if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
         .catch(() => {}).finally(() => { if (bar._fetching === id) bar._fetching = null; if (bar.dataset.id !== id && bar._row?.partial) renderListingBar(); });
     }
   }
@@ -5652,7 +5654,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return report;
   };
   // Paste-safe structure of one listing (no descriptions, names or addresses) for issues.
-  const shapeText = () => (rawSample ? JSON.stringify({ script: window.reaFilter.version, resultsPath: `${resultsPath.key}.${resultsPath.field}`, listing: shapeOf(rawSample) }, null, 1) : '');
+  // A search's listing, or on a property page that page's (kind: "listing"): REA shapes them differently.
+  const shapeText = () => {
+    const onListing = isListingPage(location.href) && rawListingSample;
+    const l = onListing ? rawListingSample : rawSample;
+    return l ? JSON.stringify({ script: window.reaFilter.version, kind: onListing ? 'listing' : 'search', ...(onListing ? {} : { resultsPath: `${resultsPath.key}.${resultsPath.field}` }), listing: shapeOf(l) }, null, 1) : '';
+  };
   // Both, for the Copy report buttons: what an "REA data format changed" issue asks for.
   const reportText = () => [selfcheckText(), shapeText()].filter(Boolean).join('\n\nlisting shape:\n');
   window.reaFilter = {

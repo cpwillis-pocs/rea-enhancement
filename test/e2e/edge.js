@@ -807,6 +807,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const stored = await marks(page).then((m) => m['146500101']);
     assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
+    const lshape = JSON.parse(await page.evaluate(() => window.reaFilter.shape()));
+    assert.equal(lshape.kind, 'listing', 'shape() on a property page is that listing');
+    assert.ok(!/Test St|Bondi, NSW/.test(JSON.stringify(lshape)) && /per week/.test(JSON.stringify(lshape)));
     // Checklist and details, folded until opened; a chip cycles its item and stays open.
     await page.click('#rf-lbar .rf-lbar-more summary');
     assert.match(await page.textContent('#rf-lbar .rf-lbar-more .rf-lbar-info'), /move-in \$/);

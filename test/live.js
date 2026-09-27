@@ -49,20 +49,45 @@ const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something RE
       const fill = Object.keys(rates).filter((k) => rates[k] === 1 && ['availability', 'price', 'photos', 'agency'].includes(k));
       // Compare with the newest saved shape: save only when REA's structure moved, and fail when
       // a path the script reads (PROBE_PATHS) has gone.
-      const dir = path.join(__dirname, 'shapes');
-      const last = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f, fs.statSync(path.join(dir, f)).mtimeMs]).sort((a, b) => b[1] - a[1])[0]?.[0];
+      const saved = saveShape('search', shape, fill);
+      if (saved) problems.push(...saved);
+    }
+    // One listing page too: the listing bar, Re-check and the shortlist copy read those, and REA
+    // shapes them differently from search results.
+    const first = await page.$eval('.rf-item a.rf-card', (a) => a.href).catch(() => '');
+    if (!first) problems.push('no listing to open');
+    else {
+      await page.goto(first, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+      await page.addScriptTag({ content: SCRIPT });
+      await page.waitForSelector('#rf-lbar', { timeout: 15000 });
+      await page.waitForFunction(() => !document.getElementById('rf-lbar')._row?.partial, null, { timeout: 30000 }).catch(() => {});
+      const bar = await page.evaluate(() => { const r = document.getElementById('rf-lbar')._row || {}; return { partial: !!r.partial, price: r.price, available: r.available }; });
+      console.log(`--- listing page ${first.replace(/\?.*/, '')}: ${JSON.stringify(bar)}`);
+      if (bar.partial || !bar.price) problems.push('listing page not read (the listing bar has no price)');
+      if (process.env.LIVE_SAVE !== '0') {
+        const raw = await page.evaluate(() => window.reaFilter.shape());
+        if (/^\{/.test(raw)) { const saved = saveShape('listing', JSON.parse(raw), bar.price ? ['price'] : []); if (saved) problems.push(...saved); }
+        else problems.push('shape() found no listing on the listing page');
+      }
+    }
+    function saveShape(kind, shape, fill) {
+      const dir = path.join(__dirname, 'shapes'), out = [];
+      const ofKind = (f) => { try { return (JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).kind || 'search') === kind; } catch { return false; } };
+      const last = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && ofKind(f)).map((f) => [f, fs.statSync(path.join(dir, f)).mtimeMs]).sort((a, b) => b[1] - a[1])[0]?.[0];
       const diff = last ? shapeDiff(JSON.parse(fs.readFileSync(path.join(dir, last), 'utf8')).listing, shape.listing) : null;
       if (diff) {
         console.log(`--- shape vs ${last}: ${diff.added.length} added, ${diff.removed.length} removed, ${diff.changed.length} changed`);
         for (const [k, list] of Object.entries(diff)) for (const x of list.slice(0, 30)) console.log(`  ${k}: ${x}`);
         const lost = PROBE_PATHS.filter((p) => diff.removed.some((r) => r === p || r.startsWith(`${p}.`) || r.startsWith(`${p}[]`)));
-        if (lost.length) problems.push(`paths the script reads are gone: ${lost.join(', ')}`);
+        if (lost.length) out.push(`${kind}: paths the script reads are gone: ${lost.join(', ')}`);
       }
       if (!diff || diff.added.length || diff.removed.length || diff.changed.length) {
-        const file = path.join(dir, `live-${new Date().toISOString().slice(0, 10)}.json`);
+        const file = path.join(dir, `live-${kind === 'listing' ? 'listing-' : ''}${new Date().toISOString().slice(0, 10)}.json`);
         fs.writeFileSync(file, `${JSON.stringify({ note: `npm run live on ${URL_.replace(/\?.*/, '')}`, expect: { fill }, ...shape }, null, 1)}\n`);
         console.log(`shape saved: ${path.relative(process.cwd(), file)} (check it has nothing personal before committing)`);
-      } else console.log('shape unchanged since the last saved one: nothing saved');
+      } else console.log(`${kind} shape unchanged since the last saved one: nothing saved`);
+      return out;
     }
   } catch (e) {
     problems.push(`${e.message.split('\n')[0]}`);
