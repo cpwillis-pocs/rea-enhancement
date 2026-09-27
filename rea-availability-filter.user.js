@@ -47,6 +47,7 @@
   const RETRY_BASE_MS = 1000;
   const RETRY_AFTER_MAX_S = 60;
   const FETCH_TIMEOUT_MS = 20000;
+  const PAUSE_MS = 10 * 60 * 1000; // after a bot check, nothing is fetched for this long
   const ANNOTATE_DEBOUNCE_MS = 120;
   const ANNOTATE_MAX_WAIT_MS = 500;
   const KNOWN_MAX = 2000;
@@ -998,9 +999,18 @@
     throw new Error('No rentSearch results found in cache.');
   }
 
+  // A refusal that looks like REA's bot protection: the caller pauses all fetching (pauseGate).
+  const botCheck = (msg) => Object.assign(new Error(msg), { botCheck: true });
+  // sessionStorage `paused` = when fetching may resume. Per tab, so a new tab can try again.
+  const pauseGate = (storage, now = () => Date.now()) => {
+    const k = keyStore(storage, `${TOOL_PREFIX}paused`);
+    const until = () => { const t = +k.get() || 0; return t > now() ? t : 0; };
+    return { until, trip(ms = PAUSE_MS) { const t = now() + ms; k.set(String(t)); return t; }, clear: () => k.clear() };
+  };
+
   function extractResults(html) {
     const m = html.match(EXCHANGE_RE);
-    if (!m) throw new Error('Hydration blob missing - probably a bot-check interstitial. Reload the page and retry.');
+    if (!m) throw botCheck('Hydration blob missing - probably a bot-check interstitial. Reload the page and retry.');
     return parseExchange(JSON.parse(m[1]));
   }
 
@@ -1546,12 +1556,13 @@
       signal?.throwIfAborted();
       const retryable = err || res.status === 429 || res.status >= 500;
       if (!retryable) {
+        if (res.status === 403) throw botCheck(`REA refused the request (HTTP 403) - probably a bot check.`);
         if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
         return extractResults(await res.text());
       }
       if (attempt >= RETRIES) {
-        throw new Error(err ? `Network error: ${err.name === 'TimeoutError' ? 'timed out' : err.message}` :
-          res.status === 429 ? 'Rate limited by REA (HTTP 429) - wait a minute and retry.' : `HTTP ${res.status} from ${url}`);
+        if (err) throw new Error(`Network error: ${err.name === 'TimeoutError' ? 'timed out' : err.message}`);
+        throw res.status === 429 ? botCheck('Rate limited by REA (HTTP 429), even after waiting - probably a bot check.') : new Error(`HTTP ${res.status} from ${url}`);
       }
       const after = Math.min(+res?.headers?.get?.('Retry-After') || 0, RETRY_AFTER_MAX_S);
       const ms = after > 0 ? after * 1000 : jitter(RETRY_BASE_MS * 2 ** attempt);
@@ -2326,7 +2337,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, pauseGate, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3758,6 +3769,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const tally = { ok: 0, gone: 0, unknown: 0 };
     try {
       for (const [i, r] of rows.entries()) {
+        if (pause.until()) throw pausedErr(pause.until());
         setStatus(`Re-checking ${i + 1} of ${rows.length}…`);
         let res, html;
         try { // body read inside too: a reset mid-download is one unreadable listing, not the end
@@ -3767,6 +3779,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           if (ctrl.signal.aborted) throw err;
           tally.unknown++; continue;
         }
+        if (res.status === 403 || res.status === 429) { tripPause(botCheck(`Re-check: HTTP ${res.status}`)); throw pausedErr(pause.until()); }
         const out = parseListingPage(html, r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
         tally[out.status]++;
         if (out.status === 'gone') marks.setGone(r.id, true);
@@ -3775,8 +3788,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }
       refreshMarks();
       setStatus(`Re-checked ${rows.length < all.length ? `${rows.length} of ${all.length} (least recently seen)` : rows.length}: ${tally.ok} updated, ${tally.gone} no longer listed${tally.unknown ? `, ${tally.unknown} couldn't be read` : ''}.${rows.length < all.length ? ' Run again for the rest.' : ''}`);
-    } catch {
-      setStatus('Re-check stopped.');
+    } catch (err) {
+      refreshMarks();
+      setStatus(err?.paused ? `Re-check stopped after ${plural(tally.ok + tally.gone + tally.unknown, 'listing')}. ${err.message}` : 'Re-check stopped.', !!err?.paused);
     } finally {
       endJob(ctrl, btn);
     }
@@ -3812,8 +3826,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           res = await fetchAllPages(key, (m) => setStatus(`Checking ${label} (${i + 1} of ${keys.length}): ${m}`), {
             signal: ctrl.signal, getPage: (url) => getPage(url, { signal: ctrl.signal }),
           });
-        } catch (err) { // one failing search doesn't stop the rest
-          if (ctrl.signal.aborted || err?.name === 'AbortError') throw err;
+        } catch (err) { // one failing search doesn't stop the rest; a bot check stops them all
+          if (ctrl.signal.aborted || err?.name === 'AbortError' || err?.paused || err?.botCheck) throw err;
           logError(`saved ${label}: ${err.message}`);
           ui.savedResult.set(key, { error: true });
           out.push(`${label}: couldn't be read`);
@@ -4483,11 +4497,26 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // page is fetched once per ROWS_TTL_MS. Failures are evicted so they can be retried.
   const pageMemo = new Map();
   const memoFresh = (url) => { const hit = pageMemo.get(url); return !!hit && !hit.signal?.aborted && Date.now() - hit.at < ROWS_TTL_MS; };
+  // Bot check: every fetch (search, Check all, Re-check, card annotation) stops until PAUSE_MS
+  // has passed, so retrying doesn't make a block worse. Pages already read are still served.
+  const pause = pauseGate(storageOr('sessionStorage'));
+  let pauseTimer = 0;
+  const pauseMsg = (t) => `REA showed a bot check, so fetching is paused until ${dtf({ hour: 'numeric', minute: '2-digit' }).format(t)}. Browse REA normally for a while; the drawer still works on what's already read.`;
+  const pausedErr = (t) => Object.assign(new Error(`Paused: ${pauseMsg(t)}`), { paused: true });
+  const showPause = () => {
+    const t = pause.until();
+    setWarn('paused', t ? pauseMsg(t) : '');
+    clearTimeout(pauseTimer);
+    if (t) pauseTimer = setTimeout(showPause, t - Date.now() + 1000);
+  };
+  const tripPause = (e) => { if (!e?.botCheck) return; pause.trip(); logError(`paused: ${e.message}`); showPause(); };
   const getPage = (url, opts) => {
     const hit = pageMemo.get(url);
     // An entry whose run was aborted is about to reject; don't hand it to a new caller.
     if (hit && !hit.signal?.aborted && Date.now() - hit.at < ROWS_TTL_MS) return hit.p;
-    const p = fetchResults(url, opts).catch((e) => { if (pageMemo.get(url)?.p === p) pageMemo.delete(url); throw e; });
+    const until = pause.until();
+    if (until) return Promise.reject(pausedErr(until));
+    const p = fetchResults(url, opts).catch((e) => { if (pageMemo.get(url)?.p === p) pageMemo.delete(url); tripPause(e); throw e; });
     pageMemo.delete(url); // re-insert so Map order stays oldest-first for eviction
     pageMemo.set(url, { at: Date.now(), p, signal: opts?.signal });
     if (pageMemo.size > PAGE_MEMO_MAX) pageMemo.delete(pageMemo.keys().next().value);
@@ -4926,6 +4955,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (ui?.ready) { // only wire the rest if build() completed
     step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });
     step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
+    step('pause', showPause);
     step('navigation', watchNavigation);
     step('cards', watchCards);
     step('card actions', watchCardActions);

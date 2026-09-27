@@ -114,7 +114,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
-  // 4. Crawl failure: page 2 is a bot-check interstitial.
+  // 4. Crawl failure: page 2 is a bot-check interstitial, which also pauses fetching.
   await block('4', async () => {
     const ctx = await browser.newContext();
     const base = serve([], { pages: 3 });
@@ -131,7 +131,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await count(page), 6, 'page 1 kept');
     assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'a partial crawl is not remembered');
     assert.notEqual(await page.getAttribute('#rf-run', 'aria-disabled'), 'true', 'usable after failure');
+    assert.match(await page.textContent('.rf-warn-msg'), /bot check, so fetching is paused until/, 'the bot check pauses fetching');
+    assert.ok(await page.evaluate(() => +sessionStorage.getItem('rea-avail-filter/paused') > Date.now()));
     blocked = false; hits.length = 0;
+    await page.click('.rf-partial [data-resume]');
+    await page.waitForFunction(() => /Paused/.test(document.querySelector('.rf-partial').textContent));
+    assert.deepEqual(hits, [], 'nothing fetched while paused');
+    await page.evaluate(() => sessionStorage.removeItem('rea-avail-filter/paused')); // the 10 minutes are up
     await page.click('.rf-partial [data-resume]');
     await waitStatus(page, /18 listings match|of 18 listings match/);
     assert.ok(await page.$('.rf-partial[hidden]'), 'resume clears the notice');
@@ -1460,6 +1466,25 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(await page.$eval(`.rf-item[data-id="${id}"]`, (el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }), 'still in view after expanding');
     await page.keyboard.press('e');
     console.log('space, scroll after sort, shortlist top, peek close, expand place: ok');
+    await done(page); await ctx.close();
+  });
+
+  // 41. A pause from an earlier bot check (this tab) shows at load and stops page 2 being
+  // fetched; the drawer still works on page 1, which came with the page.
+  await block('41', async () => {
+    const ctx = await browser.newContext();
+    const base = serve([], { pages: 2 });
+    const hits = [];
+    await ctx.addInitScript(() => sessionStorage.setItem('rea-avail-filter/paused', String(Date.now() + 5 * 60 * 1000)));
+    const page = await open(ctx, SEARCH, { route: (route) => { const u = route.request().url(); if (/\/list-2/.test(u)) hits.push(u); return base(route); } });
+    await page.click('#rf-launch');
+    assert.match(await page.textContent('.rf-warn-msg'), /fetching is paused until/);
+    await page.click('#rf-run');
+    await page.waitForSelector('.rf-partial:not([hidden])');
+    assert.match(await page.textContent('.rf-partial'), /page 2 failed \(Paused/);
+    assert.equal(await count(page), 6, 'page 1 still shown');
+    assert.deepEqual(hits, [], 'page 2 not requested');
+    console.log('bot-check pause: ok');
     await done(page); await ctx.close();
   });
 

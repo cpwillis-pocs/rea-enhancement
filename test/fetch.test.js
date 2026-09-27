@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
 const core = require('../rea-availability-filter.user.js');
-const { listing, results, page } = require('./helpers');
+const { listing, results, page, memStorage } = require('./helpers');
 
 const BASE = 'https://www.realestate.com.au/rent/in-bondi/list-1';
 const resp = (status, body = '', headers = {}) => ({
@@ -130,4 +130,28 @@ test('fetchAllPages keepPartial: a later page failing returns what was read; pag
   let waits = 0;
   await core.fetchAllPages(base, () => {}, { getPage: pages(0), wait: async () => { waits++; }, isCached: (u) => /list-[23]/.test(u) });
   assert.equal(waits, 1, 'no pause before cached pages');
+});
+
+test('bot checks are flagged for pausing: 403, 429 after every retry, a page without results; 404 and network errors are not', async () => {
+  const flag = async (fetchImpl) => { try { await core.fetchResults(BASE, { fetchImpl, wait: noWait }); } catch (e) { return !!e.botCheck; } return null; };
+  assert.equal(await flag(async () => resp(403)), true);
+  assert.equal(await flag(async () => resp(429)), true);
+  assert.equal(await flag(async () => resp(200, '<html>Please verify you are a human</html>')), true);
+  assert.equal(await flag(async () => resp(404)), false);
+  assert.equal(await flag(async () => { throw new Error('reset'); }), false);
+});
+
+test('pauseGate: trips for PAUSE_MS, then lifts; bad or past values mean not paused', () => {
+  const m = memStorage();
+  let now = 1000;
+  const g = core.pauseGate(m, () => now);
+  assert.equal(g.until(), 0);
+  const t = g.trip();
+  assert.equal(t, 1000 + core.PAUSE_MS);
+  assert.equal(g.until(), t);
+  assert.equal(m.getItem('rea-avail-filter/paused'), String(t));
+  now = t - 1; assert.equal(g.until(), t, 'still paused a moment before');
+  now = t; assert.equal(g.until(), 0, 'lifted at the time');
+  m.setItem('rea-avail-filter/paused', 'junk'); assert.equal(g.until(), 0);
+  g.trip(5); g.clear(); assert.equal(g.until(), 0);
 });
