@@ -55,7 +55,7 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 12;
+  const ROWS_VERSION = 13;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
@@ -105,6 +105,13 @@
   const loadCfg = () => {
     try { const { building, ...c } = sanitizeCfg(JSON.parse(localStorage.getItem(CFG_KEY))); return c; } catch { return {}; }
   };
+  // Another tab may have saved settings since this one loaded: write only the keys this tab
+  // changed (after vs before) over what is stored now, so an older tab can't undo them.
+  const mergeCfg = (stored, before, after) => {
+    const out = { ...stored };
+    for (const k of Object.keys(after)) if (after[k] !== before[k]) out[k] = after[k];
+    return out;
+  };
   const saveCfg = (cfg) => {
     try { const { building, ...c } = cfg; localStorage.setItem(CFG_KEY, JSON.stringify(c)); writeState.report(true); } catch { writeState.report(false); }
   };
@@ -139,7 +146,8 @@
           const k = storage.key(i);
           if (k?.startsWith(ROWS_PREFIX) && k !== ROWS_PREFIX + key) {
             let at = 0;
-            try { at = JSON.parse(storage.getItem(k)).at || 0; } catch { /* corrupt: evict first */ }
+            // Only `at` is needed, and it is written near the start: no need to parse a 1.5 MB entry.
+            try { at = +(String(storage.getItem(k)).slice(0, 80).match(/"at":(\d+)/) || [])[1] || 0; } catch { /* blocked: evict first */ }
             out.push([k, at]);
           }
         }
@@ -196,6 +204,7 @@
     in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
+    sq: typeof r.sqm === 'number' ? sqmOk(r.sqm) : null, sqt: r.sqm != null && r.sqmFromText ? 1 : null,
   });
   // Summary fields a search result always carries in full (empty means none, not unknown).
   const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk', 'bp'];
@@ -244,11 +253,17 @@
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
   // Needs a street number in the street part ("Address available on request, Bondi NSW 2026" has
   // only the postcode, so two such listings aren't the same place).
+  const aKeys = new Map(); // address -> key: withBuildings asks twice per row on every refresh
   const addressKey = (a) => {
-    const street = String(a || '').split(',')[0];
-    if (!/\d/.test(street) || /\brequest\b/i.test(a)) return '';
-    const k = String(a).toLowerCase().replace(/[^a-z0-9/]+/g, ' ').replace(/\s+/g, ' ').trim();
-    return k.length > 6 ? k : '';
+    a = String(a || '');
+    let k = aKeys.get(a);
+    if (k !== undefined) return k;
+    const street = a.split(',')[0];
+    k = !/\d/.test(street) || /\brequest\b/i.test(a) ? '' : a.toLowerCase().replace(/[^a-z0-9/]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (k.length <= 6) k = '';
+    if (aKeys.size > 20000) aKeys.clear();
+    aKeys.set(a, k);
+    return k;
   };
   const PRICE_HISTORY_MAX = 10;
   const RELIST_GAP_MS = HOUR_MS; // old listing unseen at least this long before a same-address one counts as a relist
@@ -258,6 +273,7 @@
     url: d.u, address: d.a, price: d.p, available: d.v, img: d.i, type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
     inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
+    sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
   const FEAT_V = 5; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
@@ -328,7 +344,7 @@
         writeState.report(true);
       } catch { raw = null; writeState.report(false); /* quota/blocked: re-read next time */ }
     };
-    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
+    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp', 'sq', 'sqt'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     // Read-modify-write of one listing's entry: fn(entry, all marks) returns what the setter returns.
     const edit = (id, fn) => { const { m } = fresh(); const out = fn(entry(m, id), m); save(); return out; };
@@ -715,7 +731,7 @@
 
   const snapshotStore = (storage, now = () => Date.now()) => {
     // Parsed copy reused while the stored string is unchanged (several reads per navigation).
-    let memo = null, memoRaw = null;
+    let memo = null, memoRaw = null, sizesMemo = null;
     const load = () => {
       let raw = null;
       try { raw = storage.getItem(SNAP_KEY); } catch { /* blocked */ }
@@ -754,15 +770,20 @@
       return { evicted, ok: false };
     };
     // Trims rows from the end until the entry fits SNAP_ENTRY_BUDGET. Returns whether it trimmed.
+    // Trims until the entry fits SNAP_ENTRY_BUDGET, cheapest loss first and furthest down first:
+    // row text, gone rows' text, then row features and headlines, then gone rows themselves.
+    // Sizes are tracked from the fields changed, not by re-stringifying rows. Returns whether it trimmed.
     const fitBudget = (entry) => {
       let size = JSON.stringify(entry).length;
       if (size <= SNAP_ENTRY_BUDGET) return false;
-      for (let i = entry.rows.length - 1; i >= 0 && size > SNAP_ENTRY_BUDGET; i--) {
-        const r = entry.rows[i], was = JSON.stringify(r).length;
-        r.text = ''; r.headline = clip(r.headline, LITE_HEADLINE); r.features = r.features.slice(0, 8);
-        size -= was - JSON.stringify(r).length;
-      }
-      for (const g of entry.gone) { if (size <= SNAP_ENTRY_BUDGET) break; const was = JSON.stringify(g).length; g.text = ''; g.features = []; size -= was - JSON.stringify(g).length; }
+      const len = (r) => JSON.stringify([r.text, r.headline, r.features]).length;
+      const trim = (list, fn) => {
+        for (let i = list.length - 1; i >= 0 && size > SNAP_ENTRY_BUDGET; i--) { const was = len(list[i]); fn(list[i]); size -= was - len(list[i]); }
+      };
+      trim(entry.rows, (r) => { r.text = ''; r.headline = clip(r.headline, LITE_HEADLINE); r.features = r.features.slice(0, 8); });
+      trim(entry.gone, (g) => { g.text = ''; g.features = []; });
+      trim(entry.rows, (r) => { r.features = []; r.headline = ''; });
+      while (entry.gone.length && size > SNAP_ENTRY_BUDGET) size -= JSON.stringify(entry.gone.pop()).length + 1;
       return true;
     };
     const newSince = (ids, baseIds) => {
@@ -770,12 +791,17 @@
       const base = new Set(baseIds);
       return new Set((ids || []).filter((id) => !base.has(id)));
     };
-    const view = (e) => ({
+    // `rows` is built on first read: save()'s callers only need the diff, and rebuilding every
+    // row it just slimmed was a third of the end-of-search work.
+    const view = (e) => Object.defineProperty({
       at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated, lite: !!e.lite,
-      rows: (e.rows || []).map(fatRow).filter((r) => r.url),
       gone: (e.gone || []).map(fatRow).filter((r) => r.url).map((r) => Object.assign(r, { gone: true })),
       newIds: newSince(e.ids, e.baseIds),
-    });
+    }, 'rows', { enumerable: true, configurable: true, get() {
+      const rows = (e.rows || []).map(fatRow).filter((r) => r.url);
+      Object.defineProperty(this, 'rows', { value: rows, enumerable: true });
+      return rows;
+    } });
     return {
       get(key) {
         const e = load().s[key];
@@ -804,7 +830,7 @@
         if (fitBudget(entry)) entry.lite = 1;
         const { evicted } = persist(d);
         // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
-        return { ...view(entry), evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) };
+        return Object.assign(view(entry), { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) });
       },
       // Pinned searches are the last to be forgotten when a new one is remembered.
       pin(key, on) {
@@ -816,7 +842,14 @@
       clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
       exportData: () => load().s,
       // Per search: characters stored (as localStorage counts them) and whether it was trimmed.
-      sizes: () => Object.entries(load().s).map(([key, e]) => ({ key, bytes: 2 * JSON.stringify(e).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes),
+      // Memoised on the stored string: Settings repaints this on every star or hide.
+      sizes() {
+        const d = load();
+        if (sizesMemo && memoRaw != null && sizesMemo.raw === memoRaw) return sizesMemo.out;
+        const out = Object.entries(d.s).map(([key, e]) => ({ key, bytes: 2 * JSON.stringify(e).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes);
+        sizesMemo = { raw: memoRaw, out };
+        return out;
+      },
       // Untrusted: keys must be REA rent search URLs; rows round-trip through fatRow/slimRow.
       importData(src) {
         if (!src || typeof src !== 'object') return 0;
@@ -1242,18 +1275,20 @@
     }
     return null;
   };
-  const SQM_RE = /(\d{2,4}(?:\.\d+)?)\s*(?:sq\.?\s*m(?:etres?|eters?)?(?![a-z])|m2(?![a-z\d])|m²|square\s*met(?:re|er)s?)/gi;
-  const SQM_NOT = /\b(?:land|block|lot|site|balcon(?:y|ies)|courtyard|terrace|garden|yard|backyard|garage|carport|deck|patio|outdoor|alfresco|rooftop|storage|storeroom|shed|pool)\b/;
+  const SQM_RE = /(?<![\d,.])(\d{1,2},\d{3}|\d{2,4})(?:\.\d+)?\s*(?:sq\.?\s*m(?:etres?|eters?)?(?![a-z])|m2(?![a-z\d])|m²|square\s*met(?:re|er)s?)/gi;
+  const SQM_NOT = /\b(?:land|block|lot|site|allotment|parcel|grounds|acreage|balcon(?:y|ies)|courtyard|terrace|garden|yard|backyard|garage|carport|deck|patio|outdoor|alfresco|rooftop|storage|storeroom|shed|pool)\b/;
+  const SQM_ON = /\bon\s+(?:an?\s+)?(?:approx(?:imately|\.)?\s+|about\s+|over\s+)?$/;
   const SQM_SPLIT = /[,.;+&()]|\band\b|\bplus\b|\bwith\b/;
   const sqmFromText = (text) => {
     const t = String(text || '');
     for (const m of t.matchAll(SQM_RE)) {
-      const n = sqmOk(+m[1]);
+      const n = sqmOk(parseFloat(m[0].replace(/,/g, '')));
       if (n == null) continue;
       // The words right next to the number say what was measured: "12sqm balcony", "balcony 12sqm", "600sqm block".
       const after = t.slice(m.index + m[0].length, m.index + m[0].length + 30).toLowerCase().split(SQM_SPLIT)[0];
       const before = t.slice(Math.max(0, m.index - 30), m.index).toLowerCase().split(SQM_SPLIT).pop();
-      if (!SQM_NOT.test(after) && !SQM_NOT.test(before)) return n;
+      // "set on 650sqm", "house on a 556 m2": a figure the home sits on is land.
+      if (!SQM_NOT.test(after) && !SQM_NOT.test(before) && !SQM_ON.test(before)) return n;
     }
     return null;
   };
@@ -1853,10 +1888,10 @@
     const chips = activeFilters(cfg);
     const setLevel = cfg.onePerBuilding && !cfg.building;
     const tests = rowTests(cfg, now);
-    const only = new Map();
+    const only = new Map(), prepped = prepRows(rows, cfg);
     let base = 0;
     if (!setLevel) {
-      for (const r of prepRows(rows, cfg)) {
+      for (const r of prepped) {
         let failed = null, many = false;
         for (const [tag, t] of tests) {
           if (t(r)) continue;
@@ -1866,10 +1901,10 @@
         if (failed == null) base++;
         else if (!many) only.set(failed, (only.get(failed) || 0) + 1);
       }
-    } else base = filterRows(rows, cfg, now).length;
+    } else base = filterPrepped(prepped, cfg, now).length;
     return chips.map((chip) => {
       const tag = chipTag(chip);
-      const removes = setLevel || REFILTER_TAGS.has(tag) ? filterRows(rows, without(cfg, chip), now).length - base : only.get(tag) || 0;
+      const removes = setLevel || REFILTER_TAGS.has(tag) ? filterPrepped(prepped, without(cfg, chip), now).length - base : only.get(tag) || 0;
       return { ...chip, removes };
     });
   };
@@ -2044,11 +2079,15 @@
     for (const r of rows) setDistances(r, cfg, anchor, places);
     return dedupe(rows);
   };
+  // Rows already through prepRows (removedBy reuses them: no chip changes the anchor or places).
+  const filterPrepped = (prepped, cfg, now) => {
+    const tests = rowTests(cfg, now);
+    const kept = prepped.filter((r) => tests.every(([, t]) => t(r)));
+    return cfg.onePerBuilding && !cfg.building ? onePerBuilding(kept) : kept;
+  };
   function filterRows(rows, cfg, now = new Date()) {
     cfg = { ...DEFAULT_CFG, ...cfg };
-    const tests = rowTests(cfg, now);
-    const kept = prepRows(rows, cfg).filter((r) => tests.every(([, t]) => t(r)));
-    return cfg.onePerBuilding && !cfg.building ? onePerBuilding(kept) : kept;
+    return filterPrepped(prepRows(rows, cfg), cfg, now);
   }
 
   // Same building: a unit address without its unit ("5/12 Hall St, Bondi" -> "12 hall st bondi").
@@ -2426,7 +2465,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, mergeCfg, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2803,6 +2842,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const currentKey = () => (isSearchPage(location.href) ? searchKey(location.href) : null);
 
   let cfg = { ...DEFAULT_CFG, ...loadCfg() };
+  let cfgBase = { ...cfg }; // what this tab last loaded or saved, for mergeCfg
   let cache = null; // raw rows for the current search URL
   let cacheKey = null; // searchKey() of the cached rows
   let truncated = false;
@@ -2897,7 +2937,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
           <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
           <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
-          <label title="${esc(SQM_NOTE)}"><span>Min m²<span class="rf-tip" tabindex="0" role="note" aria-label="${esc(SQM_NOTE)}">ⓘ</span></span><input type="number" min="0" max="2000" step="5" id="rf-sizeMin" inputmode="numeric"></label>
+          <label title="${esc(SQM_NOTE)}"><span>Min m²<span class="rf-tip" tabindex="0" role="note" aria-label="${esc(SQM_NOTE)}">ⓘ</span></span><input type="number" min="0" max="2000" step="5" id="rf-sizeMin" inputmode="numeric" aria-label="Min m²"></label>
         </div>
         <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
           <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
@@ -3339,6 +3379,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
     queueMicrotask(() => ui.paintAmen?.());
     ui.fields = fields;
+    ui.applyCfg = applyCfg;
     // Amenity chips cycle any -> require -> exclude, writing the hidden rf-amenities field.
     const amenInput = panel.querySelector('#rf-amenities');
     const paintAmen = () => {
@@ -3511,7 +3552,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       panel.classList.toggle('rf-compact', !!cfg.compact);
       applyTheme();
       sortDir.setAttribute('aria-pressed', String(!!cfg.sortDesc));
-      saveCfg(cfg);
+      saveCfg(mergeCfg({ ...DEFAULT_CFG, ...loadCfg() }, cfgBase, cfg));
+      cfgBase = { ...cfg };
       if (!cfg.remember || !cfg.remindSaved) document.getElementById('rf-remind')?.remove();
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
         setWarn('saved', '');
@@ -3886,13 +3928,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         setStatus(`Re-checking ${i + 1} of ${rows.length}…`);
         let res, html;
         try { // body read inside too: a reset mid-download is one unreadable listing, not the end
-          res = await fetch(r.url, { credentials: 'include', signal: withTimeout(ctrl.signal, FETCH_TIMEOUT_MS) });
+          for (let attempt = 0; ; attempt++) { // a 429 gets one wait and retry before it counts as a bot check
+            res = await fetch(r.url, { credentials: 'include', signal: withTimeout(ctrl.signal, FETCH_TIMEOUT_MS) });
+            if (res.status !== 429 || attempt) break;
+            const after = Math.min(+res.headers?.get?.('Retry-After') || 0, RETRY_AFTER_MAX_S);
+            await sleep(after > 0 ? after * 1000 : jitter(RETRY_BASE_MS * 2), ctrl.signal);
+          }
           html = res.ok ? await res.text() : '';
         } catch (err) {
           if (ctrl.signal.aborted) throw err;
           tally.unknown++; continue;
         }
-        if (res.status === 403 || res.status === 429) { tripPause(botCheck(`Re-check: HTTP ${res.status}`)); throw pausedErr(pause.until()); }
+        // A 403, a second 429, or a page with no data at all (a challenge page) stops everything.
+        const challenge = res.ok && !EXCHANGE_RE.test(html);
+        if (res.status === 403 || res.status === 429 || challenge) {
+          tripPause(botCheck(`Re-check: ${challenge ? 'challenge page' : `HTTP ${res.status}`}`));
+          throw pausedErr(pause.until());
+        }
         const out = parseListingPage(html, r.id, { status: res.status, redirectedTo: res.redirected ? res.url : '' });
         tally[out.status]++;
         if (out.status === 'gone') marks.setGone(r.id, true);
@@ -3927,6 +3979,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (busy) return;
     const keys = Object.entries(snaps.exportData()).sort(([, a], [, b]) => b.at - a.at).map(([k]) => k);
     if (!keys.length) return;
+    if (pause.until()) return setStatus(pausedErr(pause.until()).message, true);
     const ctrl = ui.savedCtrl = startJob(btn);
     pageMemo.clear(); // "new since" must mean now, not the pages cached a few minutes ago
     const out = [];
@@ -4313,7 +4366,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : '');
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
   // `offset`/`total`: this chunk's place in the whole list, for screen readers ("12 of 150").
-  const itemsHtml = (rows, offset, total) => itemParts(rows, offset, total).map((p) => p.html).join('');
   function itemParts(rows, offset = 0, total = rows.length) {
     const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist);
     return rows.map((r, i) => ({ id: r.id, html: itemHtml(r, i) }));
@@ -4441,7 +4493,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   let textClipped = false; // rows came from storage, whose listing text is shortened
   function adopt(key, rows, trunc, note, snap = null, observe = false) {
-    textClipped = !observe;
+    textClipped = observe ? false : snap?.lite && rows === snap.rows ? 'lite' : true; // before the first render reads it
     learn(rows, observe, observe); // adopt observes only fresh full crawls
     if (snap) queueMicrotask(renderSaved);
     scheduleAnnotate();
@@ -4485,7 +4537,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const snap = snaps.get(key);
     if (!snap?.rows.length) return false;
     adopt(key, snap.rows, snap.truncated, `Saved ${ago(Date.now() - snap.at)}. Refresh for current listings.`, snap);
-    if (snap.lite) textClipped = 'lite';
     returnToPlace();
     return true;
   }
@@ -4557,6 +4608,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // come from pageMemo, without a pause).
   async function run(force = false, { resume = false } = {}) {
     if (!force && restoreSession()) return;
+    // Refresh during a bot-check pause would drop the pages already read and then fail: keep them.
+    if (force && !resume && pause.until()) return setStatus(pausedErr(pause.until()).message, true);
     showPartial(null);
     runCtrl?.abort();
     const ctrl = runCtrl = new AbortController();
@@ -4599,6 +4652,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ui.newsSeen?.();
     } catch (err) {
       if (id !== runId || ctrl.signal.aborted) return;
+      if (err?.paused && cache) { setStatus(err.message, true); return; } // what's shown stays usable
       cache = null;
       cacheKey = null;
       setLaunchCount(null);
@@ -4771,9 +4825,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
     if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
-    if (r.partial && bar._fetching !== id) {
+    if (r.partial && bar._fetching !== id && !pause.until()) {
       bar._fetching = id;
-      fetch(location.href, { credentials: 'include', signal: withTimeout(null, FETCH_TIMEOUT_MS) }).then((res) => (res.ok ? res.text() : ''))
+      fetch(location.href, { credentials: 'include', signal: withTimeout(null, FETCH_TIMEOUT_MS) })
+        .then((res) => { if (res.status === 403 || res.status === 429) tripPause(botCheck(`listing page: HTTP ${res.status}`)); return res.ok ? res.text() : ''; })
         .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
         .catch(() => {}).finally(() => { if (bar._fetching === id) bar._fetching = null; if (bar.dataset.id !== id && bar._row?.partial) renderListingBar(); });
     }
@@ -4846,7 +4901,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const matchSet = () => {
     if (!cfg.dimCards || !filtersActive()) return null;
     const sig = knownVer + new Date().toDateString() + JSON.stringify(cfg); // day: rolling window moves at midnight
-    if (matchMemo.sig !== sig) matchMemo = { sig, set: new Set(applyFilters([...known.values()], cfg).map((r) => r.id)) };
+    if (matchMemo.sig !== sig) matchMemo = { sig, set: new Set(filterRows([...known.values()], cfg).map((r) => r.id)) }; // no scoring: it would overwrite the drawer's Match scores
     return matchMemo.set;
   };
 
@@ -5057,7 +5112,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
     selfcheck: () => {
       // Before any search, page 1's own data stands in, so the fill rates aren't all 0%.
-      const early = !cache && !!boot;
+      const early = !cache && !!boot && boot.key === searchKey(location.href); // not another search's page 1 after in-app navigation
       const rows = cache || (early ? rowsFrom(boot.results) : []);
       const rates = fillRates(rows), usual = health.usual();
       const report = [
@@ -5083,35 +5138,48 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   step('build', build);
   if (ui?.ready) { // only wire the rest if build() completed
     step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });
-    step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
-    step('pause', showPause);
-    step('navigation', watchNavigation);
-    step('cards', watchCards);
-    step('card actions', watchCardActions);
-    step('opens', watchOpens);
-    step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
-      : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
-    step('sync', () => window.addEventListener('storage', (e) => {
-      // Another tab changed the shortlist/hidden/notes: pick it up here.
-      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
-    }));
-    step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
-    step('share', () => {
-      if (!new RegExp(`[#&]${SHARE_PARAM}=`).test(location.hash)) return;
-      const rows = shareFromHash(location.hash);
-      history.replaceState(history.state, '', location.pathname + location.search); // don't keep it in history
-      if (rows?.length) { ui.offerShare(rows); return; }
-      ui.launch.hidden = false;
-      ui.setOpen(true);
-      setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
-    });
-    step('restore', restore);
-    step('listing bar', () => {
-      renderListingBar();
-      window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
-    });
-    step('saved', renderSaved);
-    step('remind', remindSaved);
-    step('annotate', ensureVisiblePage);
+    // The rest in a second task, so page load isn't one long (50 ms+) task: reading page 1's
+    // listings and your marks is most of it. Order within is unchanged.
+    setTimeout(() => {
+      step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
+      step('pause', showPause);
+      step('navigation', watchNavigation);
+      step('cards', watchCards);
+      step('card actions', watchCardActions);
+      step('opens', watchOpens);
+      step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
+        : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
+      step('sync', () => window.addEventListener('storage', (e) => {
+        // Another tab changed the shortlist/hidden/notes: pick it up here.
+        if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
+        // Settings saved in another tab: take its display settings (places, checklist, weights,
+        // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
+        if (e.key === CFG_KEY) {
+          const stored = { ...DEFAULT_CFG, ...loadCfg() };
+          const moved = DISPLAY_PREFS.filter((k) => k !== 'sort' && k !== 'sortDesc' && stored[k] !== cfg[k]); // each tab keeps its own sort
+          if (!moved.length) return;
+          for (const k of moved) cfgBase[k] = stored[k];
+          ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
+        }
+      }));
+      step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
+      step('share', () => {
+        if (!new RegExp(`[#&]${SHARE_PARAM}=`).test(location.hash)) return;
+        const rows = shareFromHash(location.hash);
+        history.replaceState(history.state, '', location.pathname + location.search); // don't keep it in history
+        if (rows?.length) { ui.offerShare(rows); return; }
+        ui.launch.hidden = false;
+        ui.setOpen(true);
+        setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
+      });
+      step('restore', restore);
+      step('listing bar', () => {
+        renderListingBar();
+        window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
+      });
+      step('saved', renderSaved);
+      step('remind', remindSaved);
+      step('annotate', ensureVisiblePage);
+    }, 0);
   }
 })();

@@ -1489,6 +1489,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await page.textContent('.rf-partial'), /page 2 failed \(Paused/);
     assert.equal(await count(page), 6, 'page 1 still shown');
     assert.deepEqual(hits, [], 'page 2 not requested');
+    await page.click('#rf-refresh');
+    await waitStatus(page, /^Paused:/);
+    assert.equal(await count(page), 6, 'Refresh while paused keeps what is shown');
     console.log('bot-check pause: ok');
     await done(page); await ctx.close();
   });
@@ -1540,6 +1543,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.fill('#rf-sizeMin', '');
     await page.selectOption('#rf-sort', 'ppsqm');
     assert.equal(await page.$eval('.rf-item', (el) => el.dataset.id), '146500002', 'the one listing with a size sorts first');
+    await page.hover('.rf-item[data-id="146500002"]'); await page.click('.rf-item[data-id="146500002"] [data-act=s]');
+    await page.click('[data-view=shortlist]');
+    await page.waitForSelector('.rf-item[data-id="146500002"]');
+    assert.match(await page.textContent('.rf-item[data-id="146500002"] .rf-meta'), /85 m²/, 'the Shortlist keeps the size');
     console.log('floor size: ok');
     await done(page); await ctx.close();
   });
@@ -1557,6 +1564,46 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(warned.length, 1, 'the second copy says why it stopped');
     await run(page);
     console.log('double-run guard: ok');
+    await done(page); await ctx.close();
+  });
+
+  // 45. Settings across tabs: a display setting saved in one tab reaches the other, and the
+  // other tab's later filter change doesn't write its stale copy back over it.
+  await block('45', async () => {
+    const ctx = await browser.newContext();
+    const a = await open(ctx), b = await open(ctx);
+    await a.click('#rf-launch'); await b.click('#rf-launch');
+    await a.click('.rf-settings summary');
+    await a.selectOption('#rf-theme', 'dark');
+    await b.waitForFunction(() => document.documentElement.dataset.rfTheme === 'dark');
+    assert.equal(await b.$eval('#rf-theme', (el) => el.value), 'dark', "the other tab's form follows");
+    await b.click('#rf-more summary');
+    await b.fill('#rf-priceMax', '900'); await b.dispatchEvent('#rf-priceMax', 'change');
+    const saved = await a.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')));
+    assert.equal(saved.theme, 'dark', 'theme kept');
+    assert.equal(saved.priceMax, '900', 'and the rent change saved');
+    console.log('settings across tabs: ok');
+    await done(a); await done(b); await ctx.close();
+  });
+
+  // 46. Re-check meets a challenge page: it stops, pauses fetching, and says so.
+  await block('46', async () => {
+    const ctx = await browser.newContext();
+    const base = serve();
+    let hits = 0;
+    const page = await open(ctx, SEARCH, { route: (route) => {
+      if (/\/property-/.test(route.request().url())) { hits++; return route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Please verify you are human</html>' }); }
+      return base(route);
+    } });
+    await run(page);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
+    for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    await page.click('[data-sl=recheck]');
+    await waitStatus(page, /Re-check stopped after 0 listings\. Paused:/, 20000);
+    assert.equal(hits, 1, 'no second listing fetched into the challenge');
+    assert.match(await page.textContent('.rf-warn-msg'), /fetching is paused until/);
+    console.log('re-check challenge page pauses: ok');
     await done(page); await ctx.close();
   });
 

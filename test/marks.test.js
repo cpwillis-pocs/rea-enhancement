@@ -641,3 +641,12 @@ test('resurfaced listing: any hide button or bulk hide hides it again; unhiding 
   t += 864e5; const again = [at(600)]; st.observe(again); st.decorate(again);
   assert.deepEqual([again[0].hideReason, again[0].resurfaced], ['', false]);
 });
+
+test('shortlist keeps the floor size, so Compare and exports have it', () => {
+  const m = core.marksStore(mem());
+  const r = core.toRow(listing({ id: '146500777', description: 'Bright 82sqm apartment.' }), false);
+  m.toggle(r.id, 's', r);
+  const [s] = m.shortlist();
+  assert.equal(s.sqm, 82);
+  assert.equal(s.sqmFromText, true);
+});

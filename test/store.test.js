@@ -190,3 +190,13 @@ test('rowStore / snapshots keep only what cannot be rebuilt', () => {
   assert.equal('inspect' in raw, false); assert.equal('nextInspect' in raw, false);
   assert.deepEqual(raw.amen, { pets: 'yes' });
 });
+
+test('mergeCfg: only the keys this tab changed are written over what another tab saved', () => {
+  const before = { ...core.DEFAULT_CFG, places: '', priceMax: '' };
+  const stored = { ...before, places: 'Work|-33.8,151.2' }; // another tab added a place
+  const after = { ...before, priceMax: '900' }; // this tab changed rent only
+  const out = core.mergeCfg(stored, before, after);
+  assert.equal(out.places, 'Work|-33.8,151.2', "the other tab's place survives");
+  assert.equal(out.priceMax, '900');
+  assert.deepEqual(core.mergeCfg(stored, before, before), stored, 'no change writes back what is stored');
+});

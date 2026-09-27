@@ -858,6 +858,9 @@ test('floor size: internal m² from text, skipping land, balcony and courtyard a
     ['Balcony 12sqm, internal 85sqm', 85], ['Sunny 14sqm balcony and 70sqm interior', 70], ['on a 600sqm block', null],
     ['600 sqm land', null], ['Courtyard of 40sqm', null], ['2 bed, 1 bath, 1 car', null], ['12 m2', null], ['5000sqm estate', null],
     ['Level 3, 75sqm, lift', 75],
+    ['1,200sqm apartment', 1200], ['A 1,100 sqm warehouse conversion', 1100], ['Land size: 1,250 sqm', null], ['85.5 sqm interior', 86],
+    ['Set on 650sqm', null], ['3 bed house on 556 m2', null], ['on a 600 sqm block', null], ['650sqm allotment', null], ['a 600m2 parcel', null],
+    ['Lot 12, 85sqm apartment', 85], ['80-90sqm living', 90],
   ];
   for (const [text, want] of cases) assert.equal(core.sqmFromText(text), want, text);
 });
