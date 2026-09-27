@@ -2,6 +2,24 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.28.0
+
+- **Your rating** (1–5) for shortlisted listings, after an inspection: on the Shortlist tab (Shift+1–5), on the listing-page bar, in Compare, and in CSV and print.
+- **Next stop** on the listing-page bar: the next shortlisted inspection today, how far it is and when to leave, linked to that listing.
+- **Restore shows what it will do** ("Restore 12 listings (3 shortlisted, 2 hidden), 2 saved searches, and replace your places, theme?") and waits for Restore; afterwards it can be undone.
+- **Map**: a place in another city is an arrow at the edge with its distance, instead of squashing the listings into a corner; the map is one tab stop and the arrow keys move between listings.
+- **Calendar**: each inspection carries its coordinates (GEO), and a session REA cancelled is exported as cancelled under the same ID, so importing again takes it out (where the calendar app honours it).
+- **Bigger searches remembered**: remembered searches are stored packed, about half the size, so around 1000 listings fit before any text is trimmed.
+- Fixed:
+  - Restoring a backup made with Remember results off no longer deletes this browser's remembered searches (backups no longer carry that setting).
+  - An old backup's "no longer listed" mark doesn't stick to a listing you've seen since.
+  - Re-check no longer mistakes a removed listing that redirects to REA's home page for a bot check (which paused every tab); the listing-page bar pauses on a real challenge page.
+  - The monthly backup reminder only counts once you've seen it, on a search page.
+  - "Why this tag?" quotes always contain what matched (one-feature-per-line descriptions); `-"no pets"` is one exclusion in the "matched" line.
+  - Resume during a bot-check pause keeps the Resume notice.
+- Faster: tag tooltips are worked out once per listing, a map dot jumps to its listing in one pass, this tab's cache is written after the results paint, remembered searches reuse each entry's stored form, restoring at page load has its own task, and a theme change in another tab only re-themes.
+- Project: an accessibility check (axe-core, a pinned test-only install) runs over every drawer view and the listing bar in light and dark; CI skips e2e for unit-test-only PRs and runs one Node version for e2e-only ones; `npm run live` compares against the last saved shape and fails if a path the script reads is gone; reduced-motion styles.
+
 ## 2.27.0
 
 - **Map view** (Map, or v): the listings shown on a simple map with no map tiles, coloured by rent vs the median, shortlisted ones larger, your places and distance point as pins, a scale bar and suburb names. Click (or Enter on) a dot to go to that listing.

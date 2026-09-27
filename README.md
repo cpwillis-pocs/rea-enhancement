@@ -66,18 +66,19 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
 - The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; search it, filter by status and export it.
 - **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
+- **Your rating** (1–5, or Shift+1–5) per shortlisted listing, shown in Compare and exports.
 - **Inspection checklist** per shortlisted listing (damp, water pressure, signal, light, noise, storage, or your own), shown in Compare and on the printout.
 - **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, plus a **suggested route** that fits in as many listings as can be reached in time (one session each, "to inspect" ones first), exportable to your calendar as the whole day or just the route.
 - **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
 - **Share** the shortlist as a link or **Print** it for open homes. The shared data sits in the link's `#` fragment, which browsers don't send to REA's servers; REA's own page scripts could read it before the script clears it, and wherever you paste the link keeps a copy.
-- **Backup / Restore** the shortlist, hidden listings, notes, remembered searches and your settings as a JSON file, eg to move to another browser. Settings shows when you last backed up.
+- **Backup / Restore** the shortlist, hidden listings, notes, remembered searches and your settings as a JSON file, eg to move to another browser. Settings shows when you last backed up; a restore says what it will change first and can be undone.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
 - **Saved searches**: see your remembered searches (with a rent trend across visits) and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder. **Pin** a search to keep it when you open others (3 are remembered); you're told when one is forgotten.
 - **Opened tracking**: "opened 2d ago" on listings you've looked at, and a **Not opened yet** filter.
 - **Hide with a reason** (too small, location, condition, price) so you remember why later.
 - **Application follow-up**: "did you inspect?" after an inspection passes, time since you applied, a "follow up?" nudge, a **Needs action** filter, and your record with each agency.
 - **Copy enquiry**: a ready-made message for the agent from a template you can edit.
-- **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly; for a shortlisted one it also has your inspection checklist and the key facts.
+- **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly; for a shortlisted one it also has your inspection checklist, your rating, the key facts and the **next stop** (the next shortlisted inspection today, how far, when to leave).
 - Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)

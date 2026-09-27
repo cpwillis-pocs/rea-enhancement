@@ -2,7 +2,7 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.27.0)
+## Where it stands (v2.28.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
@@ -10,12 +10,12 @@ The project went from a single-purpose availability-date filter (1.0.0) to a ful
 |---|---|
 | **Finding** | Crawl every page of a search (one page at a time, capped, resumable after a failure). Filters: dates, rent, move-in cost, beds/baths/cars, floor size, several property types, 19 amenities, heads-up clauses, lease length, taken listings, inspection day or "inspections I can make", distance to up to 3 places, building. Keywords with OR and accent folding. 12 sorts (including price per m²), each reversible. |
 | **Judging** | Map view, rent trend per remembered search, tag tooltips quoting the text each tag was read from, amenity detail (pets welcome vs on application, heating type, water efficient), rent vs the median in the listing's own suburb, best-match score with adjustable weights, move-in cost and bond flag, lease overlap or gap against your current lease, share of income, price and date change history, relists, twin listings, market view. |
-| **Deciding** | Shortlist across searches with notes, checklist, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text. |
-| **Inspecting** | Inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders, after-inspection prompts, cancelled-inspection notices. |
+| **Deciding** | Shortlist across searches with notes, checklist, your 1–5 rating, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text. |
+| **Inspecting** | The next stop and your checklist on the listing page, inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders, after-inspection prompts, cancelled-inspection notices. |
 | **Returning** | Remembered and pinned searches with new / gone listings and a rent trend, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
 | **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Full keyboard control, dark mode (system, or set in Settings), phone layout, screen-reader labels (card buttons named per listing), High Contrast styles, a first-run welcome, badges and quick actions on REA's own cards, a bar on listing pages. |
 | **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a size budget for remembered searches, a 10-minute pause after a bot check, a double-run guard, a one-time what's-new note after updates. |
-| **Project** | 188 unit tests (including shapes from `reaFilter.shape()`), 64 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, a local live check (`npm run live`), and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Project** | 197 unit tests (including shapes from `reaFilter.shape()`), 67 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, a local live check (`npm run live`), and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -44,13 +44,13 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 - **Storage is per browser** and shared with REA's own code. Backups (Settings) are the way to move data between browsers. Reviewed marks are only backed up for listings you also shortlisted, hid, noted or gave a status (so storage doesn't grow with every listing you look at).
 - **Floor size is only as good as the listing**: most rentals don't state it, and the text reading can pick a figure that isn't the internal area. Min m² leaves out listings that don't say.
 - **A challenge page that still carries results isn't detected** by the bot-check pause.
-- **Very large remembered searches stay over the size budget**: past about 550 listings, even rows without text add up to more than 400K characters.
+- **Very large remembered searches stay over the size budget**: past about 1000 listings, even packed rows without text add up to more than 400K characters.
 - **The map is a flat projection with straight lines**: fine at suburb scale, no streets, and only listings REA gives coordinates for.
 - **Photo peek assumes REA serves an 800×600 version** of each photo. If it doesn't, the peek falls back to the thumbnail.
 
 ## Ideas not built yet
 
-All eleven ideas from the 2.26.1 audit, its bugs and its slow spots shipped in 2.27.0 (see the [CHANGELOG](../CHANGELOG.md#2270)). Not done from that audit, as higher risk than value: doing the end-of-search save in a later task (about 50 ms less before results paint, but the save order matters), and merging the three stores' try-save-report code and the `SORTS` / `SORT_UNKNOWN` accessors. Run a fresh audit for the next list. When you build one, move it into the CHANGELOG, update this page, and add its e2e block (lint checks the count in [ARCHITECTURE.md](ARCHITECTURE.md#tests-at-a-glance)).
+Everything from the 2.27.0 audit (ten ideas, its bugs and its slow spots) shipped in 2.28.0 (see the [CHANGELOG](../CHANGELOG.md#2280)), except two parts judged not worth their risk: checking a results page after the first for a data blob with no pagination (a false positive would pause every tab), and throttling status announcements (the status line is already `aria-busy` during searches, Check all and Re-check). Still open from earlier: doing the end-of-search save in a later task, and merging the stores' try-save-report code and the `SORTS` / `SORT_UNKNOWN` accessors. Run a fresh audit for the next list. When you build one, move it into the CHANGELOG, update this page, and add its e2e block (lint checks the count in [ARCHITECTURE.md](ARCHITECTURE.md#tests-at-a-glance)).
 
 ## Releasing
 
