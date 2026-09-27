@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.25.0
+// @version      2.26.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -4693,10 +4693,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.23.0', items: [
-    'The drawer reopens on the listing you were on after a reload.',
-    'Tags say "Pets welcome" or "Pets on application", the heating type, and "Water efficient".',
-    'Compact list (d), photo peek (p), resizable drawer and reviewed marks arrived in 2.22.',
+  const WHATS_NEW = { version: '2.26.0', items: [
+    'Floor size: "85 m²" on listings, a Min m² filter and a Price per m² sort.',
+    'Settings → Theme picks Light or Dark instead of following the system.',
+    "After a bot check from REA, fetching pauses for 10 minutes instead of making it worse.",
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',

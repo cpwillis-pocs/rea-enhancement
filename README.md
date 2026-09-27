@@ -20,13 +20,13 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Filter and sort across every page**
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
-- Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type (pick several, eg Apartment and Unit), photo required, inspection on a given day, listed over 3 weeks ago.
+- Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, **min floor size** (m² from REA's details or the listing text; land and balcony sizes are skipped), property type (pick several, eg Apartment and Unit), photo required, inspection on a given day, listed over 3 weeks ago.
 - Keywords over headline, description, address and features: `pool|balcony -studio "north facing"` (`a|b` is either; accents are ignored).
 - **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking, solar, NBN fibre, EV charging, step-free, water efficient. Tags carry detail where the text gives it: "Pets welcome" vs "Pets on application", "Heating: ducted". Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
 - **Other places**: up to 3 named points (work, school, partner) with km to each and a "Nearest to all places" sort.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
-- Sort (⇅ reverses it; listings without the value stay last) by available date, price, price per bed, best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
+- Sort (⇅ reverses it; listings without the value stay last) by available date, price, price per bed, price per m², best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Lease overlap**: with your current lease end set, each listing shows the days of double rent (and cost) or the nights you'd need to cover, sortable.
 - **Lease term** and **Apply via** portal picked out of the text; filter out leases shorter than you need; availability read from the description when REA's date is missing.
@@ -96,10 +96,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ## How it behaves
 
-- **Polite to REA**: pages are fetched one at a time with a jittered ~600ms gap. 429/5xx responses back off exponentially (honouring `Retry-After`, capped at 60s) and requests time out after 20s. The page you're already on is reused rather than refetched, and results are cached per tab for 10 minutes. **Refresh** forces a refetch.
+- **Polite to REA**: pages are fetched one at a time with a jittered ~600ms gap. 429/5xx responses back off exponentially (honouring `Retry-After`, capped at 60s) and requests time out after 20s. If REA answers with a bot check (403, repeated 429s, or a challenge page), all fetching pauses for 10 minutes in that tab. The page you're already on is reused rather than refetched, and results are cached per tab for 10 minutes. **Refresh** forces a refetch.
 - **SPA-aware**: changing the search cancels an in-flight crawl. Paging within a search keeps the cache.
 - **Non-invasive**: REA's DOM is only touched append-only (one badge per result card plus `data-rf-*` attributes), so React re-renders can't break it or be broken by it.
-- **Storage**: settings, shortlist, notes and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted, hidden or noted). Remembered results for your last three searches are in `localStorage` too; this tab's working results are in `sessionStorage`. Settings shows how much is stored, and **Delete all my data** removes only this script's keys.
+- **Storage**: settings, shortlist, notes and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted, hidden or noted). Remembered results for your last three searches are in `localStorage` too (a very large search keeps less text for the listings furthest down, so it fits); this tab's working results are in `sessionStorage`. Settings shows how much is stored, and **Delete all my data** removes only this script's keys.
 
 ## When REA changes something
 
@@ -121,7 +121,9 @@ No dependencies; Node 20+.
 ```sh
 npm run lint    # syntax + project invariants (header, privacy, storage keys, changelog)
 npm run check   # lint + unit tests (what CI runs first)
-npm run e2e     # Chromium tests against fixture pages on the REA origin (needs playwright)
+npm run e2e:setup  # once: the Playwright version CI pins, plus Chromium
+npm run e2e     # Chromium tests against fixture pages on the REA origin
+npm run live    # local only: one real search, core paths, saves a fresh shape to test/shapes/
 npm run coverage   # unit + e2e line coverage
 node test/e2e/screenshots.js   # regenerate docs/screenshots
 ```

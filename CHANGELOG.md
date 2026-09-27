@@ -2,6 +2,20 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.26.0
+
+- **Floor size**: internal m² from REA's details or the listing text (land, balcony, courtyard and garage areas are skipped), shown on listings as "85 m²", with a **Min m²** filter, a **Price per m²** sort, Size and Per m² rows in Compare, and `floor_m2` / `rent_per_m2` export columns.
+- **Theme** under Settings: System, Light or Dark, for the drawer, launcher, notes and listing bar.
+- **Pause after a bot check**: a 403, a 429 that outlasts the retries, or a challenge page instead of results pauses every fetch (search, Check all, Re-check, card badges) for 10 minutes in that tab, with a banner saying until when. Pages already read still work.
+- **First-run welcome**: a new install shows three lines on what to do first until the first search completes or it's dismissed (instead of nothing).
+- **Big remembered searches fit**: past about 400K characters, the listings furthest down are remembered without their text (amenity tags and filters still work). Settings shows each remembered search's size.
+- **Accessibility**: the buttons on REA's cards are named per listing ("Shortlist 12 Hall St"), pressed and focused controls stay visible in Windows High Contrast, and the keyboard help lists Home / End.
+- `reaFilter.selfcheck()` reads page 1 when no search has run yet, instead of reporting 0% for every field.
+- A second copy of the script on the same page (eg an installed and a dev copy) warns in the console and stops, instead of drawing a second drawer.
+- Project: SECURITY.md and PRIVACY.md, an Idea issue template (blank issues off), a "Before going public" checklist, all screenshots used in the README; `test/shapes/` turns `reaFilter.shape()` output into regression tests; `npm run live` (local only) checks a real search and saves a fresh shape; `npm run e2e:setup` installs the Playwright version CI pins (lint checks they agree); `npm run dev-stub` prints a Tampermonkey stub that loads the working copy.
+- Faster and tidier: the chip counts ("removes 12") come from one pass over the listings instead of one full filter per chip; one click handler for the list; shared helpers for marks writes and JSON storage.
+- `ROWS_VERSION` 12 (rows gained `sqm`): this tab's cached results are refetched once.
+
 ## 2.25.0
 
 - Fixed:
