@@ -1535,6 +1535,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.fill('#rf-sizeMin', '80');
     await waitStatus(page, /^1 of \d+ listings match/);
     assert.match(await page.textContent('.rf-active'), /80\+ m²/);
+    assert.match(await page.getAttribute('.rf-tip', 'aria-label'), /most rentals don't.*left out by Min m²/, 'the ⓘ explains missing sizes');
+    assert.match(await page.$eval('.rf-achip', (b) => b.title), /left out by Min m²/, 'and so does the chip');
     await page.fill('#rf-sizeMin', '');
     await page.selectOption('#rf-sort', 'ppsqm');
     assert.equal(await page.$eval('.rf-item', (el) => el.dataset.id), '146500002', 'the one listing with a size sorts first');

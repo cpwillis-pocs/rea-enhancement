@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.26.0
+// @version      2.26.1
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -1257,6 +1257,8 @@
     }
     return null;
   };
+  // Shown wherever floor size filters or sorts: most rentals don't state it, and text reading can misfire.
+  const SQM_NOTE = "Floor size is only known when REA's details or the listing text state it, and most rentals don't. Listings without a size are left out by Min m² and go last in the Price per m² sort. Sizes read from the text can be wrong (eg a total that includes a balcony).";
   const perSqm = (r) => (Number.isFinite(r.priceNum) && r.sqm > 0 ? Math.round((r.priceNum / r.sqm) * 100) / 100 : null);
   const sqmLabel = (r) => (r.sqm ? `${r.sqm} m²${r.sqmFromText ? ' (from text)' : ''}` : '');
 
@@ -2668,6 +2670,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-checks .rf-chip{font-size:11px;padding:2px 7px}
   .rf-checks .rf-chip[data-state=no]{text-decoration:none;background:transparent;color:var(--rf-err);border-color:var(--rf-err)}
   .rf-weights{border:1px solid var(--rf-line);border-radius:8px;padding:6px 10px;margin:6px 0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .rf-tip{margin-left:4px;color:var(--rf-muted);font-weight:400;text-transform:none;cursor:help;border-radius:50%} .rf-tip:focus-visible{outline:2px solid var(--rf-accent)}
   .rf-weights legend{font-size:12px;color:var(--rf-muted);padding:0 4px}
   .rf-menu{position:relative}
   .rf-menu>summary{list-style:none;cursor:pointer}
@@ -2894,7 +2897,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
           <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
           <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
-          <label title="Internal floor area, from REA's details or the listing text; listings that don't say are left out">Min m²<input type="number" min="0" max="2000" step="5" id="rf-sizeMin" inputmode="numeric"></label>
+          <label title="${esc(SQM_NOTE)}"><span>Min m²<span class="rf-tip" tabindex="0" role="note" aria-label="${esc(SQM_NOTE)}">ⓘ</span></span><input type="number" min="0" max="2000" step="5" id="rf-sizeMin" inputmode="numeric"></label>
         </div>
         <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
           <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
@@ -2973,7 +2976,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <option value="avail">Available date</option>
           <option value="price">Price</option>
           <option value="ppb">Price per bed</option>
-          <option value="ppsqm">Price per m²</option>
+          <option value="ppsqm" title="${esc(SQM_NOTE)}">Price per m²</option>
           <option value="beds">Most beds</option>
           <option value="inspect">Next inspection</option>
           <option value="listed">Newest first</option>
@@ -4161,7 +4164,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   function renderActive() {
     const chips = cache ? removedBy(pool(), cfg) : [];
     ui.active.hidden = !chips.length || ui.view === 'shortlist';
-    ui.active.innerHTML = chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"
+    ui.active.innerHTML = chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"${c.key === 'sizeMin' ? ` title="${esc(SQM_NOTE)}"` : ''}
       aria-label="Remove filter ${esc(c.label)}${c.removes > 0 ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes > 0 ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join('');
     ui.activeChips = chips;
     ui.moreSummary.textContent = `More filters${chips.length ? ` (${chips.length} active)` : ''}`;

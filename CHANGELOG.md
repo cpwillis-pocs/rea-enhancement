@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.26.1
+
+- Floor size disclaimer: an ⓘ next to **Min m²** (hover or focus it), and the same note on the Min m² filter chip and the Price per m² sort, saying most rentals don't state a size, that listings without one are left out or sorted last, and that sizes read from the text can be wrong.
+
 ## 2.26.0
 
 - **Floor size**: internal m² from REA's details or the listing text (land, balcony, courtyard and garage areas are skipped), shown on listings as "85 m²", with a **Min m²** filter, a **Price per m²** sort, Size and Per m² rows in Compare, and `floor_m2` / `rent_per_m2` export columns.
