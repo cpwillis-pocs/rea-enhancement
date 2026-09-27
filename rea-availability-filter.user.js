@@ -255,7 +255,7 @@
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 4; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 5; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -275,7 +275,9 @@
   const dayNum = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS; // local calendar day, DST-proof
   // h: 1 hidden, 0 explicitly shown (overrides an inherited hide), absent: inherit from a relisted-from listing.
   // When hidden, and at what weekly rent: a listing hidden for its price comes back if it drops.
-  const stampHide = (e, t) => { if (e.h) { e.ht = t; if (typeof e.p === 'number') e.hp = e.p; else delete e.hp; } else { delete e.ht; delete e.hp; } };
+  const stampHide = (e, t) => { if (e.h) { e.ht = t; if (typeof e.p === 'number') e.hp = e.p; else delete e.hp; } else { delete e.ht; delete e.hp; delete e.hr; } }; // unhiding drops the reason too
+  // Hidden for its price and cheaper now: shown again, so "hide" means hide it again at this rent.
+  const resurfacedEntry = (e) => !!e?.h && e.hr === 'price' && typeof e.hp === 'number' && typeof e.p === 'number' && e.p < e.hp;
   const hiddenOf = (e, was) => e?.h === 1 || (e?.h !== 0 && !!was?.h && !e?.s);
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
@@ -428,7 +430,7 @@
           r.reviewedAt = e?.rv ? new Date(e.rv) : null;
           r.hideReason = r.hidden && e?.hr ? e.hr : '';
           r.cheaperBy = r.hidden && typeof e?.hp === 'number' && typeof e.p === 'number' && e.p < e.hp ? e.hp - e.p : 0;
-          r.resurfaced = r.cheaperBy > 0 && e.hr === 'price'; // hidden for its price, and it dropped
+          r.resurfaced = resurfacedEntry(e); // hidden for its price, and it dropped
           r.checks = cleanChecks(e?.ck);
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
@@ -446,7 +448,8 @@
         const { m } = fresh();
         const e = entry(m, id);
         // Hide flips what you see, including a hide inherited from the listing this one relists.
-        if (k === 'h') { e.h = hiddenOf(e, e.rl ? m[e.rl] : null) ? 0 : 1; stampHide(e, now()); }
+        if (k === 'h' && resurfacedEntry(e)) stampHide(e, now()); // Hide again, from any button
+        else if (k === 'h') { e.h = hiddenOf(e, e.rl ? m[e.rl] : null) ? 0 : 1; stampHide(e, now()); }
         else e[k] = e[k] ? 0 : 1;
         e.rv = now(); // deciding on it counts as having reviewed it
         if (k === 's') {
@@ -597,7 +600,7 @@
         for (const r of rows) {
           if (!r.id) continue;
           const e = entry(m, r.id);
-          if (!!e[k] === on) continue;
+          if (!!e[k] === on && !(k === 'h' && on && resurfacedEntry(e))) continue;
           e[k] = on ? 1 : 0;
           if (k === 's') { if (on) { e.st = now(); e.d = summary(r); } else delete e.st; }
           if (k === 'h') stampHide(e, now());
@@ -1248,7 +1251,7 @@
     { id: 'stepfree', label: 'Step-free', yes: 'Step-free', neg: /\bwalk[- ]up\b|\bstairs only\b|\bno lift\b|\bsplit[- ]level\b/,
       pos: /\bstep[- ]free\b|\bwheelchair (?:access(?:ible)?|friendly)\b|\blevel (?:entry|access)\b|\bno (?:stairs|steps)\b|\bsingle[- ](?:level|storey)\b/ },
     // Where tenants can only be charged for water if the home is water efficient (eg NSW, VIC).
-    { id: 'watereff', label: 'Water efficient', yes: 'Water efficient', neg: /\bnot water[- ]efficient\b/,
+    { id: 'watereff', label: 'Water efficient', yes: 'Water efficient', neg: /\b(?:not|non)[- ]water[- ]efficien|\b(?:does not|doesn't|do not|don't|fails? to|is not|isn't) (?:meet|comply with|compliant with|in compliance with)[^.]{0,30}water[- ]efficien|\bnot (?:compliant|in compliance) with[^.]{0,20}water[- ]efficien/,
       pos: /\bwater[- ]efficien(?:t|cy)(?: (?:compliant|standards|certified|devices|fixtures))?\b|\b(?:[3-6]|three|four|five|six)[- ]star (?:wels|water)\b|\bwater[- ]saving (?:fixtures|devices|shower ?heads?|taps)\b/ },
   ];
   // "X: No" per amenity, built once.
@@ -1451,7 +1454,8 @@
     if (typeof v === 'string') {
       if (/^https?:\/\//.test(v)) return 'url';
       if (/^\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d\d:?\d\d)?)?$/.test(v)) return 'iso-date';
-      return SHAPE_KEEP.test(key) && v.length <= 40 && !/\d{3,}\s*\w+\s+(?:st|street|rd|road|ave|avenue)\b/i.test(v) ? v : `string(${v.length})`;
+      const personal = /\d{3,}\s*\w+\s+(?:st|street|rd|road|ave|avenue)\b|@|(?:\+?61|\b0)[\s-]?\d(?:[\s-]?\d){7,}|\b\d{4}[\s-]?\d{3}[\s-]?\d{3}\b/i.test(v); // addresses, emails, phone numbers
+      return SHAPE_KEEP.test(key) && v.length <= 40 && !personal ? v : `string(${v.length})`;
     }
     return typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : typeof v;
   };
@@ -1871,7 +1875,7 @@
   const diffStats = (rows) => {
     let fresh = 0, moved = 0, redated = 0, featured = 0, hidden = 0, cheaperHidden = 0, reviewed = 0, total = 0;
     for (const r of dedupe(rows)) {
-      hidden += r.hidden ? 1 : 0;
+      hidden += r.hidden && !r.resurfaced ? 1 : 0; // a resurfaced one is on show
       cheaperHidden += r.hidden && !r.resurfaced && r.cheaperBy > 0 ? 1 : 0; // hidden for another reason, and cheaper now
       if (ruledOut(r)) continue; // changes are counted over what you could still pick, as "Changed recently" shows
       total++; reviewed += r.reviewedAt ? 1 : 0;
@@ -2663,8 +2667,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // gone above the header (a filter change near the top of the drawer stays put).
   const toListTop = () => {
     if (ui.panel.classList.contains('rf-full')) { ui.list.scrollTop = 0; return; }
+    // Header and tabs stick, then the (sticky) status line; the Resume notice and filter chips sit
+    // between it and the list. The list isn't sticky, so its offsetTop is its real place.
     const head = ui.panel.querySelector('.rf-head').offsetHeight + ui.panel.querySelector('.rf-tabs').offsetHeight;
-    if (ui.list.getBoundingClientRect().top < ui.panel.getBoundingClientRect().top + head) ui.panel.scrollTop = ui.list.offsetTop - head;
+    const between = [ui.partial, ui.active].filter((el) => el && !el.hidden).reduce((n, el) => n + el.offsetHeight, 0);
+    if (ui.list.getBoundingClientRect().top < ui.status.getBoundingClientRect().bottom + between) {
+      ui.panel.scrollTop = Math.max(0, ui.list.offsetTop - between - ui.status.offsetHeight - head);
+    }
   };
   const setEmpty = (html) => { ui.list.innerHTML = `<div class="rf-empty">${html}</div>`; };
   const setLaunchCount = (n) => {
@@ -2941,7 +2950,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     peek.hidden = false;
     ui.peekId = r.id;
   };
-  ui.closePeek = () => { peek.hidden = true; ui.peekId = null; peekHover = false; };
+  ui.closePeek = () => { clearTimeout(hoverTimer); peek.hidden = true; ui.peekId = null; peekHover = false; };
   ui.list.addEventListener('mouseover', (e) => {
     const img = e.target.closest('.rf-card img');
     if (!img || ui.peekId) return;
@@ -3001,7 +3010,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ui.list.querySelector(`.rf-item[data-id="${CSS.escape(it.dataset.id)}"]`)?.focus(); // after the re-render
         return true;
       }
-      case 'p': case ' ': if (!cur && e.key === ' ') return false; if (ui.peekId) ui.closePeek(); else ui.showPeek(cur || items[0]); return true;
+      // Space on a button inside the listing presses the button; on the listing itself it's the photo.
+      case 'p': case ' ': if (e.key === ' ' && document.activeElement !== cur) return false; if (ui.peekId) ui.closePeek(); else ui.showPeek(cur || items[0]); return true;
       case 'u': { const undo = ui.status.querySelector('.rf-undo'); if (!undo || undo.textContent !== 'Undo') return false; undo.click(); return true; }
       // Enter opens only when the item itself is focused; on a button it presses the button.
       case 'o': case 'Enter': if (!cur || (e.key === 'Enter' && document.activeElement !== cur)) return false; cur.querySelector('.rf-card')?.click(); return true;
@@ -3274,6 +3284,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }
     };
     const setOpen = (open) => {
+      if (!open) ui.closePeek?.();
       panel.hidden = !open;
       launch.setAttribute('aria-expanded', String(open));
       panel.setAttribute('aria-modal', String(open && narrow.matches));
@@ -3294,6 +3305,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     // Expanded drawer, remembered per browser. Phones are already full screen, so the button is hidden there.
     const expandBtn = panel.querySelector('.rf-expand');
     const setWide = (on, save = true) => {
+      // The element that scrolls changes (drawer ↔ list): carry the listing you're on across.
+      const edge = panel.querySelector('.rf-status').getBoundingClientRect().bottom;
+      const cur = document.activeElement?.closest?.('.rf-item');
+      const keep = cur && panel.contains(cur) ? cur : [...panel.querySelectorAll('.rf-list > .rf-item')].find((el) => el.getBoundingClientRect().bottom > edge + 8);
+      const wasTop = !keep || keep === panel.querySelector('.rf-list > .rf-item');
       panel.classList.toggle('rf-full', on);
       expandBtn.setAttribute('aria-pressed', String(on));
       expandBtn.setAttribute('aria-label', on ? 'Shrink drawer' : 'Expand drawer');
@@ -3303,6 +3319,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ui.applyWidth?.();
       ui.watchMore?.();
       ui.syncSticky?.();
+      if (!panel.hidden && !wasTop) keep.scrollIntoView({ block: 'start' });
     };
     wireResize(panel, narrow);
     setWide(wideKey.get() === '1', false);
@@ -3689,6 +3706,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Where you were in each tab (and for which search + filters), so switching tabs keeps it.
   const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify(cfg)}`);
   function setView(view) {
+    ui.closePeek?.();
     const place = (ui.place ||= {});
     if (ui.view && ui.view !== view) place[ui.view] = { top: listScroller().scrollTop, shown: ui.list.querySelectorAll('.rf-item').length, sig: placeSig(ui.view) };
     const back = place[view]?.sig === placeSig(view) ? place[view] : null;
@@ -3707,7 +3725,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
     ui.keepShown = 0;
     if (back) listScroller().scrollTop = back.top;
-    else if (sl) shortlistPlace();
+    else if (!(sl && shortlistPlace()) && sl) toListTop(); // not the Results tab's scroll offset
     ui.syncSticky?.();
   }
 
@@ -4555,7 +4573,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <button type="button" data-l="min" aria-expanded="false" aria-label="Show listing tools">⋯</button>` : `<button type="button" data-l="s" aria-pressed="${r.starred}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
       ${r.starred ? `<select data-l="as" aria-label="Application status">${statusOptions(r.appStatus)}</select>` : ''}
       <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
-      <button type="button" data-l="h" aria-pressed="${r.hidden}">${r.hidden ? 'Unhide' : 'Hide'}</button>
+      <button type="button" data-l="h" aria-pressed="${r.hidden && !r.resurfaced}">${hideWord(r)}</button>
       <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">–</button>
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
     if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
@@ -4586,9 +4604,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
+  const hideWord = (r) => (r.resurfaced ? 'Hide again' : r.hidden ? 'Unhide' : 'Hide');
   const cardActsHtml = (r) => `<span class="rf-card-acts">` +
     `<button type="button" data-card-act="s" data-id="${esc(r.id)}" aria-pressed="${!!r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>` +
-    `<button type="button" data-card-act="h" data-id="${esc(r.id)}" aria-label="${r.hidden ? 'Unhide' : 'Hide'} listing" title="${r.hidden ? 'Unhide' : 'Hide'} listing">${r.hidden ? 'Unhide' : 'Hide'}</button></span>`;
+    `<button type="button" data-card-act="h" data-id="${esc(r.id)}" aria-label="${hideWord(r)} listing" title="${hideWord(r)} listing">${hideWord(r)}</button></span>`;
 
   // Opening a listing (drawer card or REA's card; left, middle or ctrl click) marks it opened.
   function watchOpens() {

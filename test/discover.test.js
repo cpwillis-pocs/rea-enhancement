@@ -104,3 +104,10 @@ test('shapeOf: structure kept, words out (descriptions, names, addresses, ids, u
   assert.deepEqual(out.inspections, [{ startTime: 'iso-date' }, '(2 items)']);
   assert.equal(out.generalFeatures.bedrooms.value, 'number');
 });
+
+test('shapeOf: phone numbers and emails in display strings are taken out', () => {
+  const out = core.shapeOf({ agent: { phoneNumber: { display: '0491 570 156' }, email: { display: 'jane.d@example.com' } }, price: { display: '$650 per week' } });
+  assert.equal(out.agent.phoneNumber.display, 'string(12)');
+  assert.equal(out.agent.email.display, 'string(18)');
+  assert.equal(out.price.display, '$650 per week');
+});

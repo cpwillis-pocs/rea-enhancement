@@ -98,3 +98,10 @@ test('amenity detail: pets welcome vs on application, heating type, water effici
   assert.deepEqual(tags('Not water efficient.'), []);
   assert.deepEqual(core.amenityTags({ amen: { pets: 'yes' } }), ['Pets OK'], 'no text (shortlist from another search)');
 });
+
+test('water efficient: statements that it is not are not a yes', () => {
+  const we = (x) => core.amenitiesOf({ text: x.toLowerCase() }).watereff;
+  for (const x of ['The property does not meet water efficiency standards, so water usage is charged.', 'The home is not compliant with water efficiency standards.', 'Non-water-efficient fixtures.'])
+    assert.notEqual(we(x), 'yes', x);
+  assert.equal(we('Water efficient fixtures throughout.'), 'yes');
+});

@@ -1423,6 +1423,37 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 40. Audit fixes: Space presses a focused button (not the photo peek); a sort change deep in
+  // the drawer lands the first result below the status line; the first Shortlist visit starts at
+  // its top; the peek closes with the drawer; expanding keeps the listing you were on in view.
+  await block('40', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await open(ctx, SEARCH, { route: serve([], { pages: 4, perPage: 15 }) });
+    await page.click('#rf-launch'); await page.click('#rf-run');
+    await waitStatus(page, /60 listings match|of 60 listings match/, 20000);
+    await page.focus('.rf-item:nth-child(2) [data-act=s]'); await page.keyboard.press(' ');
+    assert.equal(Object.values(await marks(page)).filter((e) => e.s).length, 1, 'Space shortlisted');
+    assert.ok(await page.$('.rf-peek[hidden]'), 'no photo opened');
+    await page.$eval('#rf-panel', (p) => { p.scrollTop = 3000; });
+    await page.selectOption('#rf-sort', 'price');
+    const [statusBottom, firstTop] = await page.evaluate(() => [document.querySelector('.rf-status').getBoundingClientRect().bottom, document.querySelector('.rf-item').getBoundingClientRect().top]);
+    assert.ok(firstTop >= statusBottom - 1, `first result below the status line (${firstTop} vs ${statusBottom})`);
+    await page.selectOption('.rf-bulk', 'star');
+    await page.$eval('#rf-panel', (p) => { p.scrollTop = 6000; });
+    await page.click('[data-view=shortlist]');
+    assert.ok(await page.evaluate(() => { const b = document.querySelector('.rf-sl-bar').getBoundingClientRect(); return b.bottom > 0 && b.top < innerHeight; }), 'shortlist opens at its top');
+    await page.click('[data-view=results]');
+    await page.focus('.rf-item'); await page.keyboard.press('p');
+    await page.click('#rf-panel .rf-x'); await page.click('#rf-launch');
+    assert.ok(await page.$('.rf-peek[hidden]'), 'peek closed with the drawer');
+    const id = await page.$$eval('.rf-item', (e) => e[30].dataset.id);
+    await page.focus(`.rf-item[data-id="${id}"]`); await page.keyboard.press('e');
+    assert.ok(await page.$eval(`.rf-item[data-id="${id}"]`, (el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }), 'still in view after expanding');
+    await page.keyboard.press('e');
+    console.log('space, scroll after sort, shortlist top, peek close, expand place: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

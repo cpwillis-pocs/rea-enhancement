@@ -622,3 +622,22 @@ test('reviewed: set by hand or by deciding (shortlist, hide, note), filtered, co
   st.restoreDump(before); st.decorate(rows);
   assert.equal(rows[0].reviewedAt, null, 'bulk undo clears it');
 });
+
+test('resurfaced listing: any hide button or bulk hide hides it again; unhiding drops the reason', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const at = (price) => row('146500095', `$${price} per week`);
+  st.observe([at(800)]); st.toggle('146500095', 'h'); st.setHideReason('146500095', 'price');
+  t += 864e5; const now = [at(700)]; st.observe(now); st.decorate(now);
+  assert.equal(now[0].resurfaced, true);
+  assert.equal(st.toggle('146500095', 'h'), true, "card / listing bar button: hide again, not unhide");
+  st.decorate(now); assert.equal(now[0].resurfaced, false); assert.equal(now[0].hidden, true);
+  t += 864e5; const cheaper = [at(650)]; st.observe(cheaper); st.decorate(cheaper);
+  assert.equal(cheaper[0].resurfaced, true);
+  assert.equal(st.setMany(cheaper, 'h', true), 1, 'bulk Hide all shown counts it');
+  st.decorate(cheaper); assert.equal(cheaper[0].resurfaced, false);
+  // Unhide, then hide with no reason: a later drop doesn't bring it back.
+  st.toggle('146500095', 'h'); st.toggle('146500095', 'h');
+  t += 864e5; const again = [at(600)]; st.observe(again); st.decorate(again);
+  assert.deepEqual([again[0].hideReason, again[0].resurfaced], ['', false]);
+});
