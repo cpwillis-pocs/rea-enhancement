@@ -2656,6 +2656,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     font:600 11px/1.2 system-ui,-apple-system,sans-serif!important;background:rgba(255,255,255,.95)!important;color:#111!important;box-shadow:0 1px 3px rgba(0,0,0,.3)!important}
   .rf-badge .rf-card-acts button:hover{background:#fff!important}
   .rf-badge .rf-card-acts button[aria-pressed=true]{background:#e6a700!important}
+  /* Windows High Contrast drops backgrounds: pressed chips and buttons use system colours instead. */
+  @media (forced-colors: active){
+    #rf-panel [aria-pressed=true],#rf-lbar [aria-pressed=true],.rf-badge [aria-pressed=true]{forced-color-adjust:none;background:Highlight!important;color:HighlightText!important;border:1px solid Highlight!important}
+    #rf-panel :focus-visible,#rf-lbar :focus-visible,.rf-badge :focus-visible{outline:2px solid Highlight!important;outline-offset:1px}
+    #rf-launch{border:1px solid ButtonText}
+  }
   .rf-badge .rf-card-acts button:focus-visible{outline:2px solid #087a50!important;outline-offset:1px!important}
   .rf-badge .rf-b-now{background:#087a50!important}
   .rf-badge .rf-b-none{background:rgba(90,90,90,.85)!important}
@@ -2903,7 +2909,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     <div class="rf-help" id="rf-help" hidden>
       <strong>Keyboard</strong>
       <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, PgUp / PgDn</dt><dd>first / last, 5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
+      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
       <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
     </div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
@@ -4685,9 +4691,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
   const hideWord = (r) => (r.resurfaced ? 'Hide again' : r.hidden ? 'Unhide' : 'Hide');
-  const cardActsHtml = (r) => `<span class="rf-card-acts">` +
-    `<button type="button" data-card-act="s" data-id="${esc(r.id)}" aria-pressed="${!!r.starred}" aria-label="Shortlist" title="${r.starred ? 'Remove from shortlist' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>` +
-    `<button type="button" data-card-act="h" data-id="${esc(r.id)}" aria-label="${hideWord(r)} listing" title="${hideWord(r)} listing">${hideWord(r)}</button></span>`;
+  // Named per listing, so a screen reader's button list isn't 25 identical "Shortlist"s.
+  const cardActsHtml = (r) => {
+    const where = esc(String(r.address || '').split(',')[0].trim() || 'listing');
+    return `<span class="rf-card-acts">` +
+      `<button type="button" data-card-act="s" data-id="${esc(r.id)}" aria-pressed="${!!r.starred}" aria-label="Shortlist ${where}" title="${r.starred ? 'Remove from shortlist' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>` +
+      `<button type="button" data-card-act="h" data-id="${esc(r.id)}" aria-label="${hideWord(r)} ${where}" title="${hideWord(r)} listing">${hideWord(r)}</button></span>`;
+  };
 
   // Opening a listing (drawer card or REA's card; left, middle or ctrl click) marks it opened.
   function watchOpens() {

@@ -420,6 +420,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForSelector('article > .rf-badge [data-card-act=s]');
     await page.evaluate(() => { window.__reaClicks = 0; document.querySelector('article').addEventListener('click', () => window.__reaClicks++); });
     const id = await page.$eval('article > .rf-badge [data-card-act=s]', (b) => b.dataset.id);
+    assert.match(await page.$eval('article > .rf-badge [data-card-act=s]', (b) => b.getAttribute('aria-label')), /^Shortlist \d+\/\d+ \w+ (St|Ave|Rd)$/, 'named per listing');
     await page.click(`article > .rf-badge [data-card-act=s][data-id="${id}"]`);
     await page.waitForFunction((i) => document.querySelector(`[data-card-act=s][data-id="${i}"]`)?.getAttribute('aria-pressed') === 'true', id);
     assert.equal(await page.evaluate(() => window.__reaClicks), 0, 'click did not reach REA');
@@ -1509,8 +1510,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await p2.click('#rf-launch');
     assert.equal(await bg(p2, '#rf-panel'), 'rgb(28, 28, 32)', 'Dark overrides a light system, from saved settings');
     assert.equal(await p2.$eval('#rf-panel', (el) => getComputedStyle(el).colorScheme), 'dark');
-    console.log('theme setting: ok');
     await done(p2); await light.close();
+    const hc = await browser.newContext({ forcedColors: 'active' });
+    const p3 = await open(hc);
+    await p3.click('#rf-launch');
+    await p3.click('.rf-sortdir');
+    assert.equal(await p3.$eval('.rf-sortdir', (el) => getComputedStyle(el).forcedColorAdjust), 'none', 'pressed buttons keep a visible state in High Contrast');
+    await done(p3); await hc.close();
+    console.log('theme setting, forced colours: ok');
   });
 
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
