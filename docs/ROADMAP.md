@@ -73,6 +73,7 @@ When you build one, move it into the CHANGELOG, update this page, and add its e2
 ## Releasing
 
 1. `npm run ci` and `COVERAGE_MIN=98 npm run coverage` pass locally.
+1. `npm run live` passes (local only: one real search, core paths, card detection). If it saves a shape that differs from the last one in `test/shapes/`, check it has nothing personal and commit it.
 2. Bump `// @version`, and add a `## x.y.z` section at the top of CHANGELOG.md.
 3. For a release worth announcing, update `WHATS_NEW` (at most 3 short lines). Lint checks its version.
 4. If the UI changed visibly, run `npm run screenshots` and commit `docs/screenshots`.

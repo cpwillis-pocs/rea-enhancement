@@ -1366,6 +1366,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await count(page, '.rc-body .rf-badge'), 0, 'on the card, not an inner box');
     await page.hover('div.rc'); await page.click('div.rc [data-card-act=s]');
     assert.equal(Object.values(await marks(page)).filter((e) => e.s).length, 1);
+    const early = await page.evaluate(() => window.reaFilter.selfcheck());
+    assert.match(early, /rows: 6 \(page 1 only: no search run yet\)/, 'selfcheck before a search reads page 1');
+    assert.match(early, /price 83%\/\?, .*coordinates 100%/, 'fill rates from page 1, not 0%');
     await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-priceMax', '600'); await page.dispatchEvent('#rf-priceMax', 'change');

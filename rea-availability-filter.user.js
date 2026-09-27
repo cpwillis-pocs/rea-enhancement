@@ -5003,10 +5003,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     },
     // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
     selfcheck: () => {
-      const rows = cache || [];
+      // Before any search, page 1's own data stands in, so the fill rates aren't all 0%.
+      const early = !cache && !!boot;
+      const rows = cache || (early ? rowsFrom(boot.results) : []);
       const rates = fillRates(rows), usual = health.usual();
       const report = [
-        `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${truncated ? ' (truncated)' : ''}`,
+        `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${early ? ' (page 1 only: no search run yet)' : truncated ? ' (truncated)' : ''}`,
         `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
         `cards: ${cardInfo.found} found (${cardInfo.mode === 'fallback' ? 'fallback: REA no longer uses <article>' : cardInfo.mode})`,
         `results path: ${resultsPath.key ? `${resultsPath.key}.${resultsPath.field}${resultsPath.fallback ? ' (fallback: REA renamed it)' : ''}` : 'not read yet'}`,

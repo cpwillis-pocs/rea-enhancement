@@ -41,6 +41,7 @@ for (const f of ['SECURITY.md', 'PRIVACY.md']) if (!read('README.md').includes(`
 const pwLocal = JSON.parse(read('package.json')).scripts?.['e2e:setup']?.match(/playwright@(\d+\.\d+\.\d+)/)?.[1];
 const ciPath = path.join(root, '.github/workflows/ci.yml');
 const pwCi = fs.existsSync(ciPath) ? fs.readFileSync(ciPath, 'utf8').match(/PLAYWRIGHT_VERSION:\s*(\S+)/)?.[1] : pwLocal;
+if (fs.existsSync(ciPath) && /live\.js|npm run live/.test(fs.readFileSync(ciPath, 'utf8'))) err('CI must not run the live check (test/live.js hits the real REA site)');
 if (!pwLocal || pwLocal !== pwCi) err(`package.json e2e:setup installs playwright@${pwLocal}, CI pins ${pwCi}: keep them the same`);
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
