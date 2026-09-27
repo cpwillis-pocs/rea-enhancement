@@ -2,6 +2,25 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.30.0
+
+- **Applications close**: a deadline in the listing text ("Applications close Fri 3 Oct", "closing date for applications: 3/10") shows as "Apply by …"; within 3 days of it, a shortlisted listing you haven't applied for goes under Needs action with Mark applied. It's in CSV (`apply_by`), Compare and the calendar.
+- **Inspections at my times**: under Inspections I can make, "At my times" keeps listings with a session you can get to, from days and hours you type (eg `Sat 9-13, Sun, weekdays 17:30-`), in the listing's own time zone. Clear keeps your times; backups carry them.
+- **Cash to move**: move-in cost plus any rent paid twice while your lease overlaps, as a sort (Least cash to move), a Compare row and a CSV column.
+- **Calendar reminders**: the whole-list calendar export adds an all-day "Follow up" for applications with no answer after 5 days, each "Applications close" date, and your own lease end. Re-importing moves them rather than adding copies.
+- **Notes on the listing page** are edited in the bar (several lines, Esc cancels) instead of a browser prompt, and the bar's minute update no longer eats what you're typing.
+- Fixed:
+  - The safety copy was overwritten by the first star after storage was wiped, losing the shortlist it was there to bring back. It's now left alone until its offer is answered, a wipe during a visit is noticed too, and a partial loss is offered back ("Some of your shortlist…"). Changes made from the listing-page bar, presets and hidden agencies or suburbs are copied too.
+  - Listing text like "just a moment's walk to the beach", or a page loading reCAPTCHA, could make a changed REA page look like a bot check and pause every tab.
+  - Another tab's search wiped this tab's "Listing hidden. Undo" and its hide reasons.
+  - On the listing-page bar, the minute update moved focus to the first checklist item or star.
+  - The "Listing hidden" note by the launcher timed out while you were tabbing through it, and dropped focus after a click.
+  - The format-change and "script errors" warnings now go away (after a good search, and after a quiet minute).
+  - Alt+Shift+F pressed during startup opens on the listing you were on, like the launcher.
+  - A hand-edited setting or backup with an impossible date no longer breaks the filter chips.
+  - The listing-page bar scrolls rather than running off a small phone screen.
+- Internals: the script is folded into 21 `#region`s, listed in ARCHITECTURE's Section index and checked by lint; the keyboard help comes from one table, tested against the handlers and the README; a shape-mutation test deletes or retypes every path the script reads and checks the row survives; `npm run live` is optional while the repo is private.
+
 ## 2.29.0
 
 - **Safety copy**: your shortlist, notes, statuses, presets and settings are also kept in this browser's IndexedDB. If REA's page or a cleanup wipes the storage the script shares with it, the drawer says so and offers them back (with the restore preview and Undo); Cancel discards the copy. Delete all my data deletes it too.

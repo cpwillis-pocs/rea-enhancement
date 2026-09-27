@@ -2,20 +2,20 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.29.0)
+## Where it stands (v2.30.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
 | Area | What exists |
 |---|---|
-| **Finding** | Crawl every page of a search (one page at a time, capped, resumable after a failure). Filters: dates, rent, move-in cost, beds/baths/cars, floor size, several property types, 19 amenities, heads-up clauses, lease length, taken listings, inspection day or "inspections I can make", distance to up to 3 places, building. Keywords with OR and accent folding. 12 sorts (including price per m²), each reversible. |
-| **Judging** | Map view, rent trend per remembered search, tag tooltips quoting the text each tag was read from, amenity detail (pets welcome vs on application, heating type, water efficient), rent vs the median in the listing's own suburb, best-match score with adjustable weights, move-in cost and bond flag, lease overlap or gap against your current lease, share of income, price and date change history, relists, twin listings, market view. |
+| **Finding** | Crawl every page of a search (one page at a time, capped, resumable after a failure). Filters: dates, rent, move-in cost, beds/baths/cars, floor size, several property types, 19 amenities, heads-up clauses, lease length, taken listings, inspection day or "inspections I can make" (weekends, evenings or your own typed times), distance to up to 3 places, building. Keywords with OR and accent folding. 13 sorts (including price per m² and cash to move), each reversible. |
+| **Judging** | Map view, rent trend per remembered search, tag tooltips quoting the text each tag was read from, amenity detail (pets welcome vs on application, heating type, water efficient), rent vs the median in the listing's own suburb, best-match score with adjustable weights, move-in cost and bond flag, cash to move, applications-close dates, lease overlap or gap against your current lease, share of income, price and date change history, relists, twin listings, market view. |
 | **Deciding** | Shortlist across searches with notes, checklist, your 1–5 rating, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text. |
-| **Inspecting** | The next stop and your checklist on the listing page, inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders, after-inspection prompts, cancelled-inspection notices. |
+| **Inspecting** | The next stop and your checklist on the listing page, inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders (plus follow-ups, application deadlines and your lease end), after-inspection prompts, cancelled-inspection notices. |
 | **Returning** | Remembered and pinned searches with new / gone listings and a rent trend, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
 | **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Full keyboard control, dark mode (system, or set in Settings), phone layout, screen-reader labels (card buttons named per listing), High Contrast styles, a first-run welcome, badges and quick actions on REA's own cards, a bar on listing pages. |
 | **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a safety copy in IndexedDB, a size budget for remembered searches, a 10-minute pause after a bot check, a double-run guard, a one-time what's-new note after updates. |
-| **Project** | 203 unit tests (including shapes from `reaFilter.shape()`), 70 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, a local live check (`npm run live`), and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Project** | 211 unit tests (including shapes from `reaFilter.shape()`), 73 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, an optional local live check (`npm run live`), editor `#region`s with a checked Section index, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -50,7 +50,15 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 
 ## Ideas not built yet
 
-Everything from the 2.28.0 audit (ten ideas, its bugs and its slow spots) shipped in 2.29.0 (see the [CHANGELOG](../CHANGELOG.md#2290)), except, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. Also still open: doing the end-of-search save in a later task. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
+The 2.29.0 audit's bugs and eight of its ideas shipped in 2.30.0 (see the [CHANGELOG](../CHANGELOG.md#2300)). Waiting on a maintainer decision:
+
+- **Street and noise heads-up** (busy/main road, above shops or a bar, backs onto a rail line, flight path, construction next door) as new heads-up chips. Product call: five more chips, and false positives such as "close to Parramatta Rd shops".
+- **Agency patterns in Market view** (per agency: share with a price drop, median days listed, relists, taken-but-still-listed). Product call: it judges named agencies.
+- **Table-driven Settings** (one spec generating the markup, `DEFAULT_CFG`, the setting names and value checks). Worth it before the next few settings; 2.30.0 already checks dates and sorts.
+- A **notice-to-vacate date** alongside the lease-end reminder needs per-state rules, which cuts against the flat-bond decision.
+- The **preset name** is still a browser prompt (single line, so less pressing than the note was).
+
+Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. Also still open: doing the end-of-search save in a later task. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
 
 ## Releasing
 

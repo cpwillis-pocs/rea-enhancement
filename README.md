@@ -29,7 +29,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Sort (⇅ reverses it; listings without the value stay last) by available date, price, price per bed, price per m², best value vs median, **best match**, nearest, most beds, next inspection, newest first. Best match is a 0-100 score from rent vs your budget (or the median), timing vs your "from" date, distance and move-in cost, weighted as you choose in Settings; hover it to see the parts.
 - **Move-in cost** (bond + 2 weeks' rent) on every listing; bonds above 4 weeks' rent are flagged.
 - **Lease overlap**: with your current lease end set, each listing shows the days of double rent (and cost) or the nights you'd need to cover, sortable.
-- **Lease term** and **Apply via** portal picked out of the text; filter out leases shorter than you need; availability read from the description when REA's date is missing.
+- **Lease term**, **Apply via** portal and **applications-close date** ("Apply by Fri 3 Oct") picked out of the text, with a Needs action nudge on your shortlist within 3 days of the deadline; filter out leases shorter than you need; availability read from the description when REA's date is missing.
 - **Same building**: see other units in the building, spot the same place listed twice, or keep one listing per building.
 - **Rent vs median** for the same bed count in your results (eg "12% below 2-bed median"); when a search spans several suburbs, each listing is compared with its own suburb ("at median for Maroubra 2-bed").
 - **Taken listings**: "Deposit taken", "Under application" or "Leased" in the listing text is tagged in the drawer and on REA's cards; **Hide listings already taken** filters them out.
@@ -47,7 +47,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Photo peek**: p or Space (or hover a thumbnail) shows a large photo; j/k flip through listings with it open.
 - **Reviewed**: going past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed; **Not reviewed yet** (More filters) and "reviewed 34 of 150" in the status line keep your place across visits.
 - **Hidden for the price?** Give "price" as the reason and the listing comes back, tagged "$110 cheaper since you hid it", if its rent drops. Reasons can be set or changed later from a hidden listing's ⋯ menu.
-- **Inspections I can make**: keep only listings with an open home on a weekend or after 5pm.
+- **Inspections I can make**: keep only listings with an open home on a weekend, after 5pm, or at **your own times** (type days and hours, eg `Sat 9-13, Sun, weekdays 17:30-`; read in the listing's time zone).
 - **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, Shift+1–5 your rating, o or Enter open, t Results/Shortlist, m market view, v map, f filters, d compact, e expand, / keywords, ? help, Esc close; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
@@ -93,7 +93,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ![Map view](docs/screenshots/map.jpg)
 
-**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
+**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). The whole-list export also adds all-day reminders to follow up applications with no answer, for application deadlines, and for your own lease end. Spreadsheet columns include weekly rent, $/bed, move-in cost, cash to move (move-in plus any lease overlap), apply-by date, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
 
 **Dark mode** follows your system, or pick Light or Dark under Settings → Theme. **Mobile width** follows the screen. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 
