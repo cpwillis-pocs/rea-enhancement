@@ -3563,6 +3563,51 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   });
   }
 
+  // Safety copy: localStorage is shared with REA's own code, and whatever clears it takes the
+  // shortlist with it. What a backup would hold (your choices, presets, settings) is mirrored into
+  // IndexedDB a moment after each change; if this browser's marks come back empty and a copy
+  // exists, the drawer offers to restore it (same preview and undo as a backup file).
+  const MIRROR_DB = `${TOOL_PREFIX}mirror`, MIRROR_DELAY_MS = 2000;
+  const idbOpen = () => new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(MIRROR_DB, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (e) { reject(e); }
+  });
+  const idbDo = async (mode, fn) => {
+    const db = await idbOpen();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction('kv', mode), req = fn(tx.objectStore('kv'));
+        tx.oncomplete = () => resolve(req?.result);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  };
+  let mirrorTimer = 0;
+  const mirrorSoon = () => {
+    clearTimeout(mirrorTimer);
+    mirrorTimer = setTimeout(() => {
+      const data = marks.exportData();
+      if (!Object.keys(data.m).length) return; // never overwrite a copy with nothing (that's when it's needed)
+      data.presets = presets.exportData();
+      data.cfg = backupCfg(cfg);
+      idbDo('readwrite', (st) => st.put({ at: Date.now(), data }, 'copy')).catch(() => { /* private window, blocked */ });
+    }, MIRROR_DELAY_MS);
+  };
+  const offerMirror = async () => {
+    const c = marks.counts();
+    if (!isSearchPage(location.href) || c.starred || c.hidden || c.notes) return; // the offer lives in the drawer
+    const rec = await idbDo('readonly', (st) => st.get('copy')).catch(() => null);
+    if (!isObj(rec?.data?.m) || !Object.keys(rec.data.m).length) return;
+    ui.offerRestore(rec.data, `Your shortlist in this browser has gone (its storage was cleared). A safety copy from ${ago(Date.now() - rec.at)} has`);
+    ui.restoreFromMirror = true; // Cancel then drops the copy, so emptying the shortlist on purpose isn't asked about again
+  };
+  const dropMirror = () => idbDo('readwrite', (st) => st.delete('copy')).catch(() => {});
+
+
   // Shortlist bar: Backup, Restore (preview, then undo), Share, Re-check, Print and the More menu,
   // plus the incoming-share offer. Needs the drawer pieces build() made.
   function wireShortlistBar(panel) {
@@ -3640,6 +3685,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   panel.querySelector('[data-forget]').addEventListener('click', () => {
     if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
     for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
+    clearTimeout(mirrorTimer);
+    try { indexedDB.deleteDatabase(MIRROR_DB); } catch { /* blocked */ }
     document.getElementById('rf-remind')?.remove();
     marks.invalidate();
     location.reload();
@@ -3684,24 +3731,32 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       let data;
       try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
       if (data?.app !== 'rea-enhancement' || data?.kind !== 'marks' || !isObj(data.m)) throw new Error('Not an rea-enhancement backup.');
-      // Say what it will do first: a restore merges into what's here and can change settings.
-      const sm = backupSummary(data, cfg);
-      const parts = [plural(sm.listings, 'listing') + (sm.listings ? ` (${sm.shortlisted} shortlisted, ${sm.hidden} hidden)` : ''),
-        cfg.remember && sm.searches ? plural(sm.searches, 'saved search', 'es') : '', sm.presets ? plural(sm.presets, 'preset') : ''].filter(Boolean);
-      restoreIn.querySelector('.rf-restore-msg').textContent = `Restore ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
-      restoreIn.hidden = false;
-      ui.pendingRestore = data;
-      restoreIn.querySelector('[data-restore=yes]').focus();
+      ui.offerRestore(data);
     } catch (err) { setStatus(err.message, true); }
   });
   const restoreIn = panel.querySelector('.rf-restore-in');
+  // Say what it will do first: a restore merges into what's here and can change settings.
+  // `lead` opens the sentence ("Restore …", or where a safety copy came from).
+  ui.offerRestore = (data, lead = 'Restore') => {
+    ui.restoreFromMirror = false;
+    const sm = backupSummary(data, cfg);
+    const parts = [plural(sm.listings, 'listing') + (sm.listings ? ` (${sm.shortlisted} shortlisted, ${sm.hidden} hidden)` : ''),
+      cfg.remember && sm.searches ? plural(sm.searches, 'saved search', 'es') : '', sm.presets ? plural(sm.presets, 'preset') : ''].filter(Boolean);
+    restoreIn.querySelector('.rf-restore-msg').textContent = `${lead} ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
+    restoreIn.hidden = false;
+    ui.pendingRestore = data;
+    if (!ui.panel.hidden) restoreIn.querySelector('[data-restore=yes]').focus();
+  };
   restoreIn.addEventListener('click', (e) => {
     const b = e.target.closest('[data-restore]');
     if (!b) return;
     const data = ui.pendingRestore;
     restoreIn.hidden = true;
     ui.pendingRestore = null;
-    if (b.dataset.restore !== 'yes' || !data) return setStatus('Restore cancelled.');
+    if (b.dataset.restore !== 'yes' || !data) {
+      if (ui.restoreFromMirror) { ui.restoreFromMirror = false; dropMirror(); return setStatus('Safety copy discarded.'); }
+      return setStatus('Restore cancelled.');
+    }
     // Undo puts the three stores and the settings back exactly as they were.
     const ls = storageOr('localStorage'), keys = [MARKS_KEY, SNAP_KEY, PRESETS_KEY];
     const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
@@ -4180,6 +4235,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       applyTheme();
       sortDir.setAttribute('aria-pressed', String(!!cfg.sortDesc));
       saveCfg(mergeCfg({ ...DEFAULT_CFG, ...loadCfg() }, cfgBase, cfg));
+      mirrorSoon();
       cfgBase = { ...cfg };
       if (!cfg.remember || !cfg.remindSaved) document.getElementById('rf-remind')?.remove();
       if (wasRemember && !cfg.remember) { // opting out also forgets what was stored
@@ -4639,6 +4695,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // checklist tick): the list then rebuilds just those, if its order is unchanged.
   function refreshMarks(only = null) {
     ui.onlyIds = only ? new Set(only) : null;
+    mirrorSoon();
     ui.paintStorage?.();
     marks.decorate([...known.values()]); // cache rows are mostly these same objects (learn)
     if (cache) marks.decorate(cache.filter((r) => known.get(r.id) !== r));
@@ -5772,6 +5829,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         step('saved', renderSaved);
         step('remind', remindSaved);
         step('backup nudge', nudgeBackup);
+      step('safety copy', () => (typeof indexedDB === 'undefined' ? null : offerMirror()));
         step('annotate', ensureVisiblePage);
         ui.panel.dataset.rfReady = '1'; // every startup step has run (tests wait on it)
         if (ui.openWhenReady) { ui.openWhenReady = false; ui.launch.click(); }

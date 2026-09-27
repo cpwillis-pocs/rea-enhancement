@@ -1571,7 +1571,6 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const warned = [];
     page.on('console', (m) => { if (m.type() === 'warning' && /another copy/.test(m.text())) warned.push(m.text()); });
     await page.addScriptTag({ content: SCRIPT });
-    await page.waitForFunction(() => true);
     assert.equal(await page.$$eval('#rf-panel', (els) => els.length), 1, 'one drawer');
     assert.equal(await page.$$eval('#rf-launch', (els) => els.length), 1, 'one launcher');
     assert.equal(warned.length, 1, 'the second copy says why it stopped');
@@ -1874,6 +1873,41 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
     assert.match(await page.evaluate(() => window.reaFilter.selfcheck()), /annotate: boom from a test/);
     console.log('own errors logged and shown: ok');
+    await done(page); await ctx.close();
+  });
+
+  // 56. Safety copy: choices are mirrored into IndexedDB; after this site's storage is cleared, the
+  // drawer offers them back (preview, Restore); Cancel discards the copy for good.
+  await block('56', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const id = await page.$eval('.rf-item', (el) => el.dataset.id);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
+    await page.clock.runFor(2500); // past MIRROR_DELAY_MS
+    const copied = () => page.evaluate(() => new Promise((res) => {
+      const r = indexedDB.open('rea-avail-filter/mirror', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(g.result ? Object.keys(g.result.data.m) : null); r.result.close(); }; };
+    }));
+    assert.deepEqual(await copied(), [id], 'the shortlist is mirrored');
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    await page.click('#rf-launch');
+    await page.waitForSelector('.rf-restore-in:not([hidden])');
+    assert.match(await page.textContent('.rf-restore-msg'), /has gone \(its storage was cleared\)\. A safety copy from .* has 1 listing \(1 shortlisted/);
+    await page.click('[data-restore=yes]');
+    await waitStatus(page, /^Restored 1 listing/);
+    assert.equal((await marks(page))[id].s, 1, 'shortlist back');
+    // Emptied on purpose: Cancel drops the copy, and it isn't offered again.
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    await page.click('#rf-launch');
+    await page.waitForSelector('.rf-restore-in:not([hidden])');
+    await page.click('[data-restore=no]');
+    await waitStatus(page, /^Safety copy discarded/);
+    await page.waitForFunction(() => new Promise((res) => { const r = indexedDB.open('rea-avail-filter/mirror', 1); r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(!g.result); r.result.close(); }; }; }));
+    console.log('safety copy: ok');
     await done(page); await ctx.close();
   });
 

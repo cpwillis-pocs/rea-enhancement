@@ -84,6 +84,8 @@ for (const m of body.matchAll(/\b(?:XMLHttpRequest|WebSocket|EventSource|navigat
 const literals = [...body.matchAll(/'rea-avail-filter\/[^']*'/g)];
 if (literals.length !== 1 || !/const TOOL_PREFIX = 'rea-avail-filter\/';/.test(body))
   for (const m of literals.slice(1)) err(`storage key literal ${m[0]}: build it from TOOL_PREFIX`, lineOf(bodyStart + m.index));
+for (const m of body.matchAll(/\bindexedDB\.(?:open|deleteDatabase)\(\s*['"`]/g))
+  err('IndexedDB opened by a literal name: use a constant built from TOOL_PREFIX', lineOf(bodyStart + m.index));
 for (const m of body.matchAll(/\b(?:local|session)Storage\.(?:setItem|getItem|removeItem)\(\s*['"`]/g))
   err('storage accessed with a literal key: use a *_KEY constant built from TOOL_PREFIX', lineOf(bodyStart + m.index));
 
