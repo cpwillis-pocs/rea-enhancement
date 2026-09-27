@@ -576,6 +576,7 @@
               lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
               inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
               inspectCancelled: Array.isArray(e.ic) && now() - e.ic[0] < CANCEL_SHOW_MS ? clip(e.ic[1], 80) : '',
+              inspectCancelledAt: Array.isArray(e.ic) && typeof e.ic[2] === 'number' ? e.ic[2] : null, // so a calendar can cancel it
             };
           });
       },
@@ -2374,6 +2375,7 @@
   };
   // `alarm`: minutes before each inspection for a reminder (0 = none; some calendars ignore
   // reminders in imported files).
+  const geo = (r) => (Number.isFinite(r.lat) && Number.isFinite(r.lng) ? `GEO:${r.lat.toFixed(6)};${r.lng.toFixed(6)}` : '');
   const toIcs = (rows, now = Date.now(), { alarm = 0 } = {}) => {
     const events = [];
     const seen = new Set();
@@ -2385,11 +2387,22 @@
         seen.add(uid);
         events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`,
           `DURATION:PT${INSPECT_MINUTES}M`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
-          `LOCATION:${icsText(r.address)}`, r.url ? `URL:${r.url}` : '',
+          `LOCATION:${icsText(r.address)}`, geo(r), r.url ? `URL:${r.url}` : '',
           `DESCRIPTION:${icsText([r.price, r.available && `Available ${r.available}`, r.agency, r.applyVia && `Apply via ${r.applyVia}`, leaseText(r.lease), r.appStatus && `Status: ${r.appStatus}`, r.note].filter(Boolean).join(' | '))}`,
           ...(alarm > 0 ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(`Inspection: ${r.address || 'rental'}`)}`, `TRIGGER:-PT${Math.round(alarm)}M`, 'END:VALARM'] : []),
           'END:VEVENT'].filter(Boolean));
       }
+    }
+    // A session REA cancelled goes out again with the same UID and STATUS:CANCELLED, so importing
+    // the file again takes it out of the calendar (where the app honours it).
+    for (const r of rows) {
+      const at = r.inspectCancelledAt;
+      if (typeof at !== 'number' || at < now - INSPECT_GRACE_MS) continue;
+      const uid = `${r.id}-${at}@rea-enhancement`;
+      if (seen.has(uid)) continue;
+      seen.add(uid);
+      events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(at)}`, `DURATION:PT${INSPECT_MINUTES}M`,
+        'SEQUENCE:1', 'STATUS:CANCELLED', `SUMMARY:${icsText(`Cancelled: inspection ${r.address || 'rental'}`)}`, `LOCATION:${icsText(r.address)}`, geo(r), 'END:VEVENT'].filter(Boolean));
     }
     if (!events.length) return '';
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
