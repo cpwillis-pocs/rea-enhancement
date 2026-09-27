@@ -290,6 +290,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
     const ics2 = fs.readFileSync(await dl2.path(), 'utf8');
     assert.equal((ics2.match(/BEGIN:VEVENT/g) || []).length, 1, 'shortlist calendar = the one shortlisted inspection');
+    await page.selectOption(`.rf-item[data-id="${withInsp}"] select[data-app]`, 'applied');
+    const [dl3] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
+    assert.match(fs.readFileSync(await dl3.path(), 'utf8'), new RegExp(`UID:${withInsp}-fu@rea-enhancement\\r\\n[\\s\\S]*?DTSTART;VALUE=DATE:\\d{8}`), 'applied: a follow-up reminder rides along');
     console.log('calendar export:', n, 'events from results, 1 from shortlist');
     await done(page); await ctx.close();
   });

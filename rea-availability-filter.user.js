@@ -2457,7 +2457,7 @@
   // `alarm`: minutes before each inspection for a reminder (0 = none; some calendars ignore
   // reminders in imported files).
   const geo = (r) => (Number.isFinite(r.lat) && Number.isFinite(r.lng) ? `GEO:${r.lat.toFixed(6)};${r.lng.toFixed(6)}` : '');
-  const toIcs = (rows, now = Date.now(), { alarm = 0 } = {}) => {
+  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', followUps = false } = {}) => {
     // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
     // and then reinstated is live again when the newer file is imported.
     const seq = Math.floor(now / 60000);
@@ -2488,6 +2488,20 @@
       events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(at)}`, `DURATION:PT${INSPECT_MINUTES}M`,
         `SEQUENCE:${seq}`, 'STATUS:CANCELLED', `SUMMARY:${icsText(`Cancelled: inspection ${r.address || 'rental'}`)}`, `LOCATION:${icsText(r.address)}`, geo(r), 'END:VEVENT'].filter(Boolean));
     }
+    // All-day reminders: chase an application with no answer (on the day the drawer starts
+    // nudging, or today once that's passed), and your own lease end. Fixed UIDs, so a later
+    // export moves them rather than adding a second one.
+    const allDay = (uid, ymd, summary, extra = []) => events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`,
+      `DTSTART;VALUE=DATE:${ymd.replace(/-/g, '')}`, `SEQUENCE:${seq}`, 'TRANSP:TRANSPARENT', `SUMMARY:${icsText(summary)}`, ...extra, 'END:VEVENT'].filter(Boolean));
+    const today = ymdLocal(new Date(now));
+    for (const r of followUps ? rows : []) {
+      if (r.appStatus !== 'applied' || typeof r.appAt !== 'number' || seen.has(`${r.id}-fu`)) continue;
+      seen.add(`${r.id}-fu`);
+      const due = ymdLocal(new Date(r.appAt + FOLLOW_UP_DAYS * DAY_MS));
+      allDay(`${r.id}-fu@rea-enhancement`, due < today ? today : due, `Follow up: ${r.address || 'rental application'}`,
+        [r.url ? `URL:${r.url}` : '', `DESCRIPTION:${icsText([`Applied ${ymdLocal(new Date(r.appAt))}`, r.agency, r.applyVia && `via ${r.applyVia}`].filter(Boolean).join(' | '))}`]);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends');
     if (!events.length) return '';
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
       .map(icsFold).join('\r\n') + '\r\n';
@@ -2900,9 +2914,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
   }
 
-  function downloadIcs(rows) {
-    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0 });
-    if (!ics) return setStatus('No upcoming inspection times in these listings.', true);
+  // `reminders`: the whole-list export also carries follow-ups and your lease end (not one
+  // listing's or one day's file).
+  function downloadIcs(rows, { reminders = false } = {}) {
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, followUps: true } : {}) });
+    if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
   }
 
@@ -4471,7 +4487,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
-        else if (b.dataset.export === 'ics') downloadIcs(rows);
+        else if (b.dataset.export === 'ics') downloadIcs(rows, { reminders: true });
         else {
           const ok = await copyText(toTsv(rows));
           setStatus(ok ? `Copied ${rows.length} rows.` : 'Clipboard blocked - use TSV download instead.', !ok);

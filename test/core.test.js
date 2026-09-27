@@ -985,6 +985,19 @@ test('toIcs: GEO for mapping apps, and a cancelled session goes out cancelled un
   assert.doesNotMatch(core.toIcs([{ id: '1', inspections: [{ at, label: 'x' }] }], now), /GEO:/, 'no coordinates, no GEO');
 });
 
+test('toIcs reminders: follow-up on an application, lease end; only when asked, and moved not doubled', () => {
+  const now = new Date(2026, 8, 23, 12).getTime();
+  const applied = { id: '146500001', address: '1 Test St', agency: 'Ray', appStatus: 'applied', appAt: new Date(2026, 8, 21, 9).getTime(), inspections: [] };
+  const old = { ...applied, id: '146500002', appAt: new Date(2026, 8, 1).getTime() };
+  assert.equal(core.toIcs([applied], now), '', 'not unless asked');
+  const ics = core.toIcs([applied, old, { ...applied, appStatus: 'approved' }], now, { followUps: true, leaseEnd: '2026-10-31' });
+  assert.match(ics, /UID:146500001-fu@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260926\r\n[\s\S]*?SUMMARY:Follow up: 1 Test St/);
+  assert.match(ics, /UID:146500002-fu@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260923/, 'overdue: today');
+  assert.match(ics, /UID:lease-end@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20261031\r\n[\s\S]*?SUMMARY:My current lease ends/);
+  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 3, 'approved: no follow-up');
+  assert.equal(core.toIcs([], now, { followUps: true, leaseEnd: '2026-09-01' }), '', 'a past lease end is left out');
+});
+
 test('nextStop: the next shortlisted inspection today, not this listing, with distance and a leave-by time', () => {
   const at = (h, m) => Date.UTC(2026, 8, 26, h - 10, m); // Sydney is UTC+10 in September
   const here = { id: 'a', address: '1 Hall St, Bondi NSW 2026', lat: -33.89, lng: 151.27, inspections: [{ at: at(10, 0), label: 'now' }] };
