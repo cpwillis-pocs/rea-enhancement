@@ -1944,7 +1944,7 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
     annotate: true, dimCards: true, compact: false, onlyStarred: false, showHidden: false,
-    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '', theme: '',
+    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', noticeDays: '', showGone: false, income: '', theme: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1956,7 +1956,7 @@
   const BACKUP_CFG_SKIP = new Set(['remember', 'remindSaved']);
   const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
   // What a restore would do, shown before anything is merged.
-  const SETTING_NAMES = { places: 'places', checklist: 'checklist', enquiry: 'enquiry template', leaseEnd: 'lease end', inspectFree: 'inspection times', income: 'income', theme: 'theme', anchor: 'distance point',
+  const SETTING_NAMES = { places: 'places', checklist: 'checklist', enquiry: 'enquiry template', leaseEnd: 'lease end', noticeDays: 'notice period', inspectFree: 'inspection times', income: 'income', theme: 'theme', anchor: 'distance point',
     wRent: 'weights', wTiming: 'weights', wDist: 'weights', wMovein: 'weights', icsAlarm: 'calendar reminder', compact: 'compact list', annotate: 'card badges', dimCards: 'card fading', sort: 'sort', sortDesc: 'sort' };
   const backupSummary = (data, cur) => {
     const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
@@ -1982,7 +1982,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm', 'theme', 'inspectFree']; // Clear keeps your "from" point and your free times
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm', 'theme', 'inspectFree', 'noticeDays']; // Clear keeps your "from" point and your free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -2580,7 +2580,7 @@
   // `alarm`: minutes before each inspection for a reminder (0 = none; some calendars ignore
   // reminders in imported files).
   const geo = (r) => (Number.isFinite(r.lat) && Number.isFinite(r.lng) ? `GEO:${r.lat.toFixed(6)};${r.lng.toFixed(6)}` : '');
-  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', followUps = false } = {}) => {
+  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, followUps = false } = {}) => {
     // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
     // and then reinstated is live again when the newer file is imported.
     const seq = Math.floor(now / 60000);
@@ -2629,7 +2629,17 @@
       seen.add(`${r.id}-ab`);
       allDay(`${r.id}-ab@rea-enhancement`, r.applyBy, `Applications close: ${r.address || 'rental'}`, [r.url ? `URL:${r.url}` : '']);
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) {
+      allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends');
+      // Your own notice period (it varies by state and lease, so it's yours to enter): the last
+      // day to give notice, or today if that's already passed.
+      const n = Math.round(+noticeDays);
+      if (n >= 1 && n <= 120) {
+        const [y, mo, d] = leaseEnd.split('-').map(Number), by = ymdLocal(new Date(y, mo - 1, d - n));
+        allDay('notice@rea-enhancement', by < today ? today : by, `Give notice to vacate (lease ends ${leaseEnd})`,
+          [`DESCRIPTION:${icsText(`${n} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`]);
+      }
+    }
     if (!events.length) return '';
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
       .map(icsFold).join('\r\n') + '\r\n';
@@ -3069,7 +3079,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // `reminders`: the whole-list export also carries follow-ups and your lease end (not one
   // listing's or one day's file).
   function downloadIcs(rows, { reminders = false } = {}) {
-    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, followUps: true } : {}) });
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, noticeDays: num(cfg.noticeDays) || 0, followUps: true } : {}) });
     if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
   }
@@ -3615,6 +3625,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <label title="Some calendar apps ignore reminders in imported files">Calendar reminder<select id="rf-icsAlarm">
           ${[['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
         <label>My current lease ends (optional)<input type="date" id="rf-leaseEnd" title="Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap"></label>
+        <label title="How many days before your lease ends you must tell your landlord or agent you're leaving. It depends on your state and lease: check your state's tenancy rules or your lease. The calendar export then adds a reminder.">Notice I must give (days, optional)<input type="number" id="rf-noticeDays" min="1" max="120" step="1" inputmode="numeric" placeholder="check your state's rules"></label>
         <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
         <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
           title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>

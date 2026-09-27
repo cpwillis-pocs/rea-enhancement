@@ -1056,6 +1056,10 @@ test('toIcs reminders: follow-up on an application, lease end; only when asked, 
   assert.match(ics, /UID:lease-end@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20261031\r\n[\s\S]*?SUMMARY:My current lease ends/);
   assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 3, 'approved: no follow-up');
   assert.equal(core.toIcs([], now, { followUps: true, leaseEnd: '2026-09-01' }), '', 'a past lease end is left out');
+  const notice = core.toIcs([], now, { followUps: true, leaseEnd: '2026-10-31', noticeDays: 21 });
+  assert.match(notice, /UID:notice@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20261010\r\n[\s\S]*?SUMMARY:Give notice to vacate \(lease ends 2026-10-31\)/);
+  assert.match(core.toIcs([], now, { followUps: true, leaseEnd: '2026-10-01', noticeDays: 28 }), /UID:notice@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260923/, 'passed: today');
+  assert.doesNotMatch(core.toIcs([], now, { followUps: true, leaseEnd: '2026-10-31', noticeDays: 500 }), /notice@/, 'out of range ignored');
 });
 
 test('nextStop: the next shortlisted inspection today, not this listing, with distance and a leave-by time', () => {
