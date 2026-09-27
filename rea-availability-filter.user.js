@@ -771,6 +771,31 @@
   const toolBytes = (storage) => toolKeys(storage).reduce((n, k) => { try { return n + 2 * (k.length + (storage.getItem(k) || '').length); } catch { return n; } }, 0);
   const fmtBytes = (b) => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
+  // Remembered rows as stored (entry flag f:2): column names once per search (`rk`), each row an
+  // array of values, and REA's URL prefixes dropped. About half the characters of one object per
+  // row. In memory and in backups they are plain objects; old unflagged entries still read.
+  const REA_ORIGIN = 'https://www.realestate.com.au', IMG_ORIGIN = 'https://i2.au.reastatic.net';
+  const ABSENT = '\u0001'; // a key this row didn't have (as distinct from null)
+  const packUrl = (k, v) => (typeof v !== 'string' ? v : k === 'url' && v.startsWith(`${REA_ORIGIN}/`) ? v.slice(REA_ORIGIN.length)
+    : k === 'img' && v.startsWith(`${IMG_ORIGIN}/`) ? `~${v.slice(IMG_ORIGIN.length)}` : v);
+  const unpackUrl = (k, v) => (typeof v !== 'string' ? v : k === 'url' && v.startsWith('/') ? REA_ORIGIN + v : k === 'img' && v.startsWith('~/') ? IMG_ORIGIN + v.slice(1) : v);
+  const packRows = (rows, keys) => rows.map((r) => keys.map((k) => (k in r ? packUrl(k, r[k] === undefined ? null : r[k]) : ABSENT)));
+  const unpackRows = (rows, keys) => (Array.isArray(rows) ? rows : []).filter(Array.isArray).map((a) => {
+    const o = {};
+    keys.forEach((k, i) => { if (i < a.length && a[i] !== ABSENT) o[k] = unpackUrl(k, a[i]); });
+    return o;
+  });
+  const packEntry = (e) => {
+    const keys = [...new Set([...(e.rows || []), ...(e.gone || [])].flatMap((r) => Object.keys(r)))];
+    return { ...e, f: 2, rk: keys, rows: packRows(e.rows || [], keys), gone: packRows(e.gone || [], keys) };
+  };
+  const unpackEntry = (e) => {
+    if (e.f !== 2) return e;
+    const keys = Array.isArray(e.rk) ? e.rk.filter((k) => typeof k === 'string') : [];
+    const out = { ...e, rows: unpackRows(e.rows, keys), gone: unpackRows(e.gone, keys) };
+    delete out.f; delete out.rk;
+    return out;
+  };
   const snapshotStore = (storage, now = () => Date.now()) => {
     // Parsed copy reused while the stored string is unchanged (several reads per navigation).
     let memo = null, memoRaw = null, sizesMemo = null;
@@ -785,8 +810,9 @@
       try {
         const d = JSON.parse(raw);
         if (isObj(d) && isObj(d.s)) {
-          for (const [k, e] of Object.entries(d.s)) {
-            if (!isSearchKey(k) || !isObj(e) || typeof e.at !== 'number') { delete d.s[k]; continue; }
+          for (const [k, raw] of Object.entries(d.s)) {
+            if (!isSearchKey(k) || !isObj(raw) || typeof raw.at !== 'number') { delete d.s[k]; continue; }
+            const e = d.s[k] = unpackEntry(raw);
             for (const f of ['rows', 'gone']) e[f] = Array.isArray(e[f]) ? e[f].filter(isObj) : [];
             for (const f of ['ids', 'baseIds']) if (e[f] != null && !Array.isArray(e[f])) e[f] = f === 'ids' ? [] : null;
           }
@@ -796,11 +822,11 @@
       return { v: 1, s: {} };
     };
     // The stored string, built from each entry's cached JSON: a pin or a second save of one
-    // search doesn't re-stringify the other two. Same bytes as JSON.stringify(d).
+    // search doesn't re-stringify the other two. Entries are stored packed (packEntry).
     const entryJson = new WeakMap();
     const stringify = (d) => `{"v":${JSON.stringify(d.v ?? 1)},"s":{${Object.entries(d.s).map(([k, e]) => {
       let j = entryJson.get(e);
-      if (j === undefined) entryJson.set(e, (j = JSON.stringify(e)));
+      if (j === undefined) entryJson.set(e, (j = JSON.stringify(packEntry(e))));
       return `${JSON.stringify(k)}:${j}`;
     }).join(',')}}}`;
     // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
@@ -824,7 +850,7 @@
     // row text, gone rows' text, then row features and headlines, then gone rows themselves.
     // Sizes are tracked from the fields changed, not by re-stringifying rows. Returns whether it trimmed.
     const fitBudget = (entry) => {
-      let size = JSON.stringify(entry).length;
+      let size = JSON.stringify(packEntry(entry)).length; // what storage will hold
       if (size <= SNAP_ENTRY_BUDGET) return false;
       const len = (r) => JSON.stringify([r.text, r.headline, r.features]).length;
       const trim = (list, fn) => {
@@ -901,7 +927,7 @@
       sizes() {
         const d = load();
         if (sizesMemo && memoRaw != null && sizesMemo.raw === memoRaw) return sizesMemo.out;
-        const out = Object.entries(d.s).map(([key, e]) => ({ key, bytes: 2 * JSON.stringify(e).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes);
+        const out = Object.entries(d.s).map(([key, e]) => ({ key, bytes: 2 * JSON.stringify(packEntry(e)).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes);
         sizesMemo = { raw: memoRaw, out };
         return out;
       },

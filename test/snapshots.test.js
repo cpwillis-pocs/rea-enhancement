@@ -146,7 +146,7 @@ test('snapshotStore: a search over the size budget drops text from the rows furt
   const m = mem();
   const st = core.snapshotStore(m, () => 1e12);
   const long = 'Sunny unit with a dishwasher and air conditioning. '.repeat(8);
-  const rows = Array.from({ length: 500 }, (_, i) => core.toRow(listing({ id: String(146510000 + i), description: long,
+  const rows = Array.from({ length: 1200 }, (_, i) => core.toRow(listing({ id: String(146510000 + i), description: long,
     _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${146510000 + i}` } } }), false));
   const v = st.save(KEY, rows, false);
   assert.equal(v.lite, true);
@@ -155,7 +155,7 @@ test('snapshotStore: a search over the size budget drops text from the rows furt
   assert.ok(v.rows[0].text.includes('dishwasher'), 'the first rows keep their text');
   assert.equal(v.rows.at(-1).text, '', 'the last ones lose it');
   assert.equal(v.rows.at(-1).amen.dishwasher, 'yes', 'amenities survive, stored computed');
-  assert.equal(v.rows.length, 500, 'no listing dropped');
+  assert.equal(v.rows.length, 1200, 'no listing dropped');
   const [size] = st.sizes();
   assert.equal(size.key, KEY);
   assert.equal(size.lite, true);
@@ -177,4 +177,20 @@ test('rent trend: one point per visit (a refresh replaces it), at most 12, reada
   for (let i = 0; i < 15; i++) { t += 24 * H; st.save(KEY, rows(700, 6), false); }
   assert.equal(st.get(KEY).trend.length, 12, 'capped');
   assert.deepEqual(core.trendPoint(rows(500, 3), 1).m, {}, 'fewer than 5 priced listings: no median');
+});
+
+test('snapshots are stored packed (column names once, no URL prefixes), read back the same, and old entries still read', () => {
+  const m = mem();
+  const st = core.snapshotStore(m, () => 1e12);
+  const rows = [row('146500001'), { ...row('146500002'), img: 'https://i2.au.reastatic.net/345x260/x/main.jpg' }];
+  const before = st.save(KEY, rows, false).rows;
+  const raw = JSON.parse(m.getItem('rea-avail-filter/snapshots/v1')).s[KEY];
+  assert.equal(raw.f, 2);
+  assert.ok(Array.isArray(raw.rk) && Array.isArray(raw.rows[0]), 'rows as arrays');
+  assert.ok(!JSON.stringify(raw.rows).includes('https://www.realestate.com.au'), 'origin dropped');
+  const after = core.snapshotStore(m, () => 1e12).get(KEY).rows;
+  assert.deepEqual(after.map((r) => [r.id, r.url, r.img, r.priceNum, r.sqm]), before.map((r) => [r.id, r.url, r.img, r.priceNum, r.sqm]));
+  const old = mem(); // written by 2.27: one object per row
+  old.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [KEY]: { at: 1e12, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500001', price: '$700 per week' }] } } }));
+  assert.equal(core.snapshotStore(old, () => 1e12).get(KEY).rows[0].priceNum, 700);
 });
