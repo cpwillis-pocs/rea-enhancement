@@ -2439,6 +2439,22 @@
   // Inspection planner: one day's shortlisted inspections in order, with clashes and gaps too
   // short for the straight-line distance flagged. A rough guide, not a route planner.
   const PLAN_MIN_PER_KM = 2; // ~30 km/h door to door in traffic
+  // At an inspection, on the listing page: the next shortlisted inspection today (the listing's
+  // own day), how far it is from here and when to leave. Null when there's none left today.
+  const nextStop = (rows, here, now = Date.now()) => {
+    const tz = tzOf(here), day = ymdIn(now, tz);
+    let best = null;
+    for (const r of rows) {
+      if (r.id === here.id) continue;
+      for (const i of r.inspections || []) {
+        if (typeof i.at !== 'number' || i.at <= now || ymdIn(i.at, tzOf(r)) !== day) continue;
+        if (!best || i.at < best.at) best = { r, at: i.at, label: i.label };
+      }
+    }
+    if (!best) return null;
+    const km = Number.isFinite(here.lat) && Number.isFinite(best.r.lat) ? Math.round(haversineKm(here, best.r) * 10) / 10 : null;
+    return { ...best, km, leaveBy: km == null ? null : best.at - Math.max(PLAN_MIN_GAP, Math.round(km * PLAN_MIN_PER_KM)) * 60000 };
+  };
   const PLAN_MIN_GAP = 10; // minutes between inspections below which it's "tight" regardless of distance
   // Inspection times are the listing's local time: group and show them in its state's zone
   // (from the address), so a Perth listing planned from Sydney lands on the right day.
@@ -2673,7 +2689,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -5208,7 +5224,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const v = r.checks?.[k];
       return checkBtn(k, v, 'data-l="ck"');
     }).join('');
-    return `<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
+    const sl = marks.shortlist(), mine = sl.find((x) => x.id === r.id);
+    const nx = nextStop(sl, Number.isFinite(r.lat) || !mine ? r : { ...r, lat: mine.lat, lng: mine.lng }); // the page may not say where it is; the shortlist copy does
+    const clockAt = (ms) => dtf({ hour: 'numeric', minute: '2-digit', ...(tzOf(r) ? { timeZone: tzOf(r) } : {}) }).format(ms);
+    const next = nx ? `<div class="rf-lbar-info rf-lbar-next">Next: <a href="${esc(safeUrl(nx.r.url))}">${esc(clockAt(nx.at))} ${esc(String(nx.r.address || '').split(',')[0])}</a>${nx.km != null ? ` · ${nx.km} km · leave by ${esc(clockAt(nx.leaveBy))}` : ''}</div>` : '';
+    return `${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks">${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
   }

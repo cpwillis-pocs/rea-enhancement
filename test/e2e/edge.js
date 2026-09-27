@@ -1791,6 +1791,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 53. Next stop on the listing-page bar: the next shortlisted inspection today, how far, and
+  // when to leave; it links to that listing.
+  await block('53', async () => {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript((t) => {
+      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
+      const d = (id, a, la, at) => ({ u: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}`, a, la, ln: 151.2767, in: at ? [{ at, label: 'later today' }] : [] });
+      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+        146500101: { f: 1, l: 1, s: 1, st: 1, d: d(146500101, '1 Hall St, Bondi NSW 2026', -33.8915, 0) },
+        146500222: { f: 1, l: 1, s: 1, st: 1, d: d(146500222, '5 Beach Rd, Bondi NSW 2026', -33.9005, t + 75 * 60000) },
+      } }));
+    }, FIXED.getTime());
+    const page = await open(ctx, `${ORIGIN}/property-unit-nsw-bondi-146500101`);
+    await page.waitForSelector('#rf-lbar .rf-lbar-next');
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-next'), /^Next: 11:15\s?am 5 Beach Rd · 1 km · leave by 11:05\s?am$/i);
+    assert.match(await page.getAttribute('#rf-lbar .rf-lbar-next a', 'href'), /146500222$/);
+    console.log('next stop: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

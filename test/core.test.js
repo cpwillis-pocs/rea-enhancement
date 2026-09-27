@@ -961,3 +961,16 @@ test('toIcs: GEO for mapping apps, and a cancelled session goes out cancelled un
   assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 2);
   assert.doesNotMatch(core.toIcs([{ id: '1', inspections: [{ at, label: 'x' }] }], now), /GEO:/, 'no coordinates, no GEO');
 });
+
+test('nextStop: the next shortlisted inspection today, not this listing, with distance and a leave-by time', () => {
+  const at = (h, m) => Date.UTC(2026, 8, 26, h - 10, m); // Sydney is UTC+10 in September
+  const here = { id: 'a', address: '1 Hall St, Bondi NSW 2026', lat: -33.89, lng: 151.27, inspections: [{ at: at(10, 0), label: 'now' }] };
+  const rows = [here,
+    { id: 'b', address: '5 Beach Rd, Bondi NSW 2026', lat: -33.90, lng: 151.27, inspections: [{ at: at(11, 15), label: '11:15' }] },
+    { id: 'c', address: '9 Roscoe St, Bondi NSW 2026', lat: -33.89, lng: 151.28, inspections: [{ at: at(12, 0), label: '12' }, { at: Date.UTC(2026, 8, 27, 1), label: 'tomorrow' }] }];
+  const nx = core.nextStop(rows, here, at(10, 20));
+  assert.equal(nx.r.id, 'b');
+  assert.equal(nx.km, 1.1);
+  assert.equal(nx.leaveBy, at(11, 5), 'at least PLAN_MIN_GAP minutes before');
+  assert.equal(core.nextStop(rows, here, at(12, 30)), null, 'nothing left today');
+});
