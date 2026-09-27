@@ -146,6 +146,8 @@
     try { const { building, ...c } = cfg; localStorage.setItem(CFG_KEY, JSON.stringify(c)); writeState.report(true); } catch { writeState.report(false); }
   };
 
+  // Only the amenities the listing answered (most are unknown): what caches and snapshots keep.
+  const knownAmen = (amen) => Object.fromEntries(AMENITIES.map((a) => [a.id, amen?.[a.id]]).filter(([, v]) => v === 'yes' || v === 'no'));
   // Per-search row cache in sessionStorage (tab-scoped, survives reloads/back-nav).
   // JSON loses Date and Infinity, so both are restored on read.
   const rowStore = (storage, now = () => Date.now()) => ({
@@ -168,7 +170,7 @@
       const slim = rows.map((r) => {
         const o = { ...r, text: r.text?.length > ROWS_TEXT_MAX ? r.text.slice(0, ROWS_TEXT_MAX) : r.text };
         for (const k of ROW_RUNTIME) delete o[k]; // rebuilt by decorate/score/distance after restore
-        if (o.amen) o.amen = Object.fromEntries(Object.entries(o.amen).filter(([, v]) => v === 'yes' || v === 'no'));
+        if (o.amen) o.amen = knownAmen(o.amen);
         return o;
       });
       const put = () => storage.setItem(ROWS_PREFIX + key, JSON.stringify({ v: ROWS_VERSION, at: now(), truncated, rows: slim }));
@@ -384,6 +386,25 @@
     };
     const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp', 'sq', 'sqt'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
+    const rowMemo = new Map();
+    const shortlistRow = (id, e) => {
+      // Hand-edited or half-written summaries: text fields must be strings, numbers stay numbers.
+      const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, SUM_KEEP.includes(k) ? v
+        : SUM_NUM.includes(k) ? (typeof v === 'number' || typeof v === 'string' ? v : '') : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '']));
+      const priceNum = parsePrice(clip(d.p, 80));
+      return {
+        ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
+        beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
+        ...moveIn(d.bo, priceNum), agency: d.ag || '',
+        starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
+        gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
+        // The latest inspection that has already happened (the display list drops past ones).
+        lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
+        inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
+        inspectCancelled: Array.isArray(e.ic) && now() - e.ic[0] < CANCEL_SHOW_MS ? clip(e.ic[1], 80) : '',
+        inspectCancelledAt: Array.isArray(e.ic) && typeof e.ic[2] === 'number' ? e.ic[2] : null, // so a calendar can cancel it
+      };
+    };
     // Read-modify-write of one listing's entry: fn(entry, all marks) returns what the setter returns.
     const edit = (id, fn) => { const { m } = fresh(); const out = fn(entry(m, id), m); save(); return out; };
     const bag = (d, f) => (d[f] = isObj(d[f]) ? d[f] : {});
@@ -566,28 +587,23 @@
         return n;
       },
       // Shortlisted listings from every search, newest-starred first, as drawer rows.
+      // Rows are reused while their stored mark is unchanged (and within the same minute, since
+      // "past" inspections depend on the time): the Shortlist tab and the listing bar ask often.
       shortlist() {
         const { m } = load();
-        return Object.entries(m).filter(([, e]) => e.s && e.d?.u)
+        const minute = Math.floor(now() / 60000), seen = new Set();
+        const out = Object.entries(m).filter(([, e]) => e.s && e.d?.u)
           .sort(([, a], [, b]) => (b.st || 0) - (a.st || 0))
           .map(([id, e]) => {
-            // Hand-edited or half-written summaries: text fields must be strings, numbers stay numbers.
-            const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, SUM_KEEP.includes(k) ? v
-              : SUM_NUM.includes(k) ? (typeof v === 'number' || typeof v === 'string' ? v : '') : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '']));
-            const priceNum = parsePrice(clip(d.p, 80));
-            return {
-              ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
-              beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
-              ...moveIn(d.bo, priceNum), agency: d.ag || '',
-              starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
-              gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
-              // The latest inspection that has already happened (the display list drops past ones).
-              lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
-              inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
-              inspectCancelled: Array.isArray(e.ic) && now() - e.ic[0] < CANCEL_SHOW_MS ? clip(e.ic[1], 80) : '',
-              inspectCancelledAt: Array.isArray(e.ic) && typeof e.ic[2] === 'number' ? e.ic[2] : null, // so a calendar can cancel it
-            };
+            seen.add(id);
+            const sig = `${minute}|${JSON.stringify(e)}`, hit = rowMemo.get(id);
+            if (hit?.sig === sig) return hit.row;
+            const row = shortlistRow(id, e);
+            rowMemo.set(id, { sig, row });
+            return row;
           });
+        for (const id of rowMemo.keys()) if (!seen.has(id)) rowMemo.delete(id);
+        return out;
       },
       // Backup/restore of what the user chose (shortlist, hidden, notes); sighting history is not exported.
       exportData() {
@@ -704,7 +720,7 @@
     o.features = (Array.isArray(r.features) ? r.features : []).slice(0, 40).map((f) => clip(f, 80));
     // Stored as computed: the text kept here is clipped, so recomputing could miss a late "no pets".
     // Only known answers are kept (most are unknown): about a fifth of a remembered search's size.
-    o.amen = Object.fromEntries(AMENITIES.map((a) => [a.id, r.amen?.[a.id]]).filter(([, v]) => v === 'yes' || v === 'no'));
+    o.amen = knownAmen(r.amen);
     return o;
   };
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
@@ -780,9 +796,18 @@
   // row. In memory and in backups they are plain objects; old unflagged entries still read.
   const REA_ORIGIN = 'https://www.realestate.com.au', IMG_ORIGIN = 'https://i2.au.reastatic.net';
   const ABSENT = '\u0001'; // a key this row didn't have (as distinct from null)
-  const packUrl = (k, v) => (typeof v !== 'string' ? v : k === 'url' && v.startsWith(`${REA_ORIGIN}/`) ? v.slice(REA_ORIGIN.length)
-    : k === 'img' && v.startsWith(`${IMG_ORIGIN}/`) ? `~${v.slice(IMG_ORIGIN.length)}` : v);
-  const unpackUrl = (k, v) => (typeof v !== 'string' ? v : k === 'url' && v.startsWith('/') ? REA_ORIGIN + v : k === 'img' && v.startsWith('~/') ? IMG_ORIGIN + v.slice(1) : v);
+  // f:3 also stores known amenities as "pets,!gas" and coordinates to 5 decimals (about a metre).
+  const packUrl = (k, v) => {
+    if (k === 'amen' && isObj(v)) return Object.entries(v).filter(([, x]) => x === 'yes' || x === 'no').map(([id, x]) => (x === 'no' ? `!${id}` : id)).join(',');
+    if ((k === 'lat' || k === 'lng') && typeof v === 'number') return Math.round(v * 1e5) / 1e5;
+    if (typeof v !== 'string') return v;
+    return k === 'url' && v.startsWith(`${REA_ORIGIN}/`) ? v.slice(REA_ORIGIN.length) : k === 'img' && v.startsWith(`${IMG_ORIGIN}/`) ? `~${v.slice(IMG_ORIGIN.length)}` : v;
+  };
+  const unpackUrl = (k, v) => {
+    if (k === 'amen' && typeof v === 'string') return Object.fromEntries(v.split(',').filter(Boolean).map((x) => (x[0] === '!' ? [x.slice(1), 'no'] : [x, 'yes'])));
+    if (typeof v !== 'string') return v;
+    return k === 'url' && v.startsWith('/') ? REA_ORIGIN + v : k === 'img' && v.startsWith('~/') ? IMG_ORIGIN + v.slice(1) : v;
+  };
   const packRows = (rows, keys) => rows.map((r) => keys.map((k) => (k in r ? packUrl(k, r[k] === undefined ? null : r[k]) : ABSENT)));
   const unpackRows = (rows, keys) => (Array.isArray(rows) ? rows : []).filter(Array.isArray).map((a) => {
     const o = {};
@@ -791,10 +816,10 @@
   });
   const packEntry = (e) => {
     const keys = [...new Set([...(e.rows || []), ...(e.gone || [])].flatMap((r) => Object.keys(r)))];
-    return { ...e, f: 2, rk: keys, rows: packRows(e.rows || [], keys), gone: packRows(e.gone || [], keys) };
+    return { ...e, f: 3, rk: keys, rows: packRows(e.rows || [], keys), gone: packRows(e.gone || [], keys) };
   };
   const unpackEntry = (e) => {
-    if (e.f !== 2) return e;
+    if (e.f !== 2 && e.f !== 3) return e; // f:2 (2.28) differs only in keeping amenities as an object
     const keys = Array.isArray(e.rk) ? e.rk.filter((k) => typeof k === 'string') : [];
     const out = { ...e, rows: unpackRows(e.rows, keys), gone: unpackRows(e.gone, keys) };
     delete out.f; delete out.rk;
@@ -828,11 +853,8 @@
     // The stored string, built from each entry's cached JSON: a pin or a second save of one
     // search doesn't re-stringify the other two. Entries are stored packed (packEntry).
     const entryJson = new WeakMap();
-    const stringify = (d) => `{"v":${JSON.stringify(d.v ?? 1)},"s":{${Object.entries(d.s).map(([k, e]) => {
-      let j = entryJson.get(e);
-      if (j === undefined) entryJson.set(e, (j = JSON.stringify(packEntry(e))));
-      return `${JSON.stringify(k)}:${j}`;
-    }).join(',')}}}`;
+    const jsonOf = (e) => { let j = entryJson.get(e); if (j === undefined) entryJson.set(e, (j = JSON.stringify(packEntry(e)))); return j; };
+    const stringify = (d) => `{"v":${JSON.stringify(d.v ?? 1)},"s":{${Object.entries(d.s).map(([k, e]) => `${JSON.stringify(k)}:${jsonOf(e)}`).join(',')}}}`;
     // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
     // lists, then give up. Returns the keys it stopped remembering.
     const persist = (d) => {
@@ -854,8 +876,9 @@
     // row text, gone rows' text, then row features and headlines, then gone rows themselves.
     // Sizes are tracked from the fields changed, not by re-stringifying rows. Returns whether it trimmed.
     const fitBudget = (entry) => {
-      let size = JSON.stringify(packEntry(entry)).length; // what storage will hold
-      if (size <= SNAP_ENTRY_BUDGET) return false;
+      const json = JSON.stringify(packEntry(entry)); // what storage will hold
+      let size = json.length;
+      if (size <= SNAP_ENTRY_BUDGET) { entryJson.set(entry, json); return false; } // persist reuses it
       const len = (r) => JSON.stringify([r.text, r.headline, r.features]).length;
       const trim = (list, fn) => {
         for (let i = list.length - 1; i >= 0 && size > SNAP_ENTRY_BUDGET; i--) { const was = len(list[i]); fn(list[i]); size -= was - len(list[i]); }
@@ -933,7 +956,7 @@
       sizes() {
         const d = load();
         if (sizesMemo && memoRaw != null && sizesMemo.raw === memoRaw) return sizesMemo.out;
-        const out = Object.entries(d.s).map(([key, e]) => ({ key, bytes: 2 * JSON.stringify(packEntry(e)).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes);
+        const out = Object.entries(d.s).map(([key, e]) => ({ key, bytes: 2 * jsonOf(e).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes);
         sizesMemo = { raw: memoRaw, out };
         return out;
       },
@@ -1667,7 +1690,9 @@
   };
   // Worst of all distances: "nearest to all" means the longest trip is shortest.
   const worstKm = (r) => { const all = [r.km, ...(r.placeKm || []).map((p) => p.km)].filter((v) => v != null); return all.length ? Math.max(...all) : null; };
-  const kmFrom = (anchor, r) => (anchor && r.lat != null ? Math.round(haversineKm(anchor, r) * 10) / 10 : null);
+  // Straight-line km between two points to one decimal, or null when either has no location.
+  const kmBetween = (a, b) => (a && b && Number.isFinite(a.lat) && Number.isFinite(b.lat) ? Math.round(haversineKm(a, b) * 10) / 10 : null);
+  const kmFrom = (anchor, r) => kmBetween(anchor, r);
 
   // Distance from a user-chosen point. Accepts "-33.87, 151.21" or a Google Maps URL/text
   // containing "@-33.87,151.21" (no geocoding: nothing leaves the browser).
@@ -1693,7 +1718,7 @@
   };
   const kmShort = (km) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km} km`);
   const placesLabel = (r) => (r.placeKm || []).map((p) => `${p.label} ${kmShort(p.km)}`).join(' · ');
-  const kmLabel = (r) => (r.km == null ? '' : r.km < 1 ? `${Math.round(r.km * 1000)} m away` : `${r.km} km away`);
+  const kmLabel = (r) => (r.km == null ? '' : `${kmShort(r.km)} away`);
 
   const listingId = (href) => String(href || '').match(/-(\d{6,})(?:[/?#]|$)/)?.[1] || '';
 
@@ -2496,7 +2521,7 @@
       }
     }
     if (!best) return null;
-    const km = Number.isFinite(here.lat) && Number.isFinite(best.r.lat) ? Math.round(haversineKm(here, best.r) * 10) / 10 : null;
+    const km = kmBetween(here, best.r);
     return { ...best, km, leaveBy: km == null ? null : best.at - Math.max(PLAN_MIN_GAP, Math.round(km * PLAN_MIN_PER_KM)) * 60000 };
   };
   const PLAN_MIN_GAP = 10; // minutes between inspections below which it's "tight" regardless of distance
@@ -2530,7 +2555,7 @@
     for (let k = 1; k < slots.length; k++) {
       const prev = slots[k - 1], cur = slots[k];
       cur.gapMin = Math.round((cur.at - prev.end) / 60e3);
-      cur.km = prev.r.lat != null && cur.r.lat != null ? Math.round(haversineKm(prev.r, cur.r) * 10) / 10 : null;
+      cur.km = kmBetween(prev.r, cur.r);
       // Two sessions at one listing are alternatives, not a clash.
       cur.same = prev.r.id === cur.r.id;
       cur.flag = cur.same ? '' : cur.at < prev.end ? 'clash' : cur.gapMin < Math.max(PLAN_MIN_GAP, (cur.km ?? 0) * PLAN_MIN_PER_KM) ? 'tight' : '';
@@ -4836,7 +4861,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
         <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
-        <button data-act="h" title="${r.resurfaced ? 'Still not for you at this price: hide again' : r.hidden ? 'Unhide' : 'Hide this listing'}">${r.resurfaced ? 'Hide again' : r.hidden ? 'Unhide' : 'Hide'}</button>
+        <button data-act="h" title="${r.resurfaced ? 'Still not for you at this price: hide again' : r.hidden ? 'Unhide' : 'Hide this listing'}">${hideWord(r)}</button>
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
         <button data-act="copy" title="Copy a text summary of this listing" aria-label="Copy summary">Copy</button>
         ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}

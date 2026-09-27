@@ -185,7 +185,7 @@ test('snapshots are stored packed (column names once, no URL prefixes), read bac
   const rows = [row('146500001'), { ...row('146500002'), img: 'https://i2.au.reastatic.net/345x260/x/main.jpg' }];
   const before = st.save(KEY, rows, false).rows;
   const raw = JSON.parse(m.getItem('rea-avail-filter/snapshots/v1')).s[KEY];
-  assert.equal(raw.f, 2);
+  assert.equal(raw.f, 3);
   assert.ok(Array.isArray(raw.rk) && Array.isArray(raw.rows[0]), 'rows as arrays');
   assert.ok(!JSON.stringify(raw.rows).includes('https://www.realestate.com.au'), 'origin dropped');
   const after = core.snapshotStore(m, () => 1e12).get(KEY).rows;
@@ -207,7 +207,7 @@ test('size budget counts no-longer-listed rows at their stored (packed) size, an
   st.save(KEY, mk(146540000), false);
   assert.ok(m.getItem('rea-avail-filter/snapshots/v1').length <= core.SNAP_ENTRY_BUDGET + 1000, 'within budget once gone rows are dropped');
   const packed = JSON.parse(m.getItem('rea-avail-filter/snapshots/v1')).s[KEY];
-  assert.equal(packed.f, 2);
+  assert.equal(packed.f, 3);
   const other = core.snapshotStore(mem(), () => t);
   assert.equal(other.importData({ [KEY]: packed }), 1);
   assert.equal(other.get(KEY).rows.length, 800, 'rows unpacked, not an empty search');
