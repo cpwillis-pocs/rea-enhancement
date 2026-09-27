@@ -2778,6 +2778,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
   #rf-lbar button[aria-pressed=true]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
   #rf-lbar button:focus-visible,#rf-lbar select:focus-visible{outline:2px solid var(--rf-accent);outline-offset:2px}
+  .rf-lbar-more{flex:1 1 100%;font-size:12px} .rf-lbar-more summary{cursor:pointer;color:var(--rf-accent-fg);font-weight:600}
+  .rf-lbar-checks{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px} #rf-lbar .rf-lbar-checks button{font-size:12px;padding:3px 8px}
+  #rf-lbar .rf-lbar-checks button[data-state=yes]{border-color:var(--rf-accent);color:var(--rf-accent-fg)} #rf-lbar .rf-lbar-checks button[data-state=no]{border-color:var(--rf-err);color:var(--rf-err)}
   .rf-lbar-note,.rf-lbar-info{flex:1 1 100%;font-size:12px;color:var(--rf-muted);white-space:pre-wrap;overflow-wrap:anywhere}
   .rf-warn-t{color:var(--rf-err)}
   .rf-saved-list{list-style:none;margin:6px 0;padding:0;display:grid;gap:6px;font-size:13px}
@@ -4906,8 +4909,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
       <button type="button" data-l="h" aria-pressed="${r.hidden && !r.resurfaced}">${hideWord(r)}</button>
       <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">–</button>
-      ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}`;
+      ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}${r.starred ? lbarDetails(r, bar._details) : ''}`;
     if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
+    bar.querySelector('.rf-lbar-more')?.addEventListener('toggle', (e) => { bar._details = e.currentTarget.open; });
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
     if (r.partial && bar._fetching !== id && !pause.until()) {
       bar._fetching = id;
@@ -4917,6 +4921,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         .catch(() => {}).finally(() => { if (bar._fetching === id) bar._fetching = null; if (bar.dataset.id !== id && bar._row?.partial) renderListingBar(); });
     }
   }
+  // At an inspection, with the listing open on your phone: the checklist and the facts worth
+  // checking, folded away until opened (the bar stays the size it is).
+  function lbarDetails(r, open) {
+    setDistances(r, cfg, parseAnchor(cfg.anchor), parsePlaces(cfg.places));
+    const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
+      sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',
+      ...watchTags(r), placesLabel(r) || kmLabel(r)].filter(Boolean);
+    const checks = checklistItems(cfg.checklist).map((k) => {
+      const v = r.checks?.[k];
+      return `<button type="button" data-l="ck" data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
+    }).join('');
+    return `<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist and details</summary>
+      ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
+  }
   function onListingBar(e) {
     const bar = e.currentTarget, id = bar.dataset.id, r = bar._row;
     const el = e.target.closest('[data-l]');
@@ -4925,6 +4943,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (k === 'min') lbarMin.set(!lbarMin.get());
     else if (k === 's' || k === 'h') marks.toggle(id, k, r);
     else if (k === 'as') marks.setStatus(id, el.value);
+    else if (k === 'ck') {
+      marks.cycleCheck(id, el.dataset.ck);
+      renderListingBar();
+      return bar.querySelector(`[data-ck="${CSS.escape(el.dataset.ck)}"]`)?.focus();
+    }
     else if (k === 'n') {
       const text = window.prompt('Private note for this listing:', r.note || '');
       if (text == null) return;

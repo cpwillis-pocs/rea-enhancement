@@ -805,6 +805,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const stored = await marks(page).then((m) => m['146500101']);
     assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about parking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
+    // Checklist and details, folded until opened; a chip cycles its item and stays open.
+    await page.click('#rf-lbar .rf-lbar-more summary');
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-more .rf-lbar-info'), /move-in \$/);
+    await page.click('#rf-lbar [data-ck="Noise"]');
+    assert.equal((await marks(page))['146500101'].ck.Noise, 'y');
+    assert.ok(await page.$('#rf-lbar .rf-lbar-more[open]'), 'still open after the redraw');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.ck), 'Noise');
     await page.click('#rf-lbar [data-l=min]');
     assert.ok(await page.$('#rf-lbar.rf-lbar-min') && !(await page.$('#rf-lbar [data-l=h]')), 'minimised');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.l), 'min', 'focus stays on the toggle');
