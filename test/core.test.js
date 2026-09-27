@@ -939,3 +939,15 @@ test('mapLayout: fits listings and places in the box, spreads out same-spot list
   assert.deepEqual(m.labels.map((l) => [l.name, l.n]), [['Bondi', 2], ['Clovelly', 1]]);
   assert.equal(core.mapLayout([{ id: '9' }]), null, 'nothing to map');
 });
+
+test('mapLayout: a place in another city becomes an edge arrow instead of squashing the listings', () => {
+  const rows = [{ id: '1', lat: -33.890, lng: 151.270 }, { id: '2', lat: -33.891, lng: 151.272 }, { id: '3', lat: -33.900, lng: 151.260 }];
+  const m = core.mapLayout(rows, [{ label: 'Mum', lat: -37.81, lng: 144.96 }, { label: 'Work', lat: -33.895, lng: 151.25 }], 400, 300);
+  assert.deepEqual(m.pins.map((p) => p.label), ['Work'], 'a nearby place is drawn');
+  assert.equal(m.far.length, 1);
+  assert.equal(m.far[0].label, 'Mum');
+  assert.ok(m.far[0].km > 650 && m.far[0].km < 750, `${m.far[0].km} km`);
+  assert.ok(m.far[0].x <= 400 && m.far[0].y <= 300 && m.far[0].x < 200 && m.far[0].y > 150, 'at the south-west edge');
+  const xs = m.dots.map((d) => d.x);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 100, 'listings still spread across the map');
+});

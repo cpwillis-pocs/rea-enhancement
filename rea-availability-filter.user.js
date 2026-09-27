@@ -2056,8 +2056,16 @@
   const NICE_KM = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
   const mapLayout = (rows, pins = [], w = MAP_W, h = MAP_H) => {
     const has = (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng);
-    const pts = rows.filter(has), ps = pins.filter(has);
+    const pts = rows.filter(has);
     if (!pts.length) return null;
+    // Bounds from the listings; a place counts only if it is near them (within their span again
+    // on each side, or about 7 km). One in another city would squash every listing into a corner, so
+    // it becomes an arrow at the edge with its distance instead.
+    const la0 = Math.min(...pts.map((p) => p.lat)), la1 = Math.max(...pts.map((p) => p.lat));
+    const ln0 = Math.min(...pts.map((p) => p.lng)), ln1 = Math.max(...pts.map((p) => p.lng));
+    const padLa = Math.max(la1 - la0, 0.06), padLn = Math.max(ln1 - ln0, 0.07); // about 7 km at least
+    const near = (p) => p.lat >= la0 - padLa && p.lat <= la1 + padLa && p.lng >= ln0 - padLn && p.lng <= ln1 + padLn;
+    const ps = pins.filter(has).filter(near), far = pins.filter(has).filter((p) => !near(p));
     const lats = [...pts, ...ps].map((p) => p.lat), lngs = [...pts, ...ps].map((p) => p.lng);
     const minLa = Math.min(...lats), maxLa = Math.max(...lats), minLn = Math.min(...lngs), maxLn = Math.max(...lngs);
     const kx = Math.cos(((minLa + maxLa) / 2) * Math.PI / 180);
@@ -2078,7 +2086,15 @@
     const bySub = new Map();
     for (const d of dots) { const k = d.r.suburb; if (!k) continue; const g = bySub.get(k) || { name: k, x: 0, y: 0, n: 0 }; g.x += d.x; g.y += d.y; g.n++; bySub.set(k, g); }
     const labels = [...bySub.values()].sort((a, b) => b.n - a.n).slice(0, MAP_LABELS).map((g) => ({ name: g.name, x: round(g.x / g.n), y: round(g.y / g.n), n: g.n }));
-    return { w, h, dots, pins: ps.map((p) => ({ label: p.label, ...xy(p) })), scale: { km, px: round(km / kmPerPx) }, labels, skipped: rows.length - pts.length };
+    const c = { lat: (la0 + la1) / 2, lng: (ln0 + ln1) / 2 }, mid = xy(c);
+    const edges = far.map((p) => { // where the line from the listings' middle to the place leaves the box
+      const vx = (p.lng - c.lng) * kx * s, vy = (c.lat - p.lat) * s;
+      const tx = vx > 0 ? (w - MAP_PAD - mid.x) / vx : vx < 0 ? (MAP_PAD - mid.x) / vx : Infinity;
+      const ty = vy > 0 ? (h - MAP_PAD - mid.y) / vy : vy < 0 ? (MAP_PAD - mid.y) / vy : Infinity;
+      const t = Math.min(1, tx, ty);
+      return { label: p.label, km: Math.round(haversineKm(c, p)), x: round(mid.x + vx * t), y: round(mid.y + vy * t), angle: Math.round((Math.atan2(-vy, vx) * 180) / Math.PI) };
+    });
+    return { w, h, dots, pins: ps.map((p) => ({ label: p.label, ...xy(p) })), far: edges, scale: { km, px: round(km / kmPerPx) }, labels, skipped: rows.length - pts.length };
   };
   const mapTone = (r) => (r.vsMedian == null ? 'na' : r.vsMedian <= -5 ? 'lo' : r.vsMedian >= 5 ? 'hi' : 'mid');
 
@@ -2917,6 +2933,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-dot-star{stroke:var(--rf-fg);stroke-width:1.5}
   .rf-dot-lo{fill:var(--rf-accent);color:var(--rf-accent)} .rf-dot-mid{fill:#6b7cb3;color:#6b7cb3} .rf-dot-hi{fill:var(--rf-up);color:var(--rf-up)} .rf-dot-na{fill:var(--rf-soft);color:var(--rf-soft)}
   .rf-map-sub{font-size:10px;fill:var(--rf-muted);paint-order:stroke;stroke:var(--rf-hover);stroke-width:3px} .rf-map-pin rect{fill:var(--rf-fg)} .rf-map-pin text,.rf-map-scale text{font-size:10px;fill:var(--rf-fg)}
+  .rf-map-far path{fill:var(--rf-fg)}
   .rf-map-scale line{stroke:var(--rf-fg);stroke-width:2}
   .rf-market-t{overflow-x:auto;max-width:100%}
   .rf-market table{border-collapse:collapse;width:100%;margin:6px 0 12px}
@@ -3917,9 +3934,25 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const el = itemEl(id);
       if (el) { el.focus(); el.scrollIntoView({ block: 'center' }); }
     };
+    const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     ui.list.addEventListener('keydown', (e) => {
-      const dot = (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('[data-map-id]');
-      if (dot) { e.preventDefault(); e.stopPropagation(); ui.mapPick(dot.dataset.mapId); }
+      const dot = e.target.closest?.('[data-map-id]');
+      if (!dot) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); ui.mapPick(dot.dataset.mapId); return; }
+      const dir = ARROWS[e.key];
+      if (!dir) return;
+      e.preventDefault(); e.stopPropagation();
+      // The nearest dot that way, favouring ones straight ahead over ones off to the side.
+      const x0 = +dot.getAttribute('cx'), y0 = +dot.getAttribute('cy');
+      let best = null, bestD = Infinity;
+      for (const d of ui.list.querySelectorAll('[data-map-id]')) {
+        const dx = +d.getAttribute('cx') - x0, dy = +d.getAttribute('cy') - y0, ahead = dx * dir[0] + dy * dir[1];
+        if (d === dot || ahead <= 0) continue;
+        const dist = ahead + 2 * Math.abs(dx * dir[1] + dy * dir[0]);
+        if (dist < bestD) { bestD = dist; best = d; }
+      }
+      if (!best) return;
+      dot.setAttribute('tabindex', '-1'); best.setAttribute('tabindex', '0'); best.focus();
     });
     ui.pickWeek = (b) => {
       if (!ui.rows) return;
@@ -4514,13 +4547,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const pins = [...parsePlaces(cfg.places), ...(parseAnchor(cfg.anchor) ? [{ label: 'From', ...parseAnchor(cfg.anchor) }] : [])];
     const m = mapLayout(rows, pins);
     if (!m) return '<div class="rf-market"><div class="rf-plan-head">None of these listings has a location, so there is nothing to map.</div></div>';
-    const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="0" role="button"
+    const first = m.dots.find((d) => d.r.starred) || m.dots[0]; // one tab stop; arrows move between dots
+    const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
       aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
     return `<div class="rf-market rf-map"><div class="rf-plan-head">${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
       <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
         ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
         ${m.dots.filter((d) => !d.r.starred).map(dot).join('')}${m.dots.filter((d) => d.r.starred).map(dot).join('')}
         ${m.pins.map((p) => `<g class="rf-map-pin"><rect x="${p.x - 4}" y="${p.y - 4}" width="8" height="8"/><text x="${p.x + 7}" y="${p.y + 4}">${esc(p.label)}</text></g>`).join('')}
+        ${m.far.map((p) => `<g class="rf-map-pin rf-map-far"><path d="M0,-5 L9,0 L0,5 z" transform="translate(${p.x},${p.y}) rotate(${-p.angle})"/><text x="${p.x}" y="${p.y + (p.y > m.h / 2 ? -8 : 14)}" text-anchor="${p.x > m.w * 0.66 ? 'end' : p.x < m.w * 0.33 ? 'start' : 'middle'}">${esc(p.label)} ${p.km} km</text></g>`).join('')}
         <g class="rf-map-scale"><line x1="10" y1="${m.h - 10}" x2="${10 + m.scale.px}" y2="${m.h - 10}"/><text x="10" y="${m.h - 14}">${m.scale.km < 1 ? `${m.scale.km * 1000} m` : `${m.scale.km} km`}</text></g>
       </svg>
       <div class="rf-meta rf-map-key"><span class="rf-dot-lo">●</span> below the median · <span class="rf-dot-mid">●</span> near it · <span class="rf-dot-hi">●</span> above · <span class="rf-dot-na">●</span> no median · larger: shortlisted · ■ your places. Straight lines, no streets.</div></div>`;

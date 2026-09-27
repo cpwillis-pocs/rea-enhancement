@@ -1728,6 +1728,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.getAttribute('.rf-map-btn', 'aria-pressed'), 'true');
     assert.equal(await page.$$eval('.rf-map [data-map-id]', (d) => d.length), n, 'every listing shown has a location in the fixtures');
     assert.match(await page.textContent('.rf-map-pin'), /Work/);
+    assert.equal(await page.$$eval('.rf-map [data-map-id][tabindex="0"]', (d) => d.length), 1, 'one tab stop for the whole map');
+    await page.focus('.rf-map [data-map-id][tabindex="0"]');
+    const from = await page.evaluate(() => document.activeElement.dataset.mapId);
+    await page.keyboard.press('ArrowDown');
+    if (await page.evaluate(() => document.activeElement.dataset.mapId) === from) await page.keyboard.press('ArrowUp'); // it may be the lowest dot
+    const to = await page.evaluate(() => document.activeElement.dataset.mapId);
+    assert.ok(to && to !== from, 'arrow keys move between dots');
+    assert.equal(await page.$eval('.rf-map [data-map-id][tabindex="0"]', (d) => d.dataset.mapId), to, 'and the tab stop follows');
     const id = await page.$eval('.rf-map [data-map-id]:last-of-type', (d) => d.dataset.mapId);
     await page.focus(`.rf-map [data-map-id="${id}"]`); await page.keyboard.press('Enter');
     await page.waitForFunction((i) => document.activeElement?.dataset?.id === i, id);
