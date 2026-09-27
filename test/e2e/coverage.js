@@ -51,7 +51,7 @@ function report(script, out = path.join(__dirname, '../../coverage-e2e.txt')) {
     ...uiUncovered.map((l) => `${l}: ${lines[l - 1].trim()}`)].join('\n');
   fs.writeFileSync(out, text + '\n');
   console.log(text.split('\n')[0], `-> ${path.relative(process.cwd(), out)}`);
-  // COVERAGE_MIN=99.5 fails the run when UI line coverage drops below it (CI sets it on the last file).
+  // COVERAGE_MIN (eg 98) fails the run when UI line coverage drops below it; the on-demand CI coverage job sets 98.
   const pct = uiTotal ? ((uiTotal - uiUncovered.length) / uiTotal) * 100 : 100;
   const min = +process.env.COVERAGE_MIN;
   if (process.env.GITHUB_STEP_SUMMARY && process.env.COVERAGE_APPEND) {

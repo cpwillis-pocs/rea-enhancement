@@ -9,7 +9,7 @@ git clone <this repo>
 cd rea-enhancement
 npm run lint    # syntax + project invariants (header, changelog, privacy, storage keys)
 npm run check   # lint + unit tests, exactly what CI runs first
-npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js); needs `npm i --no-save playwright` + `npx playwright install chromium`
+npm run e2e     # Chromium: main flow (smoke.js) + edge paths (edge.js); needs `npm i --no-save playwright@1.56.1` (the version CI pins) + `npx playwright install chromium`
 npm run coverage   # unit coverage of the pure half, then V8 coverage of the UI half across both e2e files -> coverage-e2e.txt
 npm run ci      # check + e2e, the whole gate locally
 ```
@@ -24,7 +24,7 @@ npm run ci      # check + e2e, the whole gate locally
 
 | Job | What | When |
 |---|---|---|
-| lint | `npm run lint` | always (first) |
+| lint | `npm run lint` | first, on every run except the on-demand `screenshots` suite |
 | unit | unit tests on Node 20 (in Los Angeles time, so dates can't depend on the runner's zone), 22 and 24, with a JUnit report | PR, on demand `all`/`unit` |
 | e2e | `smoke.js` and `edge.js` in parallel, `edge.js` running 3 blocks at a time (`E2E_JOBS=3`); failure screenshots and logs as artifacts | PR, on demand `all`/`e2e` |
 | coverage | unit + e2e coverage, UI lines held to 98%; report as artifact and in the run summary | on demand `all`/`coverage` (run `npm run coverage` locally for new UI code) |
@@ -33,7 +33,7 @@ npm run ci      # check + e2e, the whole gate locally
 
 On-demand options: **suite** (all, lint, unit, e2e, coverage, screenshots), **repeat** (run each e2e file 1/3/5/10 times to hunt flaky tests; the run stops at the first failure and says which attempt) and **artifacts** (upload logs and screenshots even when everything passes). A newer push to the same PR cancels the older run. Playwright's version is pinned in the workflow and its browsers are cached.
 
-`npm run lint` (`test/lint.js`) enforces what the tests don't: the userscript header (`@grant none`, `@match` only REA, update URLs on `main`, MIT), a CHANGELOG section for the current `@version`, a `WHATS_NEW` note no newer than `@version` and with its own CHANGELOG section, the README install link, no URLs or network APIs outside realestate.com.au, storage keys built from `TOOL_PREFIX`, and no `eval`-style code. `test/lint.test.js` checks the lint itself catches each of these.
+`npm run lint` (`test/lint.js`) enforces what the tests don't: the userscript header (`@grant none`, `@match` only REA, update URLs on `main`, MIT), a CHANGELOG section for the current `@version`, a `WHATS_NEW` note no newer than `@version` and with its own CHANGELOG section, the README install link, no URLs or network APIs outside realestate.com.au and REA's image host reastatic.net, storage keys built from `TOOL_PREFIX`, and no `eval`-style code. `test/lint.test.js` checks the lint itself catches each of these.
 
 Every line of the userscript should be executed by some test: pure functions by `test/*.test.js`, UI code by `test/e2e/*.js`. `npm run coverage` lists any UI line no e2e run reached; add a scenario for it rather than leaving it unexercised. Tests freeze the clock (`test/clock.js`, `page.clock.install`), so fixture dates keep their meaning on any day.
 
@@ -53,7 +53,7 @@ Put new logic above the guard where you can, and give it a unit test.
 
 ## Rules of thumb
 
-- **REA's DOM is off limits except append-only.** Obfuscated classes change weekly and React re-renders wipe edits. The script only appends one `.rf-badge` per `<article>` and sets `data-rf-*` attributes. Don't reorder, remove or restyle REA nodes.
+- **REA's DOM is off limits except append-only.** Obfuscated classes change weekly and React re-renders wipe edits. The script only appends one `.rf-badge` per result card (REA's `<article>`, or the card `cardsOnPage` finds when there are none) and sets `data-rf-*` attributes. Don't reorder, remove or restyle REA nodes beyond the `data-rf-pos` (position on static cards) and `data-rf-match` (fade) rules.
 - **Every listing field is optional.** REA's GraphQL shape is undocumented. Read with optional chaining, degrade to empty, and add new paths to `PROBE_PATHS` so `reaFilter.probe()` reports them.
 - **Be polite to REA.** Pages are fetched sequentially with a jittered delay and a hard page cap. Don't add parallel fetching or remove the cap; a bot check blocks the user, not us.
 - **Prefix every storage key with `rea-avail-filter/`.** localStorage is shared with REA; the prefix is how Settings measures and deletes only this script's data.

@@ -2,6 +2,24 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.25.0
+
+- Fixed:
+  - Space on a focused button inside a listing (Shortlist, Hide, ⋯) presses it again, instead of opening the photo.
+  - After changing a sort or filter far down the side drawer, the first result is no longer hidden under the status line.
+  - The Shortlist tab opens at its top the first time, not at the Results tab's scroll position.
+  - A listing that came back because it got cheaper is hidden again by any Hide button (on REA's card, the listing bar, or Bulk → Hide all shown), and is labelled "Hide again" everywhere.
+  - Unhiding a listing clears its hide reason, so a later hide doesn't bring it back when the rent drops.
+  - "Water efficient" is no longer tagged when the text says the home does not meet water-efficiency standards.
+  - The photo peek closes with the drawer or on a tab switch.
+  - Expanding the drawer keeps the listing you were on in view.
+  - `reaFilter.shape()` also takes out phone numbers and email addresses.
+- Faster:
+  - Shortlisting, hiding, noting or setting a status redraws only the listing that changed (about 12 ms instead of 138 ms with 300 listings shown).
+  - Calendar export is about 25× quicker.
+  - Card detection and amenity reading do less work.
+- Docs: corrected CI, lint and coverage details; the share-link privacy wording; the full keyboard list; and the roadmap, now with ten new ideas.
+
 ## 2.24.1
 
 - The project moved to [cpwillis-pocs/rea-enhancement](https://github.com/cpwillis-pocs/rea-enhancement): the namespace and the update, download, homepage and issue links point there.

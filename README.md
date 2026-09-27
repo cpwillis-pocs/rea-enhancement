@@ -46,7 +46,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Reviewed**: going past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed; **Not reviewed yet** (More filters) and "reviewed 34 of 150" in the status line keep your place across visits.
 - **Hidden for the price?** Give "price" as the reason and the listing comes back, tagged "$110 cheaper since you hid it", if its rent drops. Reasons can be set or changed later from a hidden listing's ⋯ menu.
 - **Inspections I can make**: keep only listings with an open home on a weekend or after 5pm.
-- **Keyboard**: j/k move, g/G first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, r reviewed, p photo, 1–5 application status, o open, t Results/Shortlist, f filters, d compact, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
+- **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, o or Enter open, t Results/Shortlist, m market view, f filters, d compact, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
 **On REA's own result cards**
@@ -63,7 +63,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Inspection checklist** per shortlisted listing (damp, water pressure, signal, light, noise, storage, or your own), shown in Compare and on the printout.
 - **Plan an inspection day**: shortlisted inspections in order with clashes and tight travel gaps flagged, plus a **suggested route** that fits in as many listings as can be reached in time (one session each, "to inspect" ones first), exportable to your calendar as the whole day or just the route.
 - **Re-check** shortlisted listings to refresh price, availability and inspections from their pages, and spot ones taken down.
-- **Share** the shortlist as a link (data stays in the link, nothing goes to a server) or **Print** it for open homes.
+- **Share** the shortlist as a link or **Print** it for open homes. The shared data sits in the link's `#` fragment, which browsers don't send to REA's servers; REA's own page scripts could read it before the script clears it, and wherever you paste the link keeps a copy.
 - **Backup / Restore** the shortlist, hidden listings, notes and remembered searches as a JSON file, eg to move to another browser.
 - **Remembers each search between visits** (on by default; a setting turns it off and forgets what's stored). Coming back shows the saved results straight away, and **Refresh** fetches current listings and diffs them: listings added since your last visit are tagged **new** (filter: "New since last visit only"), and ones taken down are counted and can be shown greyed out. Sort **Newest first** to see additions in order of listing.
 - **Saved searches**: see your remembered searches and **Check all for new listings** in one click (each fetched one page at a time), with an optional once-a-day reminder. **Pin** a search to keep it when you open others (3 are remembered); you're told when one is forgotten.
@@ -95,7 +95,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ## When REA changes something
 
-REA's data format is undocumented and changes. If the badges on REA's cards stop appearing, the drawer shows a banner saying the cards weren't recognised. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, or a field is always empty, open DevTools on a results page and run:
+REA's data format is undocumented and changes. If the badges on REA's cards stop appearing, the drawer shows a banner saying the cards weren't recognised. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, or a field is always empty, click **Search all pages**, then open DevTools and run:
 
 ```js
 reaFilter.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue

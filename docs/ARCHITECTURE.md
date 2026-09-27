@@ -20,7 +20,7 @@ New logic goes in the pure half wherever possible, with a unit test.
 3. **Rows.** `toRow` turns each listing into a flat row: dates, prices normalised to weekly, bond and move-in cost, amenities, heads-up clauses, lease term, apply-via, taken, by-appointment, inspections in the listing's time zone, coordinates, and folded text for keywords. Every field is optional; unknown paths are found by `discover` and reported by `reaFilter.probe()`.
 4. **Learn.** `learn` → `marksStore.observe` records sightings, price/date/feature changes, relists and cancelled inspections. It also refreshes the shortlist copy: search rows replace inspections and clauses, property pages merge.
 5. **Adopt.** `adopt` decorates rows with your marks, then works out suburb-scoped medians (`withMedians`) and building groups (`withBuildings`), and compares against the remembered snapshot (new / gone).
-6. **Show.** `applyFilters` (`filterRows` + `withScores` + `sorter`) drives `render`. It renders 50 at a time (`RENDER_CHUNK`) with an IntersectionObserver whose root is whatever scrolls: the drawer in side mode, the list when expanded. `annotate` badges REA's own cards and can fade the ones that don't match.
+6. **Show.** `applyFilters` (`filterRows` + `withScores` + `sorter`) drives `render`. `paintList` swaps only the listings whose markup changed when the same listings are on screen (a star, hide or note click), else it redraws the list. It renders 50 at a time (`RENDER_CHUNK`) with an IntersectionObserver whose root is whatever scrolls: the drawer in side mode, the list when expanded. `annotate` badges REA's own cards and can fade the ones that don't match.
 
 REA's DOM is only ever appended to: one `.rf-badge` per result card and `data-rf-*` attributes. Cards are REA's `<article>`s. If there are none, `cardsOnPage` climbs from each `/property-` link to the largest ancestor that still holds only that listing (`selfcheck()` reports which way it found them). If a list page has listings but no card can be recognised for 8 seconds, the drawer shows a warning banner. The badge CSS resets host styles and uses `!important`, because REA's stylesheets can load after ours.
 
@@ -95,7 +95,7 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 
 ## Tests at a glance
 
-- **Unit:** `test/*.test.js` (165 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
-- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (53 blocks, numbered 1–39 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
-- **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files, and CI holds it at 98% or more.
+- **Unit:** `test/*.test.js` (169 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
+- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (54 blocks, numbered 1–40 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
+- **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Lint:** `test/lint.js` enforces the project rules, and `test/lint.test.js` checks the lint itself.
