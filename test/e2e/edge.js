@@ -41,6 +41,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached', timeout: 5000 }).catch(() => {}); // startup runs over three tasks
     return page;
   };
+  // Save a preset: pick Save from the menu, type the name in the field that opens, Enter.
+  const presetSave = async (page, kind, name) => { await page.selectOption('.rf-preset', kind); await page.fill('.rf-preset-name', name); await page.press('.rf-preset-name', 'Enter'); };
   const done = async (page) => { await cov.collect(page, SCRIPT); await page.close(); };
 
   // Each numbered scenario is a block: E2E_ONLY=24l,26 runs just those; a failure (or a page
@@ -542,18 +544,23 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('21', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'Bondi pets' : '3-bed'));
     await run(page);
     await page.click('#rf-more summary');
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.selectOption('.rf-preset', 'c:save');
+    assert.equal(await page.getAttribute('.rf-preset-name', 'aria-label'), 'Preset name');
+    await page.keyboard.type('nope'); await page.keyboard.press('Escape');
+    assert.equal(await page.$('.rf-preset-name'), null, 'Esc cancels');
+    assert.ok(await page.isVisible('#rf-panel'), 'without closing the drawer');
+    assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:nope'));
+    await presetSave(page, 'c:save', '3-bed');
     assert.match(await status(page), /Saved preset "3-bed"/);
     await page.click('.rf-clear');
     await page.selectOption('.rf-preset', 'a:3-bed');
     assert.equal(await page.inputValue('#rf-bedsMin'), '3', 'preset applied');
     await page.click('.rf-clear');
     await page.click('[data-amen=pets]');
-    await page.selectOption('.rf-preset', 'c:bind');
+    await presetSave(page, 'c:bind', 'Bondi pets');
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
@@ -569,13 +576,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('21b', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    page.on('dialog', (d) => d.accept(d.message().includes('this search') ? 'd:x' : '-3-bed'));
     await run(page);
     await page.click('#rf-more summary');
     await page.click('.rf-types [data-ptype="Townhouse"]');
-    await page.selectOption('.rf-preset', 'c:save');
+    await presetSave(page, 'c:save', '-3-bed');
     assert.match(await status(page), /Saved preset "-3-bed"/);
-    await page.selectOption('.rf-preset', 'c:bind');
+    await presetSave(page, 'c:bind', 'd:x');
     assert.match(await status(page), /d:x/);
     const vals = await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value));
     assert.ok(vals.includes('a:-3-bed') && vals.includes('d:-3-bed'), 'command-like name kept as a preset');
@@ -597,12 +603,11 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('21c', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    page.on('dialog', (d) => d.accept('Bondi pets'));
     const pets = () => page.getAttribute('[data-amen=pets]', 'aria-label');
     await run(page);
     await page.click('#rf-more summary');
     await page.click('[data-amen=pets]');
-    await page.selectOption('.rf-preset', 'c:bind');
+    await presetSave(page, 'c:bind', 'Bondi pets');
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
@@ -1615,8 +1620,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(saved.theme, 'dark', 'theme kept');
     assert.equal(saved.priceMax, '900', 'and the rent change saved');
     // A preset saved in one tab is in the other's menu; a search remembered there is listed here.
-    b.once('dialog', (d) => d.accept('from B'));
-    await b.selectOption('.rf-preset', 'c:save');
+    await presetSave(b, 'c:save', 'from B');
     await a.waitForFunction(() => [...document.querySelectorAll('.rf-preset option')].some((o) => /from B/.test(o.textContent)));
     await b.click('#rf-run'); await waitStatus(b, /listings match/);
     await a.waitForFunction(() => document.querySelector('.rf-saved-list li'), null, { timeout: 8000 });

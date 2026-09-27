@@ -3311,6 +3311,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-toast{right:20px;bottom:72px;max-width:min(360px,calc(100vw - 32px))}
   #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
   #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
+  .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
@@ -4562,15 +4563,36 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (ui.planDay && ui.compare) ui.slBar.querySelector('[data-sl=compare]').click(); // one view at a time
       renderShortlist();
     });
+    // The name is typed in a field next to the menu (themed and labelled, unlike a prompt):
+    // Enter saves, Esc cancels, leaving it saves what's typed; focus goes back to the menu.
+    const askPresetName = (key) => {
+      ui.preset.parentElement.querySelector('.rf-preset-name')?.remove();
+      const input = Object.assign(document.createElement('input'), { type: 'text', className: 'rf-preset-name', maxLength: 40,
+        placeholder: key ? 'Name (applies on this search); Enter saves' : 'Preset name; Enter saves' });
+      input.setAttribute('aria-label', key ? 'Preset name (auto-applies on this search)' : 'Preset name');
+      ui.preset.after(input);
+      input.focus();
+      let done = false;
+      const finish = (save) => {
+        if (done) return;
+        done = true;
+        const saved = save && input.value.trim() && presets.save(input.value, cfg, key);
+        input.remove();
+        if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
+        fillPresets();
+        ui.preset.focus();
+      };
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation(); // typing a name isn't a shortcut, and Esc doesn't close the drawer
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') finish(false);
+      });
+      input.addEventListener('blur', () => finish(true));
+    };
     ui.preset.addEventListener('change', () => {
       const v = ui.preset.value;
       ui.preset.value = '';
-      if (v === 'c:save' || v === 'c:bind') {
-        const key = v === 'c:bind' ? currentKey() : null;
-        const name = window.prompt(key ? 'Preset name (auto-applies on this search):' : 'Preset name:', '');
-        const saved = name && presets.save(name, cfg, key);
-        if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
-      } else if (v.startsWith('d:')) {
+      if (v === 'c:save' || v === 'c:bind') return askPresetName(v === 'c:bind' ? currentKey() : null);
+      else if (v.startsWith('d:')) {
         presets.remove(v.slice(2));
         setStatus(`Deleted preset "${v.slice(2)}".`);
       } else if (v.startsWith('a:')) applyPreset(presets.get(v.slice(2)));
