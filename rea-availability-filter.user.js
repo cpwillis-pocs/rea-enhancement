@@ -1703,6 +1703,9 @@
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
   // keyword: null) falls back to the default instead of throwing on every render.
+  // Settings a backup carries: your own setup (places, checklist, template, weights, theme…),
+  // not this search's filters. Restored through sanitizeCfg, so a hand-edited file can't break it.
+  const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok).map((k) => [k, ok[k]])); };
   const sanitizeCfg = (c) => (c && typeof c === 'object'
     ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))).map((k) => [k, c[k]]))
     : {});
@@ -2467,7 +2470,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, mergeCfg, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, mergeCfg, backupCfg, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3744,7 +3747,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const data = marks.exportData();
       data.presets = presets.exportData();
       if (cfg.remember) data.snapshots = snaps.exportData();
+      data.cfg = backupCfg(cfg);
       download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
+      backupAt.set(String(Date.now()));
+      setWarn('backup', '');
+      ui.paintStorage?.();
     });
     ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
     ui.slBar.querySelector('[data-sl=share]').addEventListener('click', async () => {
@@ -3800,7 +3807,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const ls = storageOr('localStorage'), ss = storageOr('sessionStorage');
       const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
       const per = snaps.sizes().map((x) => `${searchLabel(x.key)} ${fmtBytes(x.bytes)}${x.lite ? ' (text trimmed to fit)' : ''}`);
-      storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`
+      const last = +backupAt.get() || 0;
+      storageLine.textContent = `Last backup: ${last ? ago(Date.now() - last) : 'never'}. Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`
         + (per.length ? ` Remembered: ${per.join(' · ')}.` : '');
     };
     ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
@@ -3854,10 +3862,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         const n = marks.importJson(data);
         const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
         presets.importData(data.presets);
+        const c = backupCfg(data.cfg);
+        if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
         fillPresets();
         renderSaved();
         refreshMarks();
-        setStatus(`Restored ${plural(n, 'listing')}${k ? ` and ${plural(k, 'saved search', 'es')}` : ''} from backup.`);
+        setStatus(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`);
       } catch (err) { setStatus(err.message, true); }
     });
 
@@ -4774,6 +4784,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Once a day at most, on a search page: saved searches not checked for a day get a small
   // prompt by the launcher. Nothing is fetched unless you click "Check now".
   const REMIND_KEY = `${TOOL_PREFIX}remind-at`;
+  // Browser storage can be cleared (and REA's page shares it): with a real shortlist and no
+  // backup for a month, say so once a month.
+  const BACKUP_KEY = `${TOOL_PREFIX}backup-at`, BACKUP_NUDGE_KEY = `${TOOL_PREFIX}backup-nudge-at`;
+  const BACKUP_NUDGE_MIN = 5, BACKUP_NUDGE_DAYS = 30;
+  const backupAt = keyStore(storageOr('localStorage'), BACKUP_KEY);
+  const nudgeBackup = () => {
+    const now = Date.now(), gap = BACKUP_NUDGE_DAYS * DAY_MS, nudged = keyStore(storageOr('localStorage'), BACKUP_NUDGE_KEY);
+    const n = marks.counts().starred;
+    if (n < BACKUP_NUDGE_MIN || now - (+backupAt.get() || 0) < gap || now - (+nudged.get() || 0) < gap) return;
+    nudged.set(String(now));
+    setWarn('backup', `${n} listings shortlisted and ${backupAt.get() ? `last backed up ${ago(now - +backupAt.get())}` : 'never backed up'}. Browser storage can be cleared: Shortlist → More → Backup keeps a copy.`);
+  };
   const REMIND_EVERY_MS = DAY_MS;
   function remindSaved() {
     const old = document.getElementById('rf-remind');
@@ -5195,6 +5217,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       });
       step('saved', renderSaved);
       step('remind', remindSaved);
+      step('backup nudge', nudgeBackup);
       step('annotate', ensureVisiblePage);
     }, 0);
   }

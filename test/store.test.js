@@ -200,3 +200,9 @@ test('mergeCfg: only the keys this tab changed are written over what another tab
   assert.equal(out.priceMax, '900');
   assert.deepEqual(core.mergeCfg(stored, before, before), stored, 'no change writes back what is stored');
 });
+
+test('backupCfg: your own settings only, sanitised', () => {
+  const out = core.backupCfg({ theme: 'dark', checklist: 'Damp', priceMax: '900', wRent: 3, sort: 'nope', evil: '<x>' });
+  assert.deepEqual(out, { theme: 'dark', checklist: 'Damp' }, 'filters, bad types, bad sorts and unknown keys dropped');
+  assert.deepEqual(core.backupCfg(null), {});
+});

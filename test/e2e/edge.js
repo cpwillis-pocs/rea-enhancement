@@ -1611,6 +1611,46 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await done(other); await ctx.close();
   });
 
+  // 47. Backups carry your settings (not this search's filters) and restore them; a real
+  // shortlist with no backup gets one nudge.
+  await block('47', async () => {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/v1')) localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ theme: 'dark', checklist: 'Damp, Noise', priceMax: '900' })); });
+    const page = await open(ctx);
+    await run(page);
+    await page.hover('.rf-item:nth-child(1)'); await page.click('.rf-item:nth-child(1) >> [data-act=s]');
+    await page.click('[data-view=shortlist]');
+    const [bk] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('[data-sl=backup]'))]);
+    const data = JSON.parse(fs.readFileSync(await bk.path(), 'utf8'));
+    assert.equal(data.cfg.theme, 'dark');
+    assert.equal(data.cfg.checklist, 'Damp, Noise');
+    assert.ok(!('priceMax' in data.cfg), "a search's filters aren't settings");
+    assert.ok(await page.evaluate(() => localStorage.getItem('rea-avail-filter/backup-at')), 'backup time recorded');
+    await done(page); await ctx.close();
+    const fresh = await browser.newContext();
+    const p2 = await open(fresh);
+    await p2.click('#rf-launch'); await p2.click('[data-view=shortlist]');
+    await p2.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+    await waitStatus(p2, /Restored 1 listing, 1 saved search and your settings from backup/);
+    assert.equal(await p2.evaluate(() => document.documentElement.dataset.rfTheme), 'dark');
+    assert.equal(JSON.parse(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).checklist, 'Damp, Noise');
+    await done(p2); await fresh.close();
+    const many = await browser.newContext();
+    await many.addInitScript(() => {
+      const m = {};
+      for (let i = 0; i < 5; i++) m[146500010 + i] = { f: 1, l: 1, s: 1, st: 1, d: { u: `https://www.realestate.com.au/property-unit-nsw-bondi-${146500010 + i}`, a: `${i} Hall St, Bondi NSW 2026` } };
+      if (!localStorage.getItem('rea-avail-filter/marks/v1')) localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m }));
+    });
+    const p3 = await open(many);
+    await p3.click('#rf-launch');
+    await p3.waitForFunction(() => /5 listings shortlisted and never backed up/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''));
+    await p3.reload(); await p3.addScriptTag({ content: SCRIPT }); await p3.waitForSelector('#rf-launch');
+    await p3.click('#rf-launch');
+    assert.ok(!/never backed up/.test(await p3.textContent('.rf-warn-msg')), 'once, not on every page');
+    console.log('backup carries settings, nudge: ok');
+    await done(p3); await many.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
