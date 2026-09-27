@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         REA Availability Filter
-// @namespace    https://github.com/cpwillis/rea-enhancement
+// @namespace    https://github.com/cpwillis-pocs/rea-enhancement
 // @version      2.24.1
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis

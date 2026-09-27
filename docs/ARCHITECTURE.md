@@ -62,7 +62,9 @@ A failed write of something you chose (marks, settings, presets) goes to `writeS
 
 ## Script identity
 
-Tampermonkey tells scripts apart by `@name` plus `@namespace`. `@namespace` is still `https://github.com/cpwillis/rea-enhancement`, the repo's first home. Leave it, even though the repo now lives at `cpwillis-pocs/rea-enhancement`: changing it would make existing installs treat the update as a second, separate script. The update and download URLs point at the current home. The lint checks them, and a move means changing those URLs and bumping `@version`.
+Tampermonkey tells scripts apart by `@name` plus `@namespace` (`https://github.com/cpwillis-pocs/rea-enhancement`). Once people have installed the script, never change either: an update with a different name or namespace installs as a second, separate script. If the repo moves after it is public, change only `@updateURL`, `@downloadURL`, `@homepageURL` and `@supportURL`, plus the README install link and `RAW` in `test/lint.js`, and bump `@version`.
+
+The install and update links serve the raw file from `main`, so they only work while the repo is public.
 
 ## Versions that must move
 

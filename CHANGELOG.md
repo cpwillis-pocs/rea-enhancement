@@ -4,7 +4,7 @@ Versions match the userscript's `@version`; installs auto-update from `main` whe
 
 ## 2.24.1
 
-- The project moved to [cpwillis-pocs/rea-enhancement](https://github.com/cpwillis-pocs/rea-enhancement). Updates now come from the new address. If yours stops updating, reinstall from the link in the README (your settings and shortlist stay, since they're stored in the browser, not in the script).
+- The project moved to [cpwillis-pocs/rea-enhancement](https://github.com/cpwillis-pocs/rea-enhancement): the namespace and the update, download, homepage and issue links point there.
 
 ## 2.24.0
 
