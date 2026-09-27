@@ -85,6 +85,7 @@ When you build one, move it into the CHANGELOG, update this page, and add its e2
 
 ## Releasing
 
+1. `npm run release x.y.z` bumps `@version`, adds a CHANGELOG stub and updates the version and test counts here and in ARCHITECTURE.md (lint checks the version and e2e block count). Fill in the CHANGELOG section.
 1. `npm run ci` and `COVERAGE_MIN=98 npm run coverage` pass locally.
 1. `npm run live` passes (local only: one real search, core paths, card detection). If it saves a shape that differs from the last one in `test/shapes/`, check it has nothing personal and commit it.
 2. Bump `// @version`, and add a `## x.y.z` section at the top of CHANGELOG.md.

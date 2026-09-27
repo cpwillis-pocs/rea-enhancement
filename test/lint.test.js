@@ -55,3 +55,32 @@ test('lint catches a Playwright version that differs from CI', () => {
   assert.match(r.stderr, /playwright@1\.0\.0, CI pins/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('lint catches a ROADMAP version or e2e block count left behind at release', () => {
+  const dir = copy();
+  fs.mkdirSync(path.join(dir, 'docs')); fs.mkdirSync(path.join(dir, 'test/e2e'));
+  fs.writeFileSync(path.join(dir, 'docs/ROADMAP.md'), '## Where it stands (v0.0.1)\n');
+  fs.writeFileSync(path.join(dir, 'docs/ARCHITECTURE.md'), '(1 blocks, numbered 1–1)\n');
+  fs.writeFileSync(path.join(dir, 'test/e2e/edge.js'), "await block('1'); await block('2');\n");
+  const r = lint(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /ROADMAP\.md says v0\.0\.1/);
+  assert.match(r.stderr, /says 1 e2e blocks, test\/e2e\/edge\.js has 2/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('npm run release bumps the version, stubs the changelog and updates the doc counts', () => {
+  const dir = copy();
+  fs.mkdirSync(path.join(dir, 'docs')); fs.mkdirSync(path.join(dir, 'test/e2e'));
+  for (const f of ['docs/ROADMAP.md', 'docs/ARCHITECTURE.md', 'test/e2e/edge.js']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
+  const env = { ...process.env, RELEASE_ROOT: dir, RELEASE_ALLOW_DIRTY: '1', RELEASE_UNIT_COUNT: '321' }; // no nested test run
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'release.js'), '99.0.0'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(fs.readFileSync(path.join(dir, 'rea-availability-filter.user.js'), 'utf8'), /@version\s+99\.0\.0/);
+  assert.match(fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8'), /^## 99\.0\.0\n\n- \n/m);
+  assert.match(fs.readFileSync(path.join(dir, 'docs/ROADMAP.md'), 'utf8'), /Where it stands \(v99\.0\.0\)[\s\S]*321 unit tests/);
+  assert.match(fs.readFileSync(path.join(dir, 'docs/ARCHITECTURE.md'), 'utf8'), /\(321 tests\)/);
+  const r2 = spawnSync(process.execPath, [path.join(__dirname, 'release.js'), '1.0.0'], { env, encoding: 'utf8' });
+  assert.equal(r2.status, 1, 'refuses a lower version');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -15,7 +15,8 @@
     "e2e:fast": "E2E_JOBS=4 node test/e2e/edge.js",
     "e2e:setup": "npm install --no-save --no-audit --no-fund playwright@1.56.1 && npx playwright install chromium",
     "dev-stub": "node test/dev-stub.js",
-    "live": "node test/live.js"
+    "live": "node test/live.js",
+    "release": "node test/release.js"
   },
   "license": "MIT",
   "engines": {

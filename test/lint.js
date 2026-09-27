@@ -43,6 +43,17 @@ const ciPath = path.join(root, '.github/workflows/ci.yml');
 const pwCi = fs.existsSync(ciPath) ? fs.readFileSync(ciPath, 'utf8').match(/PLAYWRIGHT_VERSION:\s*(\S+)/)?.[1] : pwLocal;
 if (fs.existsSync(ciPath) && /live\.js|npm run live/.test(fs.readFileSync(ciPath, 'utf8'))) err('CI must not run the live check (test/live.js hits the real REA site)');
 if (!pwLocal || pwLocal !== pwCi) err(`package.json e2e:setup installs playwright@${pwLocal}, CI pins ${pwCi}: keep them the same`);
+// Docs that go stale at release time (npm run release updates them).
+const roadmapPath = path.join(root, 'docs/ROADMAP.md'), archPath = path.join(root, 'docs/ARCHITECTURE.md'), edgePath = path.join(root, 'test/e2e/edge.js');
+if (fs.existsSync(roadmapPath)) {
+  const rv = fs.readFileSync(roadmapPath, 'utf8').match(/## Where it stands \(v([\d.]+)\)/)?.[1];
+  if (rv !== tag('version')) err(`docs/ROADMAP.md says v${rv}, @version is ${tag('version')}: run npm run release, or update "Where it stands"`);
+}
+if (fs.existsSync(archPath) && fs.existsSync(edgePath)) {
+  const blocks = (fs.readFileSync(edgePath, 'utf8').match(/await block\('/g) || []).length;
+  const said = +(fs.readFileSync(archPath, 'utf8').match(/\((\d+) blocks, numbered/) || [])[1];
+  if (said !== blocks) err(`docs/ARCHITECTURE.md says ${said} e2e blocks, test/e2e/edge.js has ${blocks}`);
+}
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
 
