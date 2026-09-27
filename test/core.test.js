@@ -1113,3 +1113,17 @@ test('KEY_HELP: every shortcut in the ? help is handled, and the README lists it
     assert.ok(new RegExp(`(^|[\\s,(/])${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s,/;)]|$)`).test(readme), `README lists ${first}`);
   }
 });
+
+test('SETTINGS: one spec draws each setting, gives its default and bounds what a file can set', () => {
+  const html = core.settingsHtml({ storage: '<i id="storage"></i>' });
+  for (const x of core.SETTINGS) {
+    assert.ok(Object.hasOwn(core.DEFAULT_CFG, x.key), `${x.key} has a default`);
+    assert.match(html, new RegExp(`id="rf-${x.key}"`), `${x.key} drawn`);
+  }
+  assert.match(html, /id="rf-remindSaved">[^<]*<\/label><i id="storage">/, 'fixed markup after its entry');
+  assert.equal((html.match(/<fieldset class="rf-weights">/g) || []).length, 1, 'weights grouped once');
+  assert.deepEqual(core.sanitizeCfg({ theme: 'blue', icsAlarm: '45', wRent: '9', noticeDays: '500', income: '-3', checklist: 'x'.repeat(401) }), {}, 'out-of-range values dropped');
+  assert.deepEqual(core.sanitizeCfg({ theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' }),
+    { theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' });
+  assert.ok(!('remember' in core.backupCfg({ ...core.DEFAULT_CFG, remember: false })), 'a backup never carries Remember');
+});

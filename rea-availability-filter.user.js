@@ -1939,12 +1939,68 @@
   // #endregion
   // #region filters and sorts
 
+  // The drawer's Settings section, one entry per setting: it draws the markup (settingsHtml),
+  // gives the default, the name a restore preview uses, whether a backup carries it, and which
+  // values sanitizeCfg accepts. kind: check | select | date | int | text | textarea. `group`
+  // gathers entries into a fieldset; `after` names fixed markup drawn after the entry.
+  const WEIGHT_OPTS = [['0', 'Ignore'], ['1', 'Less'], ['2', 'Normal'], ['3', 'More']];
+  const SETTINGS = [
+    { key: 'annotate', kind: 'check', def: true, label: "Show badges and buttons on REA's result cards", name: 'card badges' },
+    { key: 'dimCards', kind: 'check', def: true, label: "Fade REA cards that don't match filters", name: 'card fading' },
+    { key: 'compact', kind: 'check', def: false, label: 'Compact list', title: 'Small photos and the key facts only, so about twice as many listings fit on screen (d)', name: 'compact list' },
+    { key: 'theme', kind: 'select', def: '', label: 'Theme', options: [['', 'System'], ['light', 'Light'], ['dark', 'Dark']], name: 'theme' },
+    { key: 'remember', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
+    { key: 'remindSaved', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
+    ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'Best match: how much each counts', name: 'weights' })),
+    { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', title: 'Some calendar apps ignore reminders in imported files', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
+    { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', inputTitle: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap", name: 'lease end' },
+    { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
+      title: "How many days before your lease ends you must tell your landlord or agent you're leaving. It depends on your state and lease: check your state's tenancy rules or your lease. The calendar export then adds a reminder." },
+    { key: 'checklist', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
+    { key: 'enquiry', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
+      inputTitle: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
+    { key: 'income', kind: 'int', def: '', min: 0, max: 99999999, step: 1000, label: 'Household income, $ a year before tax (optional)', placeholder: 'eg 120000', name: 'income',
+      inputTitle: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
+  ];
+  const SETTING_BY_KEY = new Map(SETTINGS.map((x) => [x.key, x]));
+  const settingOk = (k, v) => {
+    const x = SETTING_BY_KEY.get(k);
+    if (!x) return true;
+    if (x.kind === 'select') return x.options.some(([o]) => o === v);
+    if (x.kind === 'int') return v === '' || (/^\d+$/.test(v) && +v >= x.min && +v <= x.max);
+    if (x.kind === 'text' || x.kind === 'textarea') return v.length <= x.maxLength;
+    return true; // checks by type; dates by CFG_DATES
+  };
+  const settingsHtml = (fixed = {}) => {
+    const val = (v) => esc(typeof v === 'function' ? v() : v);
+    const one = (x) => {
+      const t = x.title ? ` title="${val(x.title)}"` : '', it = x.inputTitle ? ` title="${val(x.inputTitle)}"` : '';
+      const ph = x.placeholder ? ` placeholder="${val(x.placeholder)}"` : '', id = `rf-${x.key}`;
+      if (x.kind === 'check') return `<label class="rf-check"${t}><input type="checkbox" id="${id}">${esc(x.label)}</label>`;
+      if (x.kind === 'select') return `<label${t}>${esc(x.label)}<select id="${id}">${x.options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>`;
+      if (x.kind === 'textarea') return `<label${t}>${esc(x.label)}<textarea id="${id}" rows="${x.rows}" maxlength="${x.maxLength}"${ph}${it}></textarea></label>`;
+      const input = x.kind === 'date' ? 'type="date"' : x.kind === 'int' ? `type="number" min="${x.min}"${x.max < 99999999 ? ` max="${x.max}"` : ''} step="${x.step || 1}" inputmode="numeric"` : `type="text" maxlength="${x.maxLength}"`;
+      return `<label${t}>${esc(x.label)}<input ${input} id="${id}"${ph}${it}></label>`;
+    };
+    let out = '';
+    for (let i = 0; i < SETTINGS.length; i++) {
+      const x = SETTINGS[i];
+      if (x.group) {
+        const g = [];
+        while (SETTINGS[i]?.group === x.group) g.push(SETTINGS[i++]);
+        i--;
+        out += `<fieldset class="rf-weights"><legend>${esc(x.group)}</legend>${g.map(one).join('')}</fieldset>`;
+      } else out += one(x);
+      if (x.after) out += fixed[x.after] || '';
+    }
+    return out;
+  };
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
-    annotate: true, dimCards: true, compact: false, onlyStarred: false, showHidden: false,
-    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', noticeDays: '', showGone: false, income: '', theme: '',
+    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false,
+    ...Object.fromEntries(SETTINGS.map((x) => [x.key, x.def])),
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1953,11 +2009,11 @@
   // not this search's filters. Restored through sanitizeCfg, so a hand-edited file can't break it.
   // Not `remember`/`remindSaved`: restoring a backup made with Remember off must not delete this
   // browser's remembered searches.
-  const BACKUP_CFG_SKIP = new Set(['remember', 'remindSaved']);
+  const BACKUP_CFG_SKIP = new Set(SETTINGS.filter((x) => x.backup === false).map((x) => x.key));
   const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
   // What a restore would do, shown before anything is merged.
-  const SETTING_NAMES = { places: 'places', checklist: 'checklist', enquiry: 'enquiry template', leaseEnd: 'lease end', noticeDays: 'notice period', inspectFree: 'inspection times', income: 'income', theme: 'theme', anchor: 'distance point',
-    wRent: 'weights', wTiming: 'weights', wDist: 'weights', wMovein: 'weights', icsAlarm: 'calendar reminder', compact: 'compact list', annotate: 'card badges', dimCards: 'card fading', sort: 'sort', sortDesc: 'sort' };
+  const SETTING_NAMES = { ...Object.fromEntries(SETTINGS.filter((x) => x.name).map((x) => [x.key, x.name])),
+    places: 'places', inspectFree: 'inspection times', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
   const backupSummary = (data, cur) => {
     const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
     const c = backupCfg(data?.cfg);
@@ -1973,7 +2029,7 @@
   const isYmd = (v) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'); return !!d && !isNaN(d) && d.toISOString().startsWith(v); };
   const sanitizeCfg = (c) => (c && typeof c === 'object'
     ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))
-      && (!CFG_DATES.has(k) || c[k] === '' || isYmd(c[k]))).map((k) => [k, c[k]]))
+      && (!CFG_DATES.has(k) || c[k] === '' || isYmd(c[k])) && settingOk(k, c[k])).map((k) => [k, c[k]]))
     : {});
 
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
@@ -1982,7 +2038,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm', 'theme', 'inspectFree', 'noticeDays']; // Clear keeps your "from" point and your free times
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -3045,7 +3101,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3610,28 +3666,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       </details>
       <details class="rf-more rf-settings">
         <summary>Settings</summary>
-        <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
-        <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
-        <label class="rf-check" title="Small photos and the key facts only, so about twice as many listings fit on screen (d)"><input type="checkbox" id="rf-compact">Compact list</label>
-        <label>Theme<select id="rf-theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-        <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
-        <label class="rf-check"><input type="checkbox" id="rf-remindSaved">Remind me to check saved searches (at most daily)</label>
-        <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
+        ${settingsHtml({ storage: `<div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
           <button type="button" class="rf-btn sec" data-report title="Diagnostics for a bug report: fields found, recent errors and one listing's structure (no listing text, names or addresses)">Copy report</button>
-          <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
-        <fieldset class="rf-weights"><legend>Best match: how much each counts</legend>
-          ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
-            <option value="0">Ignore</option><option value="1">Less</option><option value="2">Normal</option><option value="3">More</option></select></label>`).join('')}
-        </fieldset>
-        <label title="Some calendar apps ignore reminders in imported files">Calendar reminder<select id="rf-icsAlarm">
-          ${[['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
-        <label>My current lease ends (optional)<input type="date" id="rf-leaseEnd" title="Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap"></label>
-        <label title="How many days before your lease ends you must tell your landlord or agent you're leaving. It depends on your state and lease: check your state's tenancy rules or your lease. The calendar export then adds a reminder.">Notice I must give (days, optional)<input type="number" id="rf-noticeDays" min="1" max="120" step="1" inputmode="numeric" placeholder="check your state's rules"></label>
-        <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
-        <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
-          title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>
-        <label>Household income, $ a year before tax (optional)<input type="number" id="rf-income" min="0" step="1000" inputmode="numeric" placeholder="eg 120000"
-          title="Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser."></label>
+          <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>` })}
       </details>
       <details class="rf-more rf-saved" hidden>
         <summary>Saved searches</summary>

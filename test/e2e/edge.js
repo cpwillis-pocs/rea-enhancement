@@ -1673,7 +1673,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await p2.click('#rf-launch'); await p2.click('[data-view=shortlist]');
     await p2.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...data, cfg: { ...data.cfg, remember: false } })) });
     await p2.waitForSelector('.rf-restore-in:not([hidden])');
-    assert.match(await p2.textContent('.rf-restore-msg'), /1 listing \(1 shortlisted, 0 hidden\), 1 saved search, and replace your checklist, theme\?/);
+    assert.match(await p2.textContent('.rf-restore-msg'), /1 listing \(1 shortlisted, 0 hidden\), 1 saved search, and replace your theme, checklist\?/);
     assert.equal(Object.values((await marks(p2)) || {}).filter((e) => e.s).length, 0, 'nothing merged before you say so');
     await p2.click('[data-restore=yes]');
     await waitStatus(p2, /Restored 1 listing, 1 saved search and your settings from backup/);
