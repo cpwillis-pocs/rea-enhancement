@@ -11,7 +11,8 @@
     "e2e:edge": "node test/e2e/edge.js",
     "coverage": "node --test --experimental-test-coverage --test-coverage-include=rea-availability-filter.user.js test/*.test.js && COVERAGE=1 node test/e2e/smoke.js && COVERAGE=1 COVERAGE_APPEND=1 node test/e2e/edge.js",
     "screenshots": "node test/e2e/screenshots.js",
-    "ci": "npm run check && npm run e2e"
+    "ci": "npm run check && npm run e2e",
+    "e2e:fast": "E2E_JOBS=4 node test/e2e/edge.js"
   },
   "license": "MIT",
   "engines": {

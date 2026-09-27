@@ -93,3 +93,14 @@ test('discover perf: 500 large listings stay fast (hints + shape misses)', () =>
   const ms = performance.now() - t0;
   assert.ok(ms < 1500, `500 big listings took ${Math.round(ms)}ms`);
 });
+
+test('shapeOf: structure kept, words out (descriptions, names, addresses, ids, urls)', () => {
+  const { listing } = require('./helpers');
+  const out = core.shapeOf(listing({ description: 'Call Jane on 0491 570 006', listingCompany: { name: 'Harbour Co' }, inspections: [{ startTime: '2026-09-26T00:30:00Z' }, { startTime: '2026-09-27T00:30:00Z' }] }));
+  const text = JSON.stringify(out);
+  for (const secret of ['Jane', 'Harbour', '1 Test St', 'reastatic']) assert.ok(!text.includes(secret), secret);
+  assert.equal(out.price.display, '$750 per week', 'display strings the parsers read are kept');
+  assert.equal(out.description, 'string(25)');
+  assert.deepEqual(out.inspections, [{ startTime: 'iso-date' }, '(2 items)']);
+  assert.equal(out.generalFeatures.bedrooms.value, 'number');
+});

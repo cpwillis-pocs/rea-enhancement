@@ -58,15 +58,16 @@ function pageResults(n, { pages = 3, perPage = 6, noInspections = false, extras 
 
 const reaPage = (n, opts) => {
   const r = pageResults(n, opts);
+  const tag = opts?.cardTag || 'article'; // cardTag: 'div' mimics REA dropping <article>
   const cards = r.exact.items.map(({ listing: l }, i) => `
-    <article class="rc">
+    <${tag} class="rc">
       <a class="rc-img" href="${l._links.canonical.href.replace(ORIGIN, '')}"><img src="${l.media.mainImage.templatedUrl.replace('{size}', '800x600')}" alt=""></a>
       <div class="rc-body">
         <div class="rc-price">${l.price.display}</div>
         <a class="rc-addr" href="${l._links.canonical.href.replace(ORIGIN, '')}">${l.address.display.fullAddress}</a>
         <div class="rc-feat">${l.generalFeatures.bedrooms.value} bed · ${l.generalFeatures.bathrooms.value} bath · ${l.generalFeatures.parkingSpaces.value} car · ${l.propertyType.display}</div>
       </div>
-    </article>`).join('');
+    </${tag}>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Real Estate & Property for Rent in ${SUBURB}</title>
 <style>
 body{margin:0;font:14px/1.4 Helvetica,Arial,sans-serif;background:#f3f3f5;color:#3b3b45}

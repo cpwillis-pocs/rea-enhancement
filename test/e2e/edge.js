@@ -6,6 +6,7 @@ const fs = require('fs');
 const assert = require('node:assert/strict');
 const { execSync } = require('child_process');
 const harness = require('./harness');
+const { AsyncLocalStorage } = require('node:async_hooks');
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { ORIGIN, serve, reaPage } = require('./fixtures');
@@ -24,11 +25,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
 
 (async () => {
   const browser = harness.watch(await pw.chromium.launch());
-  const errors = [];
+  const errors = []; // { id, msg }: page errors, tagged with the block that opened the page
+  const blockOf = new AsyncLocalStorage(); // which block is running, even with E2E_JOBS > 1
   // `before` runs after the page loads and before the script is added (eg to consume REA's global).
   const open = async (ctx, url = SEARCH, { route = serve(), before } = {}) => {
     const page = await ctx.newPage();
-    page.on('pageerror', (e) => errors.push(`[${current}] ${e.message}`));
+    const id = blockOf.getStore() ?? current;
+    page.on('pageerror', (e) => errors.push({ id, msg: `[${id}] ${e.message}` }));
     await page.clock.install({ time: FIXED });
     await cov.track(page);
     await page.route('**/*', route);
@@ -40,17 +43,25 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   const done = async (page) => { await cov.collect(page, SCRIPT); await page.close(); };
 
   // Each numbered scenario is a block: E2E_ONLY=24l,26 runs just those; a failure (or a page
-  // error it caused) names its block; E2E_TIMES=1 prints each block's duration.
+  // error it caused) names its block; E2E_TIMES=1 prints each block's duration. E2E_JOBS=n runs
+  // n blocks at once (each has its own browser context), for a quicker local run; CI runs them
+  // one at a time.
   const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',').map((x) => x.trim()).filter(Boolean) : null;
+  const jobs = Math.max(1, Math.min(8, +process.env.E2E_JOBS || 1));
   let current = '', ran = 0;
-  const block = async (id, fn) => {
-    if (only && !only.includes(id)) return;
+  const queue = [];
+  const runBlock = (id, fn) => blockOf.run(id, async () => {
     current = id; harness.section(id); ran++;
     const t = Date.now();
     try { await fn(); } catch (e) { e.message = `[block ${id}] ${e.message}`; throw e; }
-    assert.deepEqual(errors, [], `no page errors in block ${id}`);
+    assert.deepEqual(errors.filter((e) => e.id === id).map((e) => e.msg), [], `no page errors in block ${id}`);
     if (process.env.E2E_TIMES) console.log(`  block ${id}: ${Date.now() - t}ms`);
+  });
+  const block = async (id, fn) => {
+    if (only && !only.includes(id)) return;
+    if (jobs > 1) queue.push({ id, fn }); else await runBlock(id, fn);
   };
+  const drain = () => Promise.all(Array.from({ length: jobs }, async () => { for (let b; (b = queue.shift());) await runBlock(b.id, b.fn); }));
 
   // 1. Boot fallback: global already consumed by the app, data read from the <script> tag.
   await block('1', async () => {
@@ -285,7 +296,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: required');
     const withPets = await count(page);
     assert.ok(withPets > 0 && withPets < total, `pets required: ${withPets}/${total}`);
-    assert.ok(await page.$$eval('.rf-item .rf-tags', (e) => e.every((t) => /Pets OK/.test(t.textContent))));
+    assert.ok(await page.$$eval('.rf-item .rf-tags', (e) => e.every((t) => /Pets (OK|welcome|on application)/.test(t.textContent))));
+    assert.match(await page.textContent('.rf-list'), /Pets on application/, 'the wording tells considered apart from welcome');
     await page.click('[data-amen=pets]');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: excluded');
     const noPets = await count(page);
@@ -1328,6 +1340,51 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 36. REA drops <article>: cards are found by climbing from each listing link; badges, card
+  // buttons and fading still work, and selfcheck says which way they were found.
+  await block('36', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { cardTag: 'div' }) });
+    await page.waitForSelector('div.rc > .rf-badge', { timeout: 5000 });
+    assert.equal(await count(page, 'div.rc > .rf-badge'), 6, 'one badge per card');
+    assert.equal(await count(page, '.rc-body .rf-badge'), 0, 'on the card, not an inner box');
+    await page.hover('div.rc'); await page.click('div.rc [data-card-act=s]');
+    assert.equal(Object.values(await marks(page)).filter((e) => e.s).length, 1);
+    await run(page);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-priceMax', '600'); await page.dispatchEvent('#rf-priceMax', 'change');
+    await page.waitForSelector('div.rc[data-rf-match="0"]');
+    const report = await page.evaluate(() => window.reaFilter.selfcheck());
+    assert.match(report, /cards: 6 found \(fallback: REA no longer uses <article>\)/);
+    const shape = await page.evaluate(() => window.reaFilter.shape());
+    assert.ok(!/Curlewis|Bondi Realty/.test(shape) && /per week/.test(shape), 'shape(): structure without names or addresses');
+    console.log('cards without <article>, shape(): ok');
+    await done(page); await ctx.close();
+  });
+
+  // 37. Your place survives a reload (same filters): the drawer opens on the listing you were on;
+  // with different filters it's a different list, so it opens at the top.
+  await block('37', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await open(ctx, SEARCH, { route: serve([], { pages: 4, perPage: 15 }) });
+    await page.click('#rf-launch'); await page.click('#rf-run');
+    await waitStatus(page, /60 listings match|of 60 listings match/, 20000);
+    const id = await page.$$eval('.rf-item', (e) => e[42].dataset.id); // well down the list
+    await page.focus(`.rf-item[data-id="${id}"]`);
+    await page.clock.runFor(600);
+    const reopen = async () => { await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch'); await page.click('#rf-launch'); };
+    await reopen();
+    await page.waitForFunction((i) => document.activeElement?.dataset?.id === i, id, { timeout: 3000 });
+    const inView = await page.$eval(`.rf-item[data-id="${id}"]`, (el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; });
+    assert.ok(inView, 'the listing you were on is in view');
+    await page.click('#rf-more summary'); await page.fill('#rf-bedsMin', '2'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    await reopen();
+    await page.clock.runFor(300);
+    assert.notEqual(await page.evaluate(() => document.activeElement?.dataset?.id), id, 'different filters: not restored');
+    console.log('place kept across reloads: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
@@ -1399,6 +1456,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false, "Esc outside the drawer is REA's");
     console.log('enter on buttons + esc scope: ok'); await done(page); await ctx.close(); });
 
+  await drain();
+  assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);
   if (!only) cov.report(SCRIPT); // a partial run would under-report coverage
   await browser.close();

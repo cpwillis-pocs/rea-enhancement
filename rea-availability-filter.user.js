@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.22.0
+// @version      2.23.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis/rea-enhancement
@@ -255,7 +255,7 @@
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 3; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 4; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -1247,6 +1247,9 @@
       pos: /\bev[- ]charg(?:er|ers|ing)\b|\belectric (?:vehicle|car) charg(?:er|ers|ing)\b|\bcar charging (?:point|station|bay)s?\b/ },
     { id: 'stepfree', label: 'Step-free', yes: 'Step-free', neg: /\bwalk[- ]up\b|\bstairs only\b|\bno lift\b|\bsplit[- ]level\b/,
       pos: /\bstep[- ]free\b|\bwheelchair (?:access(?:ible)?|friendly)\b|\blevel (?:entry|access)\b|\bno (?:stairs|steps)\b|\bsingle[- ](?:level|storey)\b/ },
+    // Where tenants can only be charged for water if the home is water efficient (eg NSW, VIC).
+    { id: 'watereff', label: 'Water efficient', yes: 'Water efficient', neg: /\bnot water[- ]efficient\b/,
+      pos: /\bwater[- ]efficien(?:t|cy)(?: (?:compliant|standards|certified|devices|fixtures))?\b|\b(?:[3-6]|three|four|five|six)[- ]star (?:wels|water)\b|\bwater[- ]saving (?:fixtures|devices|shower ?heads?|taps)\b/ },
   ];
   // "X: No" per amenity, built once.
   for (const a of AMENITIES) a.kvNo = new RegExp(`(?:${a.pos.source})${AMEN_NO}`);
@@ -1261,7 +1264,20 @@
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
     .filter(([id, st]) => AMENITIES.some((a) => a.id === id) && (st === 'yes' || st === 'no')));
   const amenCfgString = (o) => Object.entries(o).map(([id, st]) => `${id}:${st}`).join(',');
-  const amenityTags = (r) => AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.yes);
+  // Finer detail read from the text for a few amenities, shown in the tag ("Pets on application",
+  // "Heating: ducted"). Shortlisted rows from other searches have no text, so they keep the plain tag.
+  const PETS_ASK = /\bpets? (?:(?:are |will be )?considered|negotiable|(?:on|by|upon|subject to) (?:application|approval|request))\b/;
+  const PETS_WELCOME = /\bpets? (?:are )?(?:welcome|allowed|permitted|ok|okay|accepted)\b|\bpet[- ]friendly\b/;
+  const HEAT_TYPES = [['ducted', /\bducted (?:gas )?heat/], ['split system', /\bsplit[- ]system|\breverse[- ]cycle/], ['hydronic', /\bhydronic/],
+    ['underfloor', /\b(?:underfloor|in[- ]floor) heat/], ['gas', /\bgas (?:space |wall )?heat/], ['fireplace', /\bfireplace\b|\bwood (?:fire|heater)/]];
+  const amenDetail = (id, text) => {
+    const t = String(text || '');
+    if (!t) return '';
+    if (id === 'pets') return PETS_ASK.test(t) ? 'Pets on application' : PETS_WELCOME.test(t) ? 'Pets welcome' : '';
+    if (id === 'heating') { const kinds = HEAT_TYPES.filter(([, re]) => re.test(t)).map(([k]) => k).slice(0, 2); return kinds.length ? `Heating: ${kinds.join(', ')}` : ''; }
+    return '';
+  };
+  const amenityTags = (r) => AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => amenDetail(a.id, r.text) || a.yes);
 
   // Heads-up: terms in the listing text worth asking the agent about. Plain text matches, so a
   // tag means "mentioned", never a verdict ("no application fee" is not flagged).
@@ -1423,6 +1439,22 @@
   };
   // REA drift guard: `items` that isn't an array reads as empty rather than throwing.
   const itemsOf = (block) => (Array.isArray(block?.items) ? block.items : []);
+  // A listing's structure with its words taken out, for reporting format changes: keys and
+  // types everywhere; short display strings (dates, prices, labels) kept as they read, since
+  // they are what the parsers look at; agent text, names, addresses and ids replaced by their type.
+  const SHAPE_KEEP = /^(?:display|shortLabel|longLabel|label|value|unit|type|__typename|propertyType|state|currency|period|frequency)$/;
+  const shapeOf = (v, key = '', depth = 0) => {
+    if (depth > 8) return '…';
+    if (v == null) return v;
+    if (Array.isArray(v)) return v.length ? [shapeOf(v[0], key, depth + 1), `(${v.length} items)`] : [];
+    if (typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, shapeOf(v[k], k, depth + 1)]));
+    if (typeof v === 'string') {
+      if (/^https?:\/\//.test(v)) return 'url';
+      if (/^\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d\d:?\d\d)?)?$/.test(v)) return 'iso-date';
+      return SHAPE_KEEP.test(key) && v.length <= 40 && !/\d{3,}\s*\w+\s+(?:st|street|rd|road|ave|avenue)\b/i.test(v) ? v : `string(${v.length})`;
+    }
+    return typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : typeof v;
+  };
   const sampleOf = (results) => itemsOf(results?.exact).find((i) => i?.listing)?.listing ?? null;
   const rowsFrom = (results) => [
     ...itemsOf(results?.exact).map((i) => i?.listing && safeRow(i.listing, false)),
@@ -2288,7 +2320,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2591,9 +2623,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-sl-q{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:130px}
   .rf-sl-filter{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
-  article[data-rf-pos]{position:relative}
-  article[data-rf-match="0"]{opacity:.35;transition:opacity .15s}
-  article[data-rf-match="0"]:hover{opacity:1}
+  [data-rf-id][data-rf-pos]{position:relative}
+  [data-rf-id][data-rf-match="0"]{opacity:.35;transition:opacity .15s}
+  [data-rf-id][data-rf-match="0"]:hover{opacity:1}
   /* On REA's cards: its own CSS (which may load after ours) mustn't size or pad our tags: reset, then !important. */
   .rf-badge,.rf-badge *{all:unset!important;box-sizing:border-box!important}
   .rf-badge{position:absolute!important;top:10px!important;left:10px!important;right:10px!important;z-index:5!important;display:flex!important;gap:4px!important;flex-wrap:wrap!important;align-items:center!important;pointer-events:none!important;
@@ -2680,6 +2712,249 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const presets = presetStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
 
+  // The drawer's markup. Only module constants go in, so it is built once and wired up by build().
+  const panelHtml = () => `
+    <div class="rf-resize" role="separator" aria-orientation="vertical" aria-label="Drawer width: drag, or use the left and right arrow keys" tabindex="0" aria-valuemin="${DRAWER_MIN}" aria-valuemax="${DRAWER_MAX}"></div>
+    <div class="rf-head">
+      <h2>Availability Filter</h2>
+      <button type="button" class="rf-tofilters" hidden title="Back up to the filters (f)">↑ Filters</button>
+      <button class="rf-clear" title="Reset all filters">Clear</button>
+      <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
+      <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
+      <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
+    </div>
+    <div class="rf-tabs" role="tablist">
+      <button role="tab" id="rf-tab-results" data-view="results" aria-selected="true" aria-controls="rf-list">Results</button>
+      <button role="tab" id="rf-tab-shortlist" data-view="shortlist" aria-selected="false" aria-controls="rf-list" tabindex="-1">Shortlist <span class="rf-count"></span></button>
+    </div>
+    <div class="rf-sl-bar" hidden>
+      <span class="rf-label">Shortlist, all searches</span>
+      <select class="rf-sl-bulk" aria-label="Bulk action on the shortlist shown">
+        <option value="">Bulk…</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="status:${v}" data-label="Mark {n} shown: ${v}">Mark shown: ${v}</option>`).join('')}
+        <option value="unstar-declined" data-label="Remove declined">Remove declined</option><option value="unstar" data-label="Remove all {n} shown">Remove all shown</option>
+      </select>
+      <select class="rf-plan" aria-label="Plan an inspection day"></select>
+      <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
+      <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
+        <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
+        <option value="-">Not started</option><option value="!">Needs action</option>
+      </select>
+      <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
+      <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
+      <details class="rf-menu"><summary class="rf-btn sec" title="Export, share, print, backup">More</summary><div class="rf-menu-list">
+        <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
+        <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
+        <button class="rf-btn sec" data-sl="share" title="Copy a link that shares these listings (no server involved)">Share link</button>
+        <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
+        <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
+        <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
+      </div></details>
+      <input type="file" accept="application/json,.json" hidden>
+    </div>
+    <div class="rf-controls">
+      <div class="rf-dates">
+        <label>Available from<input type="date" id="rf-from"></label>
+        <label>Available to<input type="date" id="rf-to"></label>
+        <label>Within<select id="rf-withinDays">
+          <option value="">Any time</option><option value="14">2 weeks</option><option value="28">4 weeks</option>
+          <option value="56">8 weeks</option><option value="84">12 weeks</option>
+        </select></label>
+      </div>
+      <details class="rf-more" id="rf-more">
+        <summary>More filters</summary>
+        <div class="rf-grid3">
+          <label>Min $/wk<input type="number" min="0" step="25" id="rf-priceMin" inputmode="numeric"></label>
+          <label>Max $/wk<input type="number" min="0" step="25" id="rf-priceMax" inputmode="numeric"></label>
+          <label title="Bond + 2 weeks' rent">Max move-in $<input type="number" min="0" step="100" id="rf-upfrontMax" inputmode="numeric"></label>
+          <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
+          <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
+          <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
+        </div>
+        <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
+          <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
+        </div>
+        <div class="rf-amen rf-amen-req" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
+          <input type="hidden" id="rf-amenities">
+          ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
+        </div>
+        <div class="rf-amen rf-nowatch" role="group" aria-label="Hide listings whose text mentions">
+          <span class="rf-label">Hide if mentioned</span><input type="hidden" id="rf-noWatch">
+          ${WATCHOUTS.map((w) => `<button type="button" class="rf-chip" data-nowatch="${w.id}" aria-pressed="false">${w.label}</button>`).join('')}
+        </div>
+        <div class="rf-dist">
+          <label>Distance from<input type="text" id="rf-anchor" placeholder="-33.87, 151.21 or a Google Maps link" autocomplete="off"></label>
+          <label>Max km<input type="number" min="0" step="1" id="rf-maxKm" inputmode="decimal"></label>
+        </div>
+        <div class="rf-grid3">
+          <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
+        </div>
+        <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
+        <input type="hidden" id="rf-building">
+        <label>Other places (optional, one per line)<textarea id="rf-places" rows="2" placeholder="Work: -33.87, 151.21&#10;Uni: Google Maps link"
+          title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
+        <div class="rf-meta rf-places-fb" aria-live="polite"></div>
+        <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
+        <label>Inspection on<input type="date" id="rf-inspectOn"></label>
+        <label title="Keeps listings with at least one upcoming inspection you can get to, in the listing's local time">Inspections I can make<select id="rf-inspectWhen">
+          <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option></select></label>
+        <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
+        <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
+        <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
+        <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
+        <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price, date or details changed recently</label>
+        <label class="rf-check"><input type="checkbox" id="rf-unopenedOnly">Not opened yet</label>
+        <label class="rf-check" title="Listings you haven't gone past with j, marked with r, shortlisted, hidden or noted"><input type="checkbox" id="rf-unreviewedOnly">Not reviewed yet</label>
+        <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
+        <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
+        <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
+        <label class="rf-check"><input type="checkbox" id="rf-floorplanOnly">Has a floorplan</label>
+        <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies / suburbs</span><span class="rf-ag-list"></span></div>
+      </details>
+      <details class="rf-more rf-settings">
+        <summary>Settings</summary>
+        <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
+        <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
+        <label class="rf-check" title="Small photos and the key facts only, so about twice as many listings fit on screen (d)"><input type="checkbox" id="rf-compact">Compact list</label>
+        <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
+        <label class="rf-check"><input type="checkbox" id="rf-remindSaved">Remind me to check saved searches (at most daily)</label>
+        <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
+          <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
+        <fieldset class="rf-weights"><legend>Best match: how much each counts</legend>
+          ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
+            <option value="0">Ignore</option><option value="1">Less</option><option value="2">Normal</option><option value="3">More</option></select></label>`).join('')}
+        </fieldset>
+        <label title="Some calendar apps ignore reminders in imported files">Calendar reminder<select id="rf-icsAlarm">
+          ${[['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+        <label>My current lease ends (optional)<input type="date" id="rf-leaseEnd" title="Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap"></label>
+        <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
+        <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
+          title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>
+        <label>Household income, $ a year before tax (optional)<input type="number" id="rf-income" min="0" step="1000" inputmode="numeric" placeholder="eg 120000"
+          title="Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser."></label>
+      </details>
+      <details class="rf-more rf-saved" hidden>
+        <summary>Saved searches</summary>
+        <ul class="rf-saved-list"></ul>
+        <button type="button" class="rf-btn sec" data-saved-check title="Fetch each remembered search (one page at a time) and count what's new">Check all for new listings</button>
+      </details>
+      <div class="rf-row rf-presets">
+        <select class="rf-preset" aria-label="Filter presets"></select>
+      </div>
+      <div class="rf-row">
+        <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
+        <label class="rf-sort">Sort<select id="rf-sort">
+          <option value="avail">Available date</option>
+          <option value="price">Price</option>
+          <option value="ppb">Price per bed</option>
+          <option value="beds">Most beds</option>
+          <option value="inspect">Next inspection</option>
+          <option value="listed">Newest first</option>
+          <option value="value">Best value vs median</option>
+          <option value="distance">Nearest</option>
+          <option value="allnear">Nearest to all places</option>
+          <option value="fit">Least overlap with my lease</option>
+          <option value="match">Best match</option>
+        </select></label>
+        <input type="checkbox" id="rf-sortDesc" hidden><button type="button" class="rf-btn sec rf-sortdir" aria-pressed="false" aria-label="Reverse the sort order" title="Reverse the sort order (unknown values stay last)">⇅</button>
+      </div>
+      <div class="rf-actions">
+        <button class="rf-btn" id="rf-run">Search all pages</button>
+        <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
+        <select class="rf-bulk" aria-label="Bulk action on the listings shown" disabled>
+          <option value="">Bulk…</option><option value="star" data-label="Shortlist all {n} shown">Shortlist all shown</option><option value="hide" data-label="Hide all {n} shown">Hide all shown</option><option value="reviewed" data-label="Mark all {n} shown reviewed">Mark all shown reviewed</option>
+        </select>
+        <button class="rf-btn sec rf-market-btn" aria-pressed="false" disabled title="Rent spread per bed count and when the listings shown become available">Market</button>
+      </div>
+      <div class="rf-actions rf-exports">
+        <span class="rf-label">Export</span>
+        <button class="rf-btn sec" data-export="csv" disabled>CSV</button>
+        <button class="rf-btn sec" data-export="tsv" disabled>TSV</button>
+        <button class="rf-btn sec" data-export="copy" disabled title="Copy as TSV - pastes into Sheets/Excel">Copy</button>
+        <button class="rf-btn sec" data-export="ics" disabled title="Upcoming inspections as a calendar file">Calendar</button>
+      </div>
+    </div>
+    <div class="rf-help" id="rf-help" hidden>
+      <strong>Keyboard</strong>
+      <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
+      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, PgUp / PgDn</dt><dd>first / last, 5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
+      <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
+    </div>
+    <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
+      <span class="rf-share-msg"></span>
+      <button class="rf-btn" data-share="add">Add to my shortlist</button>
+      <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
+    </div>
+    <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
+    <div class="rf-peek" hidden role="dialog" aria-label="Photo"><img alt=""><div class="rf-peek-cap"></div></div>
+    <div class="rf-news" hidden role="note"><span class="rf-news-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss what's new">×</button></div>
+    <div class="rf-status" role="status" aria-live="polite"></div>
+    <div class="rf-partial" hidden><span class="rf-partial-msg"></span> <button type="button" class="rf-btn sec" data-resume>Resume</button></div>
+    <div class="rf-active" hidden aria-label="Active filters"></div>
+    <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
+
+  // Wiring kept out of build(): each only needs the panel (and the phone media query).
+  function wireResize(panel, narrow) {
+  // Side drawer width: dragged from its left edge (or arrow keys on the handle), remembered;
+  // wide enough and results go two per row. Expanded mode and phones ignore it.
+  const widthKey = keyStore(storageOr('localStorage'), WIDTH_KEY), handle = panel.querySelector('.rf-resize');
+  const clampW = (w) => Math.round(Math.max(DRAWER_MIN, Math.min(DRAWER_MAX, window.innerWidth - 40, w)));
+  ui.applyWidth = (w = +widthKey.get() || 0) => {
+    const side = !panel.classList.contains('rf-full') && !narrow.matches;
+    panel.style.width = side && w ? `${clampW(w)}px` : '';
+    panel.classList.toggle('rf-two', side && panel.offsetWidth >= DRAWER_TWO_COL);
+    handle.setAttribute('aria-valuenow', String(Math.round(panel.offsetWidth)));
+    handle.style.left = `${Math.round(window.innerWidth - panel.offsetWidth) - 4}px`; // on the drawer's left edge
+  };
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev) => ui.applyWidth(window.innerWidth - ev.clientX);
+    const up = () => { handle.removeEventListener('pointermove', move); widthKey.set(String(Math.round(panel.offsetWidth))); ui.watchMore?.(); };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up, { once: true });
+  });
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const w = clampW(panel.offsetWidth + (e.key === 'ArrowLeft' ? 40 : -40));
+    widthKey.set(String(w));
+    ui.applyWidth(w);
+  });
+  window.addEventListener('resize', () => ui.applyWidth());
+  }
+
+  function wirePeek(panel) {
+  // Photo peek: beside the side drawer when there's room, else over it; hovering a thumbnail
+  // for a moment shows it too.
+  const peek = panel.querySelector('.rf-peek'), peekImg = peek.querySelector('img'), peekCap = peek.querySelector('.rf-peek-cap');
+  let peekHover = false, hoverTimer = null;
+  ui.showPeek = (item) => {
+    const r = item && rowOf(item.dataset.id);
+    if (!r?.img) { ui.closePeek(); return; }
+    peekImg.onerror = () => { peekImg.onerror = null; peekImg.src = r.img; }; // that size may not exist
+    peekImg.src = bigImg(r.img);
+    peekCap.textContent = [r.price, r.address, r.available && r.available !== '-' ? r.available : ''].filter(Boolean).join(' · ');
+    const room = window.innerWidth - panel.offsetWidth - 32;
+    peek.classList.toggle('rf-peek-over', panel.classList.contains('rf-full') || room < 320);
+    peek.style.right = peek.classList.contains('rf-peek-over') ? '' : `${panel.offsetWidth + 16}px`;
+    peek.style.width = peek.classList.contains('rf-peek-over') ? '' : `${Math.min(800, room)}px`;
+    peek.hidden = false;
+    ui.peekId = r.id;
+  };
+  ui.closePeek = () => { peek.hidden = true; ui.peekId = null; peekHover = false; };
+  ui.list.addEventListener('mouseover', (e) => {
+    const img = e.target.closest('.rf-card img');
+    if (!img || ui.peekId) return;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => { ui.showPeek(img.closest('.rf-item')); peekHover = true; }, 400);
+  });
+  ui.list.addEventListener('mouseout', (e) => {
+    if (!e.target.closest('.rf-card img')) return;
+    clearTimeout(hoverTimer);
+    if (peekHover) ui.closePeek();
+  });
+  }
+
   function build() {
     const style = document.createElement('style');
     style.textContent = css;
@@ -2696,184 +2971,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     panel.setAttribute('aria-label', 'Availability Filter');
     launch.setAttribute('aria-controls', 'rf-panel');
     launch.setAttribute('aria-expanded', 'false');
-    panel.innerHTML = `
-      <div class="rf-resize" role="separator" aria-orientation="vertical" aria-label="Drawer width: drag, or use the left and right arrow keys" tabindex="0" aria-valuemin="${DRAWER_MIN}" aria-valuemax="${DRAWER_MAX}"></div>
-      <div class="rf-head">
-        <h2>Availability Filter</h2>
-        <button type="button" class="rf-tofilters" hidden title="Back up to the filters (f)">↑ Filters</button>
-        <button class="rf-clear" title="Reset all filters">Clear</button>
-        <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
-        <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
-        <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
-      </div>
-      <div class="rf-tabs" role="tablist">
-        <button role="tab" id="rf-tab-results" data-view="results" aria-selected="true" aria-controls="rf-list">Results</button>
-        <button role="tab" id="rf-tab-shortlist" data-view="shortlist" aria-selected="false" aria-controls="rf-list" tabindex="-1">Shortlist <span class="rf-count"></span></button>
-      </div>
-      <div class="rf-sl-bar" hidden>
-        <span class="rf-label">Shortlist, all searches</span>
-        <select class="rf-sl-bulk" aria-label="Bulk action on the shortlist shown">
-          <option value="">Bulk…</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="status:${v}" data-label="Mark {n} shown: ${v}">Mark shown: ${v}</option>`).join('')}
-          <option value="unstar-declined" data-label="Remove declined">Remove declined</option><option value="unstar" data-label="Remove all {n} shown">Remove all shown</option>
-        </select>
-        <select class="rf-plan" aria-label="Plan an inspection day"></select>
-        <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
-        <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
-          <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
-          <option value="-">Not started</option><option value="!">Needs action</option>
-        </select>
-        <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
-        <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
-        <details class="rf-menu"><summary class="rf-btn sec" title="Export, share, print, backup">More</summary><div class="rf-menu-list">
-          <button class="rf-btn sec" data-export="csv" title="Download the shortlist as CSV">CSV</button>
-          <button class="rf-btn sec" data-export="ics" title="Shortlisted inspections as a calendar file">Calendar</button>
-          <button class="rf-btn sec" data-sl="share" title="Copy a link that shares these listings (no server involved)">Share link</button>
-          <button class="rf-btn sec" data-sl="print" title="Printable shortlist (or Save as PDF)">Print</button>
-          <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
-          <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
-        </div></details>
-        <input type="file" accept="application/json,.json" hidden>
-      </div>
-      <div class="rf-controls">
-        <div class="rf-dates">
-          <label>Available from<input type="date" id="rf-from"></label>
-          <label>Available to<input type="date" id="rf-to"></label>
-          <label>Within<select id="rf-withinDays">
-            <option value="">Any time</option><option value="14">2 weeks</option><option value="28">4 weeks</option>
-            <option value="56">8 weeks</option><option value="84">12 weeks</option>
-          </select></label>
-        </div>
-        <details class="rf-more" id="rf-more">
-          <summary>More filters</summary>
-          <div class="rf-grid3">
-            <label>Min $/wk<input type="number" min="0" step="25" id="rf-priceMin" inputmode="numeric"></label>
-            <label>Max $/wk<input type="number" min="0" step="25" id="rf-priceMax" inputmode="numeric"></label>
-            <label title="Bond + 2 weeks' rent">Max move-in $<input type="number" min="0" step="100" id="rf-upfrontMax" inputmode="numeric"></label>
-            <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
-            <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
-            <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
-          </div>
-          <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
-            <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
-          </div>
-          <div class="rf-amen rf-amen-req" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
-            <input type="hidden" id="rf-amenities">
-            ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
-          </div>
-          <div class="rf-amen rf-nowatch" role="group" aria-label="Hide listings whose text mentions">
-            <span class="rf-label">Hide if mentioned</span><input type="hidden" id="rf-noWatch">
-            ${WATCHOUTS.map((w) => `<button type="button" class="rf-chip" data-nowatch="${w.id}" aria-pressed="false">${w.label}</button>`).join('')}
-          </div>
-          <div class="rf-dist">
-            <label>Distance from<input type="text" id="rf-anchor" placeholder="-33.87, 151.21 or a Google Maps link" autocomplete="off"></label>
-            <label>Max km<input type="number" min="0" step="1" id="rf-maxKm" inputmode="decimal"></label>
-          </div>
-          <div class="rf-grid3">
-            <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
-          </div>
-          <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
-          <input type="hidden" id="rf-building">
-          <label>Other places (optional, one per line)<textarea id="rf-places" rows="2" placeholder="Work: -33.87, 151.21&#10;Uni: Google Maps link"
-            title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
-          <div class="rf-meta rf-places-fb" aria-live="polite"></div>
-          <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
-          <label>Inspection on<input type="date" id="rf-inspectOn"></label>
-          <label title="Keeps listings with at least one upcoming inspection you can get to, in the listing's local time">Inspections I can make<select id="rf-inspectWhen">
-            <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option></select></label>
-          <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
-          <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
-          <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
-          <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
-          <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price, date or details changed recently</label>
-          <label class="rf-check"><input type="checkbox" id="rf-unopenedOnly">Not opened yet</label>
-          <label class="rf-check" title="Listings you haven't gone past with j, marked with r, shortlisted, hidden or noted"><input type="checkbox" id="rf-unreviewedOnly">Not reviewed yet</label>
-          <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
-          <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
-          <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
-          <label class="rf-check"><input type="checkbox" id="rf-floorplanOnly">Has a floorplan</label>
-          <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies / suburbs</span><span class="rf-ag-list"></span></div>
-        </details>
-        <details class="rf-more rf-settings">
-          <summary>Settings</summary>
-          <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
-          <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
-          <label class="rf-check" title="Small photos and the key facts only, so about twice as many listings fit on screen (d)"><input type="checkbox" id="rf-compact">Compact list</label>
-          <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
-          <label class="rf-check"><input type="checkbox" id="rf-remindSaved">Remind me to check saved searches (at most daily)</label>
-          <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
-            <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
-          <fieldset class="rf-weights"><legend>Best match: how much each counts</legend>
-            ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
-              <option value="0">Ignore</option><option value="1">Less</option><option value="2">Normal</option><option value="3">More</option></select></label>`).join('')}
-          </fieldset>
-          <label title="Some calendar apps ignore reminders in imported files">Calendar reminder<select id="rf-icsAlarm">
-            ${[['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
-          <label>My current lease ends (optional)<input type="date" id="rf-leaseEnd" title="Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap"></label>
-          <label>Inspection checklist (comma-separated)<input type="text" id="rf-checklist" maxlength="400" placeholder="${esc(CHECKLIST_DEFAULT)}"></label>
-          <label>Enquiry message (Copy enquiry)<textarea id="rf-enquiry" rows="3" maxlength="600" placeholder="${esc(ENQUIRY_DEFAULT)}"
-            title="Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA's site."></textarea></label>
-          <label>Household income, $ a year before tax (optional)<input type="number" id="rf-income" min="0" step="1000" inputmode="numeric" placeholder="eg 120000"
-            title="Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser."></label>
-        </details>
-        <details class="rf-more rf-saved" hidden>
-          <summary>Saved searches</summary>
-          <ul class="rf-saved-list"></ul>
-          <button type="button" class="rf-btn sec" data-saved-check title="Fetch each remembered search (one page at a time) and count what's new">Check all for new listings</button>
-        </details>
-        <div class="rf-row rf-presets">
-          <select class="rf-preset" aria-label="Filter presets"></select>
-        </div>
-        <div class="rf-row">
-          <label class="rf-check"><input type="checkbox" id="rf-exact">Hide surrounding suburbs</label>
-          <label class="rf-sort">Sort<select id="rf-sort">
-            <option value="avail">Available date</option>
-            <option value="price">Price</option>
-            <option value="ppb">Price per bed</option>
-            <option value="beds">Most beds</option>
-            <option value="inspect">Next inspection</option>
-            <option value="listed">Newest first</option>
-            <option value="value">Best value vs median</option>
-            <option value="distance">Nearest</option>
-            <option value="allnear">Nearest to all places</option>
-            <option value="fit">Least overlap with my lease</option>
-            <option value="match">Best match</option>
-          </select></label>
-          <input type="checkbox" id="rf-sortDesc" hidden><button type="button" class="rf-btn sec rf-sortdir" aria-pressed="false" aria-label="Reverse the sort order" title="Reverse the sort order (unknown values stay last)">⇅</button>
-        </div>
-        <div class="rf-actions">
-          <button class="rf-btn" id="rf-run">Search all pages</button>
-          <button class="rf-btn sec" id="rf-refresh" title="Ignore cached results and refetch" hidden>Refresh</button>
-          <select class="rf-bulk" aria-label="Bulk action on the listings shown" disabled>
-            <option value="">Bulk…</option><option value="star" data-label="Shortlist all {n} shown">Shortlist all shown</option><option value="hide" data-label="Hide all {n} shown">Hide all shown</option><option value="reviewed" data-label="Mark all {n} shown reviewed">Mark all shown reviewed</option>
-          </select>
-          <button class="rf-btn sec rf-market-btn" aria-pressed="false" disabled title="Rent spread per bed count and when the listings shown become available">Market</button>
-        </div>
-        <div class="rf-actions rf-exports">
-          <span class="rf-label">Export</span>
-          <button class="rf-btn sec" data-export="csv" disabled>CSV</button>
-          <button class="rf-btn sec" data-export="tsv" disabled>TSV</button>
-          <button class="rf-btn sec" data-export="copy" disabled title="Copy as TSV - pastes into Sheets/Excel">Copy</button>
-          <button class="rf-btn sec" data-export="ics" disabled title="Upcoming inspections as a calendar file">Calendar</button>
-        </div>
-      </div>
-      <div class="rf-help" id="rf-help" hidden>
-        <strong>Keyboard</strong>
-        <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-        <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, PgUp / PgDn</dt><dd>first / last, 5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
-        <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
-      </div>
-      <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
-        <span class="rf-share-msg"></span>
-        <button class="rf-btn" data-share="add">Add to my shortlist</button>
-        <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
-      </div>
-      <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
-      <div class="rf-peek" hidden role="dialog" aria-label="Photo"><img alt=""><div class="rf-peek-cap"></div></div>
-      <div class="rf-news" hidden role="note"><span class="rf-news-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss what's new">×</button></div>
-      <div class="rf-status" role="status" aria-live="polite"></div>
-      <div class="rf-partial" hidden><span class="rf-partial-msg"></span> <button type="button" class="rf-btn sec" data-resume>Resume</button></div>
-      <div class="rf-active" hidden aria-label="Active filters"></div>
-      <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
+    panel.innerHTML = panelHtml();
 
     document.body.append(launch, panel);
 
@@ -2993,11 +3091,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       panel.setAttribute('aria-modal', String(open && narrow.matches));
       setInert(open && narrow.matches);
       if (!open) for (const d of panel.querySelectorAll('.rf-acts-more[open], .rf-menu[open]')) d.open = false;
-      else { ui.applyWidth?.(); ui.syncSticky?.(); } // sizes are only known once it's shown
+      else { ui.applyWidth?.(); ui.syncSticky?.(); ui.placedNow = !!ui.applyPlace?.(); } // sizes are only known once it's shown
     };
     narrow.addEventListener?.('change', () => { if (!panel.hidden) setOpen(true); });
     ui.setOpen = setOpen;
-    launch.addEventListener('click', () => { setOpen(true); ui.run.focus(); });
+    launch.addEventListener('click', () => { setOpen(true); if (!ui.placedNow) ui.run.focus(); }); // back where you were, else on Search
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
     const help = panel.querySelector('.rf-help'), helpBtn = panel.querySelector('.rf-keys');
     const toggleHelp = () => {
@@ -3018,33 +3116,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ui.watchMore?.();
       ui.syncSticky?.();
     };
-    // Side drawer width: dragged from its left edge (or arrow keys on the handle), remembered;
-    // wide enough and results go two per row. Expanded mode and phones ignore it.
-    const widthKey = keyStore(storageOr('localStorage'), WIDTH_KEY), handle = panel.querySelector('.rf-resize');
-    const clampW = (w) => Math.round(Math.max(DRAWER_MIN, Math.min(DRAWER_MAX, window.innerWidth - 40, w)));
-    ui.applyWidth = (w = +widthKey.get() || 0) => {
-      const side = !panel.classList.contains('rf-full') && !narrow.matches;
-      panel.style.width = side && w ? `${clampW(w)}px` : '';
-      panel.classList.toggle('rf-two', side && panel.offsetWidth >= DRAWER_TWO_COL);
-      handle.setAttribute('aria-valuenow', String(Math.round(panel.offsetWidth)));
-      handle.style.left = `${Math.round(window.innerWidth - panel.offsetWidth) - 4}px`; // on the drawer's left edge
-    };
-    handle.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      handle.setPointerCapture(e.pointerId);
-      const move = (ev) => ui.applyWidth(window.innerWidth - ev.clientX);
-      const up = () => { handle.removeEventListener('pointermove', move); widthKey.set(String(Math.round(panel.offsetWidth))); ui.watchMore?.(); };
-      handle.addEventListener('pointermove', move);
-      handle.addEventListener('pointerup', up, { once: true });
-    });
-    handle.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      e.preventDefault();
-      const w = clampW(panel.offsetWidth + (e.key === 'ArrowLeft' ? 40 : -40));
-      widthKey.set(String(w));
-      ui.applyWidth(w);
-    });
-    window.addEventListener('resize', () => ui.applyWidth());
+    wireResize(panel, narrow);
     setWide(wideKey.get() === '1', false);
     panel.classList.toggle('rf-compact', !!cfg.compact);
     const sortDir = panel.querySelector('.rf-sortdir'), sortDesc = panel.querySelector('#rf-sortDesc');
@@ -3115,7 +3187,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href) && !typing(e.target)) {
         e.preventDefault();
         setOpen(panel.hidden);
-        if (!panel.hidden) ui.run.focus(); else launch.focus();
+        if (!panel.hidden) { if (!ui.placedNow) ui.run.focus(); } else launch.focus();
         return;
       }
       if (panel.hidden) return;
@@ -3327,42 +3399,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       toFilters.hidden = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
     };
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => ui.syncSticky()).observe(ui.status);
-    panel.addEventListener('scroll', () => ui.syncSticky(), { passive: true });
+    panel.addEventListener('scroll', () => { ui.syncSticky(); notePlace(); }, { passive: true });
+    ui.list.addEventListener('scroll', () => notePlace(), { passive: true });
+    ui.list.addEventListener('focusin', () => notePlace());
+    ui.applyPlace = () => applyPlace();
     ui.toFilters = () => {
       panel.scrollTop = 0;
       (ui.view === 'shortlist' ? ui.slBar.querySelector('select, input, button') : panel.querySelector('#rf-from'))?.focus({ preventScroll: true });
       ui.syncSticky();
     };
     toFilters.addEventListener('click', () => ui.toFilters());
-    // Photo peek: beside the side drawer when there's room, else over it; hovering a thumbnail
-    // for a moment shows it too.
-    const peek = panel.querySelector('.rf-peek'), peekImg = peek.querySelector('img'), peekCap = peek.querySelector('.rf-peek-cap');
-    let peekHover = false, hoverTimer = null;
-    ui.showPeek = (item) => {
-      const r = item && rowOf(item.dataset.id);
-      if (!r?.img) { ui.closePeek(); return; }
-      peekImg.onerror = () => { peekImg.onerror = null; peekImg.src = r.img; }; // that size may not exist
-      peekImg.src = bigImg(r.img);
-      peekCap.textContent = [r.price, r.address, r.available && r.available !== '-' ? r.available : ''].filter(Boolean).join(' · ');
-      const room = window.innerWidth - panel.offsetWidth - 32;
-      peek.classList.toggle('rf-peek-over', panel.classList.contains('rf-full') || room < 320);
-      peek.style.right = peek.classList.contains('rf-peek-over') ? '' : `${panel.offsetWidth + 16}px`;
-      peek.style.width = peek.classList.contains('rf-peek-over') ? '' : `${Math.min(800, room)}px`;
-      peek.hidden = false;
-      ui.peekId = r.id;
-    };
-    ui.closePeek = () => { peek.hidden = true; ui.peekId = null; peekHover = false; };
-    ui.list.addEventListener('mouseover', (e) => {
-      const img = e.target.closest('.rf-card img');
-      if (!img || ui.peekId) return;
-      clearTimeout(hoverTimer);
-      hoverTimer = setTimeout(() => { ui.showPeek(img.closest('.rf-item')); peekHover = true; }, 400);
-    });
-    ui.list.addEventListener('mouseout', (e) => {
-      if (!e.target.closest('.rf-card img')) return;
-      clearTimeout(hoverTimer);
-      if (peekHover) ui.closePeek();
-    });
+    wirePeek(panel);
     ui.warnbar.querySelector('.rf-warn-x').addEventListener('click', () => { ui.warnDismissed = ui.warnbar.querySelector('.rf-warn-msg').textContent; ui.warnbar.hidden = true; });
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
     // Its root is whatever scrolls the results (the drawer, or the list when expanded), so it is
@@ -4140,6 +4187,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // The filters from before a bound preset live in localStorage (like cfg), so a reload or a
   // new tab still puts them back when you leave the preset's search.
   const PRESET_VISIT_KEY = `${TOOL_PREFIX}preset-visit`;
+  const PLACE_KEY = `${TOOL_PREFIX}place`; // sessionStorage: where you were in each search's results
   const PRESET_PREV_KEY = `${TOOL_PREFIX}preset-prev/v1`;
   const prevKey = keyStore(storageOr('localStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
   const prevStore = {
@@ -4229,12 +4277,54 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Session cache first, else the remembered results from a previous visit (no fetch).
   function restore() {
-    if (restoreSession()) return true;
+    if (restoreSession()) { returnToPlace(); return true; }
     if (!cfg.remember || !isSearchPage(location.href)) return false;
     const key = searchKey(location.href);
     const snap = snaps.get(key);
     if (!snap?.rows.length) return false;
     adopt(key, snap.rows, snap.truncated, `Saved ${ago(Date.now() - snap.at)}. Refresh for current listings.`, snap);
+    returnToPlace();
+    return true;
+  }
+
+  // Your place in a search's results (the listing you were on), per tab, so a reload or coming
+  // back to the search opens there. Only with the same filters and sort: otherwise it's a
+  // different list and the top is the right place.
+  const PLACE_MAX = 10;
+  const placeKey = keyStore(storageOr('sessionStorage'), PLACE_KEY);
+  const placeFor = () => JSON.stringify(PRESET_KEYS.map((k) => cfg[k]));
+  const readPlaces = () => { try { const p = JSON.parse(placeKey.get() || '{}'); return isObj(p) ? p : {}; } catch { return {}; } };
+  let placeTimer = null;
+  function notePlace() {
+    clearTimeout(placeTimer);
+    placeTimer = setTimeout(() => {
+      if (ui.view === 'shortlist' || !cacheKey || ui.panel.hidden) return;
+      const items = [...ui.list.querySelectorAll('.rf-item')];
+      const cur = document.activeElement?.closest?.('.rf-item');
+      const edge = ui.panel.classList.contains('rf-full') ? ui.list.getBoundingClientRect().top : ui.status.getBoundingClientRect().bottom;
+      const at = cur && ui.list.contains(cur) ? cur : items.find((el) => el.getBoundingClientRect().bottom > edge + 8);
+      const places = readPlaces();
+      if (!at || items.indexOf(at) === 0) delete places[cacheKey];
+      else places[cacheKey] = { id: at.dataset.id, shown: items.length, sig: placeFor(), t: Date.now() };
+      const keep = Object.entries(places).sort(([, a], [, b]) => b.t - a.t).slice(0, PLACE_MAX);
+      placeKey.set(JSON.stringify(Object.fromEntries(keep)));
+    }, 400);
+  }
+  let pendingPlace = null;
+  function returnToPlace() {
+    const p = readPlaces()[cacheKey];
+    pendingPlace = p && p.sig === placeFor() ? p : null;
+    if (!ui.panel.hidden) applyPlace();
+  }
+  function applyPlace() {
+    const p = pendingPlace;
+    pendingPlace = null;
+    if (!p || ui.view === 'shortlist') return false;
+    for (let n = 0; n < 20 && ui.list.querySelectorAll('.rf-item').length < p.shown && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
+    const el = ui.list.querySelector(`.rf-item[data-id="${CSS.escape(p.id)}"]`);
+    if (!el) return false;
+    el.scrollIntoView({ block: 'start' });
+    el.focus({ preventScroll: true });
     return true;
   }
 
@@ -4374,10 +4464,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install records the version without a note.
-  const WHATS_NEW = { version: '2.22.0', items: [
-    'Compact list (d) fits twice as many listings; p shows a large photo.',
-    'Drag the drawer\'s edge to resize it; ⇅ reverses the sort.',
-    'Reviewed marks (r, or moving on with j) and a "Not reviewed yet" filter keep your place across visits.',
+  const WHATS_NEW = { version: '2.23.0', items: [
+    'The drawer reopens on the listing you were on after a reload.',
+    'Tags say "Pets welcome" or "Pets on application", the heating type, and "Water efficient".',
+    'Compact list (d), photo peek (p), resizable drawer and reviewed marks arrived in 2.22.',
   ] };
   const SEEN_KEY = `${TOOL_PREFIX}seen-version`;
   const verNum = (v) => String(v || '0').split('.').reduce((n, x) => n * 1000 + (+x || 0), 0);
@@ -4520,18 +4610,40 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Card -> listing id. Prefer /property- links: an agent/agency link earlier in the
   // card can also end in a long number.
-  function cardsOnPage() {
-    const cards = new Map();
-    for (const a of document.querySelectorAll('article a[href]')) {
-      if (a.closest('#rf-panel')) continue;
-      const href = a.getAttribute('href');
-      const id = listingId(href);
-      if (!id) continue;
-      const card = a.closest('article');
-      const prop = /\/property-/.test(href);
-      const prev = cards.get(card);
-      if (!prev || (prop && !prev.prop) || (!prev.known && known.has(id))) cards.set(card, { id, prop, known: known.has(id) });
+  // Cards are REA's <article>s. If REA stops using them, a card is the largest ancestor of a
+  // /property- link (up to CARD_CLIMB levels) that still holds links to one listing only.
+  const CARD_CLIMB = 8;
+  const cardInfo = { mode: 'none', found: 0 }; // for selfcheck()
+  const climbToCard = (a) => {
+    let el = a, best = null;
+    for (let d = 0; d < CARD_CLIMB && el.parentElement && el.parentElement !== document.body; d++) {
+      el = el.parentElement;
+      const ids = new Set([...el.querySelectorAll('a[href*="/property-"]')].map((x) => listingId(x.getAttribute('href'))).filter(Boolean));
+      if (ids.size > 1) break;
+      best = el;
     }
+    return best;
+  };
+  function cardsOnPage() {
+    const collect = (links, cardOf) => {
+      const cards = new Map();
+      for (const a of links) {
+        if (a.closest('#rf-panel, #rf-lbar, #rf-toast, #rf-remind')) continue;
+        const href = a.getAttribute('href');
+        const id = listingId(href);
+        if (!id) continue;
+        const card = cardOf(a);
+        if (!card) continue;
+        const prop = /\/property-/.test(href);
+        const prev = cards.get(card);
+        if (!prev || (prop && !prev.prop) || (!prev.known && known.has(id))) cards.set(card, { id, prop, known: known.has(id) });
+      }
+      return cards;
+    };
+    let cards = collect(document.querySelectorAll('article a[href]'), (a) => a.closest('article'));
+    cardInfo.mode = 'article';
+    if (!cards.size) { cards = collect(document.querySelectorAll('a[href*="/property-"]'), climbToCard); cardInfo.mode = cards.size ? 'fallback' : 'none'; }
+    cardInfo.found = cards.size;
     return cards;
   }
 
@@ -4662,6 +4774,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return out;
     },
     raw: () => rawSample,
+    // Paste-safe structure of one listing (no descriptions, names or addresses) for issues.
+    shape: () => {
+      if (!rawSample) return 'No listing seen yet - load a results page or run a search.';
+      const out = JSON.stringify({ script: window.reaFilter.version, resultsPath: `${resultsPath.key}.${resultsPath.field}`, listing: shapeOf(rawSample) }, null, 1);
+      console.log(out);
+      copyText(out).catch(() => {});
+      return out;
+    },
     // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
     selfcheck: () => {
       const rows = cache || [];
@@ -4669,6 +4789,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const report = [
         `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${truncated ? ' (truncated)' : ''}`,
         `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
+        `cards: ${cardInfo.found} found (${cardInfo.mode === 'fallback' ? 'fallback: REA no longer uses <article>' : cardInfo.mode})`,
         `results path: ${resultsPath.key ? `${resultsPath.key}.${resultsPath.field}${resultsPath.fallback ? ' (fallback: REA renamed it)' : ''}` : 'not read yet'}`,
         `discovered paths: ${Object.entries(found).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'}`,
         `schema warnings: ${schemaWarnings(rows).join('; ') || 'none'}`,

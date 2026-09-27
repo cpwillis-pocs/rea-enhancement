@@ -86,3 +86,15 @@ test('watchOf: negations next to a mention are not heads-ups; broader phrasing c
   ];
   for (const [text, want] of cases) assert.equal(core.watchOf(text).join(','), want, text);
 });
+
+test('amenity detail: pets welcome vs on application, heating type, water efficient', () => {
+  const tags = (x) => core.amenityTags({ amen: core.amenitiesOf({ text: x.toLowerCase() }), text: x.toLowerCase() });
+  assert.deepEqual(tags('Pets considered on application.'), ['Pets on application']);
+  assert.deepEqual(tags('Pet friendly apartment.'), ['Pets welcome']);
+  assert.deepEqual(tags('Pets: yes'), ['Pets OK'], 'no wording to go on: plain tag');
+  assert.ok(tags('Ducted heating throughout.').includes('Heating: ducted'));
+  assert.ok(tags('Cosy wood fireplace.').includes('Heating: fireplace'));
+  assert.deepEqual(tags('Water efficient fixtures throughout.'), ['Water efficient']);
+  assert.deepEqual(tags('Not water efficient.'), []);
+  assert.deepEqual(core.amenityTags({ amen: { pets: 'yes' } }), ['Pets OK'], 'no text (shortlist from another search)');
+});
