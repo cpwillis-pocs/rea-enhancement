@@ -3192,6 +3192,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const health = healthStore(storageOr('localStorage'));
   const errorLog = []; // last few errors, for reaFilter.selfcheck()
   const logError = (msg) => { errorLog.push(`${new Date().toISOString()} ${String(msg).slice(0, 200)}`); if (errorLog.length > 10) errorLog.shift(); };
+  // Errors in event handlers and observers (card badges, keys, the listing bar, other tabs)
+  // otherwise only reach the console: log them for selfcheck(), and after ERROR_WARN_N in a
+  // minute say so, with Copy report. The handler's error doesn't escape to REA's page.
+  const ERROR_WARN_N = 3, ERROR_WARN_MS = 60000;
+  const recentErrors = [];
+  const noteError = (name, e) => {
+    console.warn(`[reaFilter] ${name}:`, e);
+    logError(`${name}: ${e?.message || e}`);
+    const t = Date.now();
+    recentErrors.push(t);
+    while (recentErrors.length && t - recentErrors[0] > ERROR_WARN_MS) recentErrors.shift();
+    if (recentErrors.length >= ERROR_WARN_N) setWarn('errors', `The script hit ${recentErrors.length} errors in the last minute (latest: ${name}). Copy report, then paste it into an issue on the script's GitHub page.`);
+  };
+  const guard = (name, fn) => function guarded(...args) { try { return fn.apply(this, args); } catch (e) { noteError(name, e); return undefined; } };
   const presets = presetStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
 
@@ -3504,7 +3518,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       default: return false;
     }
   };
-  document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', guard('keys', (e) => {
     if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href) && !typing(e.target)) {
       e.preventDefault();
       setOpen(panel.hidden);
@@ -3549,7 +3563,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
       else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
     }
-  });
+  }));
   }
 
   // Clicks inside a listing (shortlist, hide, note, status, checklist, ⋯ menu…), delegated from the
@@ -4592,7 +4606,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (msg) warnings[kind] = msg; else delete warnings[kind];
     const text = Object.values(warnings).join(' ');
     ui.warnbar.hidden = !text || ui.warnDismissed === text;
-    ui.warnbar.querySelector('.rf-report').hidden = !(warnings.drift || warnings.cards || warnings.schema || warnings.format);
+    ui.warnbar.querySelector('.rf-report').hidden = !(warnings.drift || warnings.cards || warnings.schema || warnings.format || warnings.errors);
     ui.warnbar.querySelector('.rf-warn-msg').textContent = text;
   };
   const setStatus = (msg, isErr) => {
@@ -5286,8 +5300,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       bar.setAttribute('role', 'region');
       bar.setAttribute('aria-label', 'Shortlist this listing');
       document.body.appendChild(bar);
-      bar.addEventListener('click', onListingBar);
-      bar.addEventListener('change', onListingBar);
+      bar.addEventListener('click', guard('listing bar', onListingBar));
+      bar.addEventListener('change', guard('listing bar', onListingBar));
     }
     if (bar._opened !== id) { bar._opened = id; marks.setOpened(id); } // being here is opening it
     const r = bar._row?.id === id ? bar._row : listingPageRow(id);
@@ -5506,7 +5520,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (isSearchPage(location.href) && !cardsOnPage().size) setWarn('cards', "REA's result cards weren't recognised, so the badges and card buttons are off (the drawer still works). Copy report, then paste it into an issue on the script's GitHub page.");
     }, CARD_WARN_MS);
   };
-  function annotate() {
+  function annotate() { try { annotateNow(); } catch (e) { noteError('annotate', e); } }
+  function annotateNow() {
     if (!isSearchPage(location.href)) return;
     const matches = matchSet();
     const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
@@ -5565,7 +5580,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   function watchCards() {
-    new MutationObserver((muts) => {
+    new MutationObserver(guard('cards', (muts) => {
       if (!isSearchPage(location.href)) return;
       // Ignore mutations confined to our own badges/panel.
       const ours = (m) => m.type === 'childList' && (m.target.closest?.('.rf-badge, #rf-panel, #rf-launch') ||
@@ -5573,7 +5588,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         [...m.addedNodes, ...m.removedNodes].every((n) => /^rf-(?:toast|remind|lbar)$/.test(n.id || '')) && m.addedNodes.length + m.removedNodes.length > 0); // our own notes on <body>
       if (muts.every(ours)) return;
       scheduleAnnotate();
-    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
+    })).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
   }
 
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
@@ -5689,7 +5704,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       step('opens', watchOpens);
       step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
         : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
-      step('sync', () => window.addEventListener('storage', (e) => {
+      step('sync', () => window.addEventListener('storage', guard('other tab', (e) => {
         // Another tab changed the shortlist/hidden/notes: pick it up here.
         if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
         if (e.key === PRESETS_KEY || e.key === null) fillPresets(); // a preset saved in another tab
@@ -5715,7 +5730,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           }
           ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
         }
-      }));
+      })));
       step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
       step('share', () => {
         if (!new RegExp(`[#&]${SHARE_PARAM}=`).test(location.hash)) return;

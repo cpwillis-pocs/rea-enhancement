@@ -1853,6 +1853,27 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 55. The script's own errors in handlers and observers are logged for selfcheck() and, three in
+  // a minute, shown with Copy report; they don't escape to REA's page.
+  await block('55', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await page.click('#rf-launch');
+    await page.evaluate(() => { // break the card badges: every annotate throws
+      const qsa = Document.prototype.querySelectorAll;
+      Document.prototype.querySelectorAll = function (sel) { if (/article/.test(sel)) throw new Error('boom from a test'); return qsa.call(this, sel); };
+    });
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => document.querySelector('main').append(document.createElement('article')));
+      await page.clock.runFor(1000);
+    }
+    await page.waitForFunction(() => /errors in the last minute \(latest: annotate\)/.test(document.querySelector('.rf-warn-msg')?.textContent || ''));
+    assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
+    assert.match(await page.evaluate(() => window.reaFilter.selfcheck()), /annotate: boom from a test/);
+    console.log('own errors logged and shown: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
