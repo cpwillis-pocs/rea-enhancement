@@ -77,6 +77,11 @@
   const SNAP_VISIT_GAP_MS = HOUR_MS; // runs closer together than this count as one visit
   const SNAP_TEXT_MAX = 300; // per-field text cap in remembered rows (sessionStorage rows: ROWS_TEXT_MAX)
   const GONE_MAX = 200; // no-longer-listed rows kept per search
+  // Characters per remembered search. localStorage (~5M characters) is shared with REA, and three
+  // 500-listing searches would take about a third of it; past this the rows furthest down lose
+  // their text (amenities are stored computed, so their tags and filters still work).
+  const SNAP_ENTRY_BUDGET = 400000;
+  const LITE_HEADLINE = 60;
   const IMPORT_ROWS_MAX = 1000; // rows accepted per search from a backup
   const SEARCH_KEY_MAX = 2000; // longest search URL accepted from a backup
   const YEARLESS_ROLL_MS = 60 * DAY_MS; // "3 Jan" more than this far in the past means next year
@@ -761,13 +766,25 @@
       }
       return { evicted, ok: false };
     };
+    // Trims rows from the end until the entry fits SNAP_ENTRY_BUDGET. Returns whether it trimmed.
+    const fitBudget = (entry) => {
+      let size = JSON.stringify(entry).length;
+      if (size <= SNAP_ENTRY_BUDGET) return false;
+      for (let i = entry.rows.length - 1; i >= 0 && size > SNAP_ENTRY_BUDGET; i--) {
+        const r = entry.rows[i], was = JSON.stringify(r).length;
+        r.text = ''; r.headline = clip(r.headline, LITE_HEADLINE); r.features = r.features.slice(0, 8);
+        size -= was - JSON.stringify(r).length;
+      }
+      for (const g of entry.gone) { if (size <= SNAP_ENTRY_BUDGET) break; const was = JSON.stringify(g).length; g.text = ''; g.features = []; size -= was - JSON.stringify(g).length; }
+      return true;
+    };
     const newSince = (ids, baseIds) => {
       if (!baseIds) return new Set();
       const base = new Set(baseIds);
       return new Set((ids || []).filter((id) => !base.has(id)));
     };
     const view = (e) => ({
-      at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated,
+      at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated, lite: !!e.lite,
       rows: (e.rows || []).map(fatRow).filter((r) => r.url),
       gone: (e.gone || []).map(fatRow).filter((r) => r.url).map((r) => Object.assign(r, { gone: true })),
       newIds: newSince(e.ids, e.baseIds),
@@ -797,6 +814,7 @@
           }
         }
         const entry = d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX), ...(prev?.pin ? { pin: 1 } : {}) };
+        if (fitBudget(entry)) entry.lite = 1;
         const { evicted } = persist(d);
         // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
         return { ...view(entry), evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) };
@@ -810,6 +828,8 @@
       },
       clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
       exportData: () => load().s,
+      // Per search: characters stored (as localStorage counts them) and whether it was trimmed.
+      sizes: () => Object.entries(load().s).map(([key, e]) => ({ key, bytes: 2 * JSON.stringify(e).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes),
       // Untrusted: keys must be REA rent search URLs; rows round-trip through fatRow/slimRow.
       importData(src) {
         if (!src || typeof src !== 'object') return 0;
@@ -826,6 +846,7 @@
             gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
             ...(e.pin ? { pin: 1 } : {}),
           };
+          if (fitBudget(d.s[k])) d.s[k].lite = 1;
           n++;
         }
         persist(d);
@@ -2379,7 +2400,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3702,7 +3723,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const paintStorage = () => {
       const ls = storageOr('localStorage'), ss = storageOr('sessionStorage');
       const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
-      storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`;
+      const per = snaps.sizes().map((x) => `${searchLabel(x.key)} ${fmtBytes(x.bytes)}${x.lite ? ' (text trimmed to fit)' : ''}`);
+      storageLine.textContent = `Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`
+        + (per.length ? ` Remembered: ${per.join(' · ')}.` : '');
     };
     ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
     panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
@@ -4089,7 +4112,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const st = diffStats(cache);
     const matchHint = (cfg.sort === 'match' && !rows.some((r) => r.score != null)
       ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '')
-      + (textClipped && cfg.keyword.trim() ? ' Keywords searched the saved (shortened) text; Refresh to search full descriptions.' : '');
+      + (textClipped && cfg.keyword.trim() ? (textClipped === 'lite'
+        ? ' Keywords searched the saved text, which is left out for listings further down in a search this big; Refresh to search full descriptions.'
+        : ' Keywords searched the saved (shortened) text; Refresh to search full descriptions.') : '');
     const since = baseAt ? ` since ${ago(Date.now() - baseAt)}` : '';
     const extra = [st.fresh && `${st.fresh} new${since}`, gone.length && `${gone.length} no longer listed`, st.moved && `${st.moved} price changed`, st.redated && `${st.redated} date changed`, st.featured && `${st.featured} details changed`,
       !cfg.showHidden && st.hidden && `${st.hidden} hidden`, st.cheaperHidden && `${st.cheaperHidden} hidden now cheaper`, st.reviewed && `reviewed ${st.reviewed} of ${st.total}`].filter(Boolean).join(' · ');
@@ -4433,6 +4458,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const snap = snaps.get(key);
     if (!snap?.rows.length) return false;
     adopt(key, snap.rows, snap.truncated, `Saved ${ago(Date.now() - snap.at)}. Refresh for current listings.`, snap);
+    if (snap.lite) textClipped = 'lite';
     returnToPlace();
     return true;
   }

@@ -839,6 +839,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-settings summary');
     await page.waitForFunction(() => document.querySelector('.rf-storage-n').textContent);
     assert.match(await page.textContent('.rf-storage-n'), /Stored in this browser only: \d+ KB \(1 shortlisted, 0 hidden, 1 remembered search\)/);
+    assert.match(await page.textContent('.rf-storage-n'), /Remembered: Bondi NSW 2026 \d+ KB\./, 'per-search size');
     await Promise.all([page.waitForEvent('load'), page.click('[data-forget]')]);
     const keys = await page.evaluate(() => Object.keys(localStorage).concat(Object.keys(sessionStorage)));
     assert.deepEqual(keys.filter((k) => k.startsWith('rea-avail-filter/')), [], 'tool data gone');

@@ -141,3 +141,25 @@ test('storage full: a pinned search is kept (or the loss reported), and pin repo
   assert.ok(kept.includes(key('a')), 'the pinned one wins');
   assert.equal(out.refused, true, 'the new unpinned one is the one dropped');
 });
+
+test('snapshotStore: a search over the size budget drops text from the rows furthest down, keeping amenities', () => {
+  const m = mem();
+  const st = core.snapshotStore(m, () => 1e12);
+  const long = 'Sunny unit with a dishwasher and air conditioning. '.repeat(8);
+  const rows = Array.from({ length: 500 }, (_, i) => core.toRow(listing({ id: String(146510000 + i), description: long,
+    _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${146510000 + i}` } } }), false));
+  const v = st.save(KEY, rows, false);
+  assert.equal(v.lite, true);
+  const stored = m.getItem('rea-avail-filter/snapshots/v1');
+  assert.ok(stored.length <= core.SNAP_ENTRY_BUDGET + 200, `stored ${stored.length}`);
+  assert.ok(v.rows[0].text.includes('dishwasher'), 'the first rows keep their text');
+  assert.equal(v.rows.at(-1).text, '', 'the last ones lose it');
+  assert.equal(v.rows.at(-1).amen.dishwasher, 'yes', 'amenities survive, stored computed');
+  assert.equal(v.rows.length, 500, 'no listing dropped');
+  const [size] = st.sizes();
+  assert.equal(size.key, KEY);
+  assert.equal(size.lite, true);
+  assert.ok(size.bytes > 0 && size.bytes <= 2 * (core.SNAP_ENTRY_BUDGET + 200));
+  const small = core.snapshotStore(mem(), () => 1e12).save(KEY, rows.slice(0, 10), false);
+  assert.equal(small.lite, false, 'a small search is untouched');
+});
