@@ -2755,10 +2755,112 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   };
 
   // Node test harness: expose pure functions, skip all DOM work.
+  // Views drawn in place of the list (day planner, map, market, compare): pure, so unit-tested.
+  function planHtml(slots, day) {
+    // Zone name only when the listing's clock differs from yours (Melbourne from Sydney doesn't).
+    const clock = (ms, tz) => dtf({ hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) }).format(ms);
+    const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? dtf({ hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }).format(ms) : clock(ms, tz))
+      .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
+    const clashes = slots.filter((x) => x.flag).length;
+    const route = bestRoute(slots);
+    const partial = route.listings > 1 && route.visits < route.listings;
+    const inRoute = new Set([...route.picked].map((x) => x.r.id));
+    return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
+      <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
+      ${route.listings > 1 ? `<div class="rf-plan-route"><span>Suggested route: <strong>${route.visits} of ${plural(route.listings, 'listing')}</strong>${partial ? ' (the rest clash or are too far to reach in time)' : ''}</span>${partial || route.picked.size < slots.length ? ' <button class="rf-btn sec" data-plan-ics="route">Calendar for the route</button>' : ''}</div>` : ''}
+      <ol>${slots.map((x) => {
+        const tag = route.listings < 2 ? '' : route.picked.has(x) ? '<span class="rf-tag rf-new">route</span>'
+          : inRoute.has(x.r.id) ? '<span class="rf-tag">other time</span>' : '<span class="rf-tag">skip</span>';
+        return `<li class="${[x.flag ? `rf-${x.flag}` : '', route.listings > 1 && !route.picked.has(x) ? 'rf-off-route' : ''].filter(Boolean).join(' ')}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
+        <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>${tag}
+        ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
+      </li>`;
+      }).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
+  }
+
+  function mapHtml(rows, cfg) {
+    const pins = [...parsePlaces(cfg.places), ...(parseAnchor(cfg.anchor) ? [{ label: 'From', ...parseAnchor(cfg.anchor) }] : [])];
+    const m = mapLayout(rows, pins);
+    if (!m) return '<div class="rf-market"><div class="rf-plan-head">None of these listings has a location, so there is nothing to map.</div></div>';
+    const first = m.dots.find((d) => d.r.starred) || m.dots[0]; // one tab stop; arrows move between dots
+    const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
+      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
+    return `<div class="rf-market rf-map"><div class="rf-plan-head">${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
+      <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
+        ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
+        ${m.dots.filter((d) => !d.r.starred).map(dot).join('')}${m.dots.filter((d) => d.r.starred).map(dot).join('')}
+        ${m.pins.map((p) => `<g class="rf-map-pin"><rect x="${p.x - 4}" y="${p.y - 4}" width="8" height="8"/><text x="${p.x + 7}" y="${p.y + 4}">${esc(p.label)}</text></g>`).join('')}
+        ${m.far.map((p) => `<g class="rf-map-pin rf-map-far"><path d="M0,-5 L9,0 L0,5 z" transform="translate(${p.x},${p.y}) rotate(${-p.angle})"/><text x="${p.x}" y="${p.y + (p.y > m.h / 2 ? -8 : 14)}" text-anchor="${p.x > m.w * 0.66 ? 'end' : p.x < m.w * 0.33 ? 'start' : 'middle'}">${esc(p.label)} ${p.km} km</text></g>`).join('')}
+        <g class="rf-map-scale"><line x1="10" y1="${m.h - 10}" x2="${10 + m.scale.px}" y2="${m.h - 10}"/><text x="10" y="${m.h - 14}">${m.scale.km < 1 ? `${m.scale.km * 1000} m` : `${m.scale.km} km`}</text></g>
+      </svg>
+      <div class="rf-meta rf-map-key"><span class="rf-dot-lo">●</span> below the median · <span class="rf-dot-mid">●</span> near it · <span class="rf-dot-hi">●</span> above · <span class="rf-dot-na">●</span> no median · larger: shortlisted · ■ your places. Straight lines, no streets.</div></div>`;
+  }
+
+  function marketHtml(m, trend = '') {
+    const $ = (v) => (v == null ? '–' : money(v));
+    const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
+    const top = Math.max(1, ...m.byWeek.map((w) => w.n));
+    const weekLabel = (w) => w.label || shortDate(w.from);
+    return `<div class="rf-market"><div class="rf-plan-head">${plural(m.n, 'listing')} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
+      ${trend ? `<div class="rf-meta rf-trend" title="This whole search, one point per visit (up to ${TREND_MAX})">Trend: ${esc(trend)}</div>` : ''}
+      <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
+      <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
+        <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
+      ${m.bySuburb.length ? `<div class="rf-market-t"><table><caption>By suburb</caption><thead><tr><th scope="col">Suburb</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Per bed</th></tr></thead>
+      <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
+        const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
+        const inner = `<span>${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;
+        return `<li>${data && w.n ? `<button type="button"${data} title="Show listings available ${w.from ? `${esc(shortDate(w.from))} to ${esc(shortDate(w.to))}` : esc(w.label.toLowerCase())}">${inner}</button>` : `<div>${inner}</div>`}</li>`;
+      }).join('')}</ul>
+      <div class="rf-meta">Over the listings your filters show. Medians need ${MEDIAN_MIN}+ priced listings. Click a week to filter to it.</div></div>`;
+  }
+
+  // Side-by-side comparison: one column per listing, best value per row highlighted.
+  const compareRows = (cfg) => [
+    ['Rent', (r) => r.price, (r) => r.priceNum, 'min'],
+    ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
+    ['Move-in', (r) => (Number.isFinite(r.upfront) ? money(r.upfront) : ''), (r) => r.upfront, 'min'],
+    ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
+    ['Size', (r) => sqmLabel(r).replace(' (from text)', ''), (r) => -(r.sqm || 0), 'min'],
+    ['Per m²', (r) => (perSqm(r) != null ? `$${perSqm(r)}` : ''), (r) => perSqm(r) ?? Infinity, 'min'],
+    ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
+    ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
+    ['Places', (r) => placesLabel(r), (r) => worstKm(r) ?? Infinity, 'min'],
+    ['Of income', (r) => (incomePct(r, cfg.income) != null ? `${incomePct(r, cfg.income)}%` : ''), (r) => incomePct(r, cfg.income) ?? Infinity, 'min'],
+    ['My rating', (r) => (r.rating ? `${'★'.repeat(r.rating)} ${r.rating}/5` : ''), (r) => -(r.rating || 0), 'min'],
+    ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
+    ['Amenities', (r) => amenityTags(r).join(', '), null],
+    ['Heads-up', (r) => watchTags(r).join(', '), null],
+    ['Agency', (r) => r.agency || '', null],
+    ['Lease', (r) => leaseText(r.lease).replace(/^Lease /, ''), null],
+    ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
+    ['Apply via', (r) => r.applyVia || '', null],
+    ['Status', (r) => statusLabel(r.appStatus), null],
+    ['Checklist', (r) => checkSummary(r, checklistItems(cfg.checklist)), (r) => -Object.values(r.checks || {}).filter((v) => v === 'y').length, 'min'],
+    ['Note', (r) => r.note || '', null],
+  ];
+  // `total`: listings on the list (to say when only some are compared); `picked`: ticked ones.
+  function compareHtml(rows, cfg, { total = rows.length, picked = false } = {}) {
+    const best = (score) => {
+      const vals = rows.map(score).filter((v) => isFinite(v));
+      const min = Math.min(...vals);
+      // Only a "best" when it beats something: ties across every listing highlight nothing.
+      return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
+    };
+    const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
+    const body = compareRows(cfg).filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!cfg.leaseEnd)).map(([label, show, score]) => {
+      const b = score ? best(score) : null;
+      return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
+    }).join('');
+    return `<div class="rf-compare"><table><thead><tr><td></td>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
+      (total > rows.length ? `<div class="rf-empty">Comparing ${picked ? 'your selection' : `the first ${rows.length}`}; tick "Compare" on listings to choose.</div>` : '');
+  }
+
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -4476,7 +4578,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const total = marks.counts().starred;
     if (rows.length && !slots && !cmp) paintList(rows);
     else ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
-      : slots ? planHtml(slots, ui.planDay) : compareHtml(cmp);
+      : slots ? planHtml(slots, ui.planDay) : compareHtml(cmp, cfg, { total: ui.rows.length, picked: ui.cmpPicked });
     setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
@@ -4666,109 +4768,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    if (ui.mapOn) ui.list.innerHTML = mapHtml(rows);
+    if (ui.mapOn) ui.list.innerHTML = mapHtml(rows, cfg);
     else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : ''); else paintList(rows);
     toListTop();
-  }
-
-  function planHtml(slots, day) {
-    // Zone name only when the listing's clock differs from yours (Melbourne from Sydney doesn't).
-    const clock = (ms, tz) => dtf({ hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) }).format(ms);
-    const t = (ms, tz) => (tz && clock(ms, tz) !== clock(ms) ? dtf({ hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' }).format(ms) : clock(ms, tz))
-      .replace(/\s?(am|pm)/i, (m) => m.trim().toLowerCase());
-    const clashes = slots.filter((x) => x.flag).length;
-    const route = bestRoute(slots);
-    const partial = route.listings > 1 && route.visits < route.listings;
-    const inRoute = new Set([...route.picked].map((x) => x.r.id));
-    return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
-      <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
-      ${route.listings > 1 ? `<div class="rf-plan-route"><span>Suggested route: <strong>${route.visits} of ${plural(route.listings, 'listing')}</strong>${partial ? ' (the rest clash or are too far to reach in time)' : ''}</span>${partial || route.picked.size < slots.length ? ' <button class="rf-btn sec" data-plan-ics="route">Calendar for the route</button>' : ''}</div>` : ''}
-      <ol>${slots.map((x) => {
-        const tag = route.listings < 2 ? '' : route.picked.has(x) ? '<span class="rf-tag rf-new">route</span>'
-          : inRoute.has(x.r.id) ? '<span class="rf-tag">other time</span>' : '<span class="rf-tag">skip</span>';
-        return `<li class="${[x.flag ? `rf-${x.flag}` : '', route.listings > 1 && !route.picked.has(x) ? 'rf-off-route' : ''].filter(Boolean).join(' ')}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
-        <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>${tag}
-        ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
-      </li>`;
-      }).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
-  }
-
-  function mapHtml(rows) {
-    const pins = [...parsePlaces(cfg.places), ...(parseAnchor(cfg.anchor) ? [{ label: 'From', ...parseAnchor(cfg.anchor) }] : [])];
-    const m = mapLayout(rows, pins);
-    if (!m) return '<div class="rf-market"><div class="rf-plan-head">None of these listings has a location, so there is nothing to map.</div></div>';
-    const first = m.dots.find((d) => d.r.starred) || m.dots[0]; // one tab stop; arrows move between dots
-    const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
-      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
-    return `<div class="rf-market rf-map"><div class="rf-plan-head">${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
-      <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
-        ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
-        ${m.dots.filter((d) => !d.r.starred).map(dot).join('')}${m.dots.filter((d) => d.r.starred).map(dot).join('')}
-        ${m.pins.map((p) => `<g class="rf-map-pin"><rect x="${p.x - 4}" y="${p.y - 4}" width="8" height="8"/><text x="${p.x + 7}" y="${p.y + 4}">${esc(p.label)}</text></g>`).join('')}
-        ${m.far.map((p) => `<g class="rf-map-pin rf-map-far"><path d="M0,-5 L9,0 L0,5 z" transform="translate(${p.x},${p.y}) rotate(${-p.angle})"/><text x="${p.x}" y="${p.y + (p.y > m.h / 2 ? -8 : 14)}" text-anchor="${p.x > m.w * 0.66 ? 'end' : p.x < m.w * 0.33 ? 'start' : 'middle'}">${esc(p.label)} ${p.km} km</text></g>`).join('')}
-        <g class="rf-map-scale"><line x1="10" y1="${m.h - 10}" x2="${10 + m.scale.px}" y2="${m.h - 10}"/><text x="10" y="${m.h - 14}">${m.scale.km < 1 ? `${m.scale.km * 1000} m` : `${m.scale.km} km`}</text></g>
-      </svg>
-      <div class="rf-meta rf-map-key"><span class="rf-dot-lo">●</span> below the median · <span class="rf-dot-mid">●</span> near it · <span class="rf-dot-hi">●</span> above · <span class="rf-dot-na">●</span> no median · larger: shortlisted · ■ your places. Straight lines, no streets.</div></div>`;
-  }
-
-  function marketHtml(m, trend = '') {
-    const $ = (v) => (v == null ? '–' : money(v));
-    const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
-    const top = Math.max(1, ...m.byWeek.map((w) => w.n));
-    const weekLabel = (w) => w.label || shortDate(w.from);
-    return `<div class="rf-market"><div class="rf-plan-head">${plural(m.n, 'listing')} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
-      ${trend ? `<div class="rf-meta rf-trend" title="This whole search, one point per visit (up to ${TREND_MAX})">Trend: ${esc(trend)}</div>` : ''}
-      <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
-      <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
-        <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
-      ${m.bySuburb.length ? `<div class="rf-market-t"><table><caption>By suburb</caption><thead><tr><th scope="col">Suburb</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Per bed</th></tr></thead>
-      <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-      <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
-        const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
-        const inner = `<span>${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;
-        return `<li>${data && w.n ? `<button type="button"${data} title="Show listings available ${w.from ? `${esc(shortDate(w.from))} to ${esc(shortDate(w.to))}` : esc(w.label.toLowerCase())}">${inner}</button>` : `<div>${inner}</div>`}</li>`;
-      }).join('')}</ul>
-      <div class="rf-meta">Over the listings your filters show. Medians need ${MEDIAN_MIN}+ priced listings. Click a week to filter to it.</div></div>`;
-  }
-
-  // Side-by-side comparison: one column per listing, best value per row highlighted.
-  const COMPARE_ROWS = [
-    ['Rent', (r) => r.price, (r) => r.priceNum, 'min'],
-    ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
-    ['Move-in', (r) => (Number.isFinite(r.upfront) ? money(r.upfront) : ''), (r) => r.upfront, 'min'],
-    ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
-    ['Size', (r) => sqmLabel(r).replace(' (from text)', ''), (r) => -(r.sqm || 0), 'min'],
-    ['Per m²', (r) => (perSqm(r) != null ? `$${perSqm(r)}` : ''), (r) => perSqm(r) ?? Infinity, 'min'],
-    ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
-    ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
-    ['Places', (r) => placesLabel(r), (r) => worstKm(r) ?? Infinity, 'min'],
-    ['Of income', (r) => (incomePct(r, cfg.income) != null ? `${incomePct(r, cfg.income)}%` : ''), (r) => incomePct(r, cfg.income) ?? Infinity, 'min'],
-    ['My rating', (r) => (r.rating ? `${'★'.repeat(r.rating)} ${r.rating}/5` : ''), (r) => -(r.rating || 0), 'min'],
-    ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
-    ['Amenities', (r) => amenityTags(r).join(', '), null],
-    ['Heads-up', (r) => watchTags(r).join(', '), null],
-    ['Agency', (r) => r.agency || '', null],
-    ['Lease', (r) => leaseText(r.lease).replace(/^Lease /, ''), null],
-    ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
-    ['Apply via', (r) => r.applyVia || '', null],
-    ['Status', (r) => statusLabel(r.appStatus), null],
-    ['Checklist', (r) => checkSummary(r, checklistItems(cfg.checklist)), (r) => -Object.values(r.checks || {}).filter((v) => v === 'y').length, 'min'],
-    ['Note', (r) => r.note || '', null],
-  ];
-  function compareHtml(rows) {
-    const best = (score) => {
-      const vals = rows.map(score).filter((v) => isFinite(v));
-      const min = Math.min(...vals);
-      // Only a "best" when it beats something: ties across every listing highlight nothing.
-      return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
-    };
-    const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
-    const body = COMPARE_ROWS.filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!cfg.leaseEnd)).map(([label, show, score]) => {
-      const b = score ? best(score) : null;
-      return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
-    }).join('');
-    return `<div class="rf-compare"><table><thead><tr><td></td>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
-      (ui.rows.length > rows.length ? `<div class="rf-empty">Comparing ${ui.cmpPicked ? 'your selection' : `the first ${rows.length}`}; tick "Compare" on listings to choose.</div>` : '');
   }
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.

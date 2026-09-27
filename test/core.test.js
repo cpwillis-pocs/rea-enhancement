@@ -979,3 +979,28 @@ test('nextStop: the next shortlisted inspection today, not this listing, with di
     assert.equal(core.nextStop([here, { ...rows[1], ...dead }, rows[2]], here, at(10, 20)).r.id, 'c', JSON.stringify(dead));
   }
 });
+
+test('views drawn in place of the list: escaped, best-per-row, route tags, map pins, market rows', () => {
+  const { pageResults } = require('./e2e/fixtures');
+  const rows = core.rowsFrom(pageResults(1, { extras: true }));
+  rows[0].address = '<b>x</b> St'; rows[0].rating = 4; rows[1].rating = 2;
+  const cfg = { ...core.DEFAULT_CFG };
+  const cmp = core.compareHtml(rows.slice(0, 3), cfg, { total: 6 });
+  assert.ok(!cmp.includes('<b>x</b>') && cmp.includes('&lt;b&gt;x&lt;/b&gt;'), 'escaped');
+  assert.match(cmp, /<th scope="row">My rating<\/th><td class="rf-best">★★★★ 4\/5/, 'best rating highlighted');
+  assert.match(cmp, /Comparing the first 3/);
+  assert.doesNotMatch(cmp, /Of income/, 'no income set: row left out');
+  assert.match(core.compareHtml(rows.slice(0, 2), { ...cfg, income: '2000' }), /Of income/);
+  const map = core.mapHtml(rows, { ...cfg, places: 'Work: -33.87, 151.21' });
+  assert.equal((map.match(/data-map-id=/g) || []).length, rows.length);
+  assert.match(map, /rf-map-pin/);
+  assert.match(core.mapHtml([{ id: '1' }], cfg), /nothing to map/);
+  const market = core.marketHtml(core.marketStats(rows), '2-bed median $700 → $690');
+  assert.match(market, /Weekly rent by bedrooms/);
+  assert.match(market, /Trend: 2-bed median/);
+  const day = '2026-09-26';
+  const shortlisted = rows.map((r, i) => ({ ...r, inspections: [{ at: Date.UTC(2026, 8, 26, i, 0), label: `${i}` }] }));
+  const plan = core.planHtml(core.planDay(shortlisted, day), day);
+  assert.match(plan, /Suggested route/);
+  assert.match(plan, /rf-tag rf-new">route/);
+});
