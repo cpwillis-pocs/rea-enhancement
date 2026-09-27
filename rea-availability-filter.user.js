@@ -55,7 +55,7 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 13;
+  const ROWS_VERSION = 14;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
@@ -243,7 +243,7 @@
   const summary = (r) => ({
     u: reaUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: reaImg(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
-    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
+    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), ab: /^\d{4}-\d{2}-\d{2}$/.test(r.applyBy || '') ? r.applyBy : '', le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
     sq: typeof r.sqm === 'number' ? sqmOk(r.sqm) : null, sqt: r.sqm != null && r.sqmFromText ? 1 : null,
@@ -269,6 +269,10 @@
     if (r.lastInspect && now - r.lastInspect < ACTION_WINDOW_DAYS * DAY_MS && (!r.appStatus || r.appStatus === 'to inspect') &&
       !(r.inspectAnswered >= r.lastInspect) && !(r.appAt >= r.lastInspect)) return 'inspected';
     if (r.appStatus === 'inspected' && r.appAt && now - r.appAt > APPLY_NUDGE_DAYS * DAY_MS) return 'apply';
+    if (r.applyBy && !['applied', 'approved', 'declined'].includes(r.appStatus)) { // the deadline is close and you haven't applied
+      const left = (new Date(`${r.applyBy}T23:59:59`) - now) / DAY_MS;
+      if (left >= 0 && left <= APPLY_BY_SOON_DAYS) return 'applyby';
+    }
     return '';
   }; // an application with no answer after this long gets a "follow up?" nudge
   const needsFollowUp = (r, now = Date.now()) => r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
@@ -313,7 +317,7 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: reaUrl(d.u), address: d.a, price: d.p, available: d.v, img: reaImg(d.i), type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', applyBy: typeof d.ab === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.ab) ? d.ab : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
   });
@@ -717,7 +721,7 @@
   // baseline, so refreshing twice doesn't wipe the "new" tags). `gone` = baseline rows no
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
-    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken', 'byAppt', 'sqm', 'sqmFromText']; // inspect/nextInspect: re-derived on load
+    'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken', 'byAppt', 'sqm', 'sqmFromText', 'applyBy']; // inspect/nextInspect: re-derived on load
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -1570,6 +1574,24 @@
     return null;
   };
 
+  // "Applications close Fri 3 Oct", "closing date for applications: 3/10": the deadline as
+  // YYYY-MM-DD ('' when the text doesn't give one). Not "close to shops": the word must follow
+  // "applications", or be "closing date".
+  const APPLY_BY_G = /\b(?:applications?|apps)\s+(?:close[sd]?|closing|are due|due|must be (?:in|submitted|received|lodged))\b|\bclosing date(?:\s+for\s+applications?)?\b/gi;
+  const applyByOf = (text, now = new Date()) => {
+    const src = String(text || '');
+    APPLY_BY_G.lastIndex = 0;
+    for (let m; (m = APPLY_BY_G.exec(src));) {
+      const tail = src.slice(m.index + m[0].length, m.index + m[0].length + 48).replace(/^[\s:,-]*(?:(?:by|on|is|at|before|this|the|of)\s+)*/i, '');
+      if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun)/i.test(tail)) continue;
+      const d = parseAvail(`Available ${tail.split(/[.;\n]/)[0]}`, now);
+      if (d) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    return '';
+  };
+  const APPLY_BY_SOON_DAYS = 3; // the shortlist nudges this close to the deadline
+  const applyByLabel = (ymd) => (ymd ? `Apply by ${dtf({ weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${ymd}T00:00:00`))}` : '');
+
   // How the agent takes applications, when the text names a portal (display only, never contacted).
   const APPLY_VIA = [
     ['2Apply', /\b2apply\b/],
@@ -1802,6 +1824,7 @@
     const said = [row.headline, str(listing.description), ...row.features].join(' ');
     row.watch = watchOf(said).join(',');
     row.applyVia = applyViaOf(said);
+    row.applyBy = applyByOf(said);
     row.taken = takenOf(row.headline, str(listing.description));
     row.byAppt = !row.inspections.length && byApptOf(said);
     row.lease = leaseCode(leaseTermOf(said));
@@ -2467,7 +2490,7 @@
 
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['applyBy', 'apply_by'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
@@ -2556,6 +2579,11 @@
       const due = ymdLocal(new Date(r.appAt + FOLLOW_UP_DAYS * DAY_MS));
       allDay(`${r.id}-fu@rea-enhancement`, due < today ? today : due, `Follow up: ${r.address || 'rental application'}`,
         [r.url ? `URL:${r.url}` : '', `DESCRIPTION:${icsText([`Applied ${ymdLocal(new Date(r.appAt))}`, r.agency, r.applyVia && `via ${r.applyVia}`].filter(Boolean).join(' | '))}`]);
+    }
+    for (const r of followUps ? rows : []) {
+      if (!r.applyBy || r.applyBy < today || ['applied', 'approved', 'declined'].includes(r.appStatus) || seen.has(`${r.id}-ab`)) continue;
+      seen.add(`${r.id}-ab`);
+      allDay(`${r.id}-ab@rea-enhancement`, r.applyBy, `Applications close: ${r.address || 'rental'}`, [r.url ? `URL:${r.url}` : '']);
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends');
     if (!events.length) return '';
@@ -2917,6 +2945,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
     ['Cash to move', (r) => (cashToMove(r) != null ? money(cashToMove(r)) : ''), (r) => cashToMove(r) ?? Infinity, 'min'],
     ['Apply via', (r) => r.applyVia || '', null],
+    ['Applications close', (r) => applyByLabel(r.applyBy).replace(/^Apply by /, ''), null],
     ['Status', (r) => statusLabel(r.appStatus), null],
     ['Checklist', (r) => checkSummary(r, checklistItems(cfg.checklist)), (r) => -Object.values(r.checks || {}).filter((v) => v === 'y').length, 'min'],
     ['Note', (r) => r.note || '', null],
@@ -2941,7 +2970,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -5047,7 +5076,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', sqmLabel(r), r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${metaLine([r.agency, sl && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
-          ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : ''].filter(Boolean), ' rf-sec')}
+          ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : '', applyByLabel(r.applyBy)].filter(Boolean), ' rf-sec')}
           ${tagsHtml(wt, ' rf-watch rf-sec', 'Mentioned in the listing text: worth asking the agent')}
           ${kq ? `<div class="rf-meta rf-sec rf-kwq">matched: ${esc(kq)}</div>` : ''}
           ${moneyLine(r, inc, med)}
@@ -5065,6 +5094,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ${r.buildingN || r.alsoListed?.length ? `<div class="rf-group rf-sec">${r.buildingN ? `<button type="button" class="rf-chip" data-act="bldg" title="Show only listings at ${esc(r.buildingAddr)}">${r.buildingN} in this building</button>` : ''}${r.alsoListed?.length
         ? ` <span class="rf-meta">Also listed ${r.alsoListed.map((x) => `${x.agency ? `by ${esc(x.agency)} ` : ''}${x.price ? `at ${esc(x.price)}` : ''}`).join('; ')}</span>` : ''}</div>` : ''}
       ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
+      ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${r.starred && sl ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];

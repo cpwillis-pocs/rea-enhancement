@@ -2074,6 +2074,32 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 59. Applications close: a shortlisted listing whose deadline is in two days is under Needs
+  // action with a nudge; Mark applied clears it; the calendar carries the deadline.
+  await block('59', async () => {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => {
+      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
+      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+        146500101: { f: 1, l: 1, s: 1, st: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026', ab: '2026-09-25' } },
+        146500102: { f: 1, l: 1, s: 1, st: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', ab: '2026-10-20' } },
+      } }));
+    });
+    const page = await open(ctx);
+    await page.click('#rf-launch'); await page.click('[data-view=shortlist]');
+    await page.selectOption('.rf-sl-filter', '!');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101'], 'only the close deadline needs action');
+    assert.match(await page.textContent('.rf-item .rf-nudge'), /Applications close Fri,? 25 Sept?: apply\?/);
+    assert.match(await page.textContent('.rf-item'), /Apply by Fri,? 25 Sept?/);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
+    assert.match(fs.readFileSync(await dl.path(), 'utf8'), /UID:146500101-ab@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260925/);
+    await page.click('.rf-item .rf-nudge [data-na=applied]');
+    assert.equal((await marks(page))['146500101'].as, 'applied');
+    await page.waitForFunction(() => !document.querySelector('.rf-item .rf-nudge'));
+    console.log('applications close: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

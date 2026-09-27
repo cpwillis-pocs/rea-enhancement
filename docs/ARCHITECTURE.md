@@ -75,7 +75,7 @@ The install and update links serve the raw file from `main`, so they only work w
 |---|---|---|
 | `// @version` (header) | Any change to the script | Tampermonkey only auto-updates to a higher version. CI's version-bump job checks it on PRs, and lint checks CHANGELOG.md has a section for it. |
 | `WHATS_NEW.version` | A release users should hear about | Shows the one-time "Updated to…" note. Lint keeps it no higher than `@version` and with a CHANGELOG section. |
-| `ROWS_VERSION` (13) | `toRow()` output changes shape | Invalidates old tab caches |
+| `ROWS_VERSION` (14) | `toRow()` output changes shape | Invalidates old tab caches |
 | `FEAT_V` | `AMENITIES` or `WATCHOUTS` detection changes | Old feature signatures aren't compared, so no false "details changed". Only append to those lists: signatures are bit positions. |
 
 `test/versions.test.js` catches a forgotten `ROWS_VERSION` or `FEAT_V` bump; after bumping, refresh its record with `UPDATE_VERSIONS=1 node --test test/versions.test.js`. `npm run release x.y.z` bumps `@version` and prints the rest.
@@ -102,7 +102,7 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 ## Tests at a glance
 
 - **Unit:** `test/*.test.js` (203 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
-- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (72 blocks, numbered 1–58 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
+- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (73 blocks, numbered 1–59 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Shapes:** `test/shapes.test.js` rebuilds a listing from each `test/shapes/*.json` (`reaFilter.shape()` output) and checks it still parses.
 - **Live:** `npm run live` (`test/live.js`) runs one real search locally and saves a fresh shape. Never in CI; lint enforces that.

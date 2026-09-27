@@ -678,6 +678,27 @@ test('my inspection times: parsed, checked in the listing zone, filtered, and ex
   assert.equal(core.activeFilters(cfg).find((f) => f.key === 'inspectWhen')?.label, 'Inspect at my times');
 });
 
+test('applications close: read from the text, nudged near the deadline, exported', () => {
+  const now = new Date(2026, 8, 23, 12);
+  const by = (t) => core.applyByOf(t, now);
+  assert.equal(by('Applications close Fri 3 Oct at 5pm.'), '2026-10-03');
+  assert.equal(by('Closing date for applications: 3/10/2026'), '2026-10-03');
+  assert.equal(by('Apps due by Monday 5th October'), '2026-10-05');
+  assert.equal(by('All applications must be submitted by 10th October'), '2026-10-10');
+  for (const no of ['Close to shops. Available 1 Oct', 'Applications close soon', 'Application closing on request', 'Doors close 3 Oct']) assert.equal(by(no), '', no);
+  const soon = { applyBy: '2026-09-25' }, later = { applyBy: '2026-10-10' };
+  assert.equal(core.needsAction(soon, +now), 'applyby');
+  assert.equal(core.needsAction(later, +now), '', 'not yet');
+  assert.equal(core.needsAction({ ...soon, appStatus: 'applied' }, +now), '', 'already applied');
+  assert.equal(core.needsAction({ applyBy: '2026-09-20' }, +now), '', 'passed');
+  const [head, line] = core.toCsv([{ id: '1', url: 'u', applyBy: '2026-09-25' }]).split('\n');
+  assert.equal(line.split(',')[head.split(',').indexOf('apply_by')], '2026-09-25');
+  const ics = core.toIcs([{ id: '146500001', address: '1 Test St', applyBy: '2026-09-25', inspections: [] }], +now, { followUps: true });
+  assert.match(ics, /UID:146500001-ab@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260925\r\n[\s\S]*?SUMMARY:Applications close: 1 Test St/);
+  const [row] = core.rowsFrom(results({ exact: [listing({ description: 'Applications close Fri 3 Oct at 5pm.' })] }));
+  assert.match(row.applyBy, /^\d{4}-10-03$/, 'toRow reads it');
+});
+
 test('building filter matches the building exactly (2 Hall St is not 12 Hall St)', () => {
   const rows = [{ id: '1', url: 'a', address: '5/2 Hall St, Bondi NSW 2026' }, { id: '2', url: 'b', address: '3/12 Hall St, Bondi NSW 2026' }, { id: '3', url: 'c', address: '9/2 Hall St, Bondi NSW 2026' }];
   const key = core.buildingKey(rows[0].address);
