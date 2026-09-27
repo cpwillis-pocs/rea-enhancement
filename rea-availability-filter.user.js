@@ -344,11 +344,15 @@
   const hiddenOf = (e, was) => e?.h === 1 || (e?.h !== 0 && !!was?.h && !e?.s);
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   const marksStore = (storage, now = () => Date.now()) => {
-    let data = null, raw = null, writes = 0, countMemo = null;
+    // `wiped`: storage held marks and now holds none, without this script removing them (site
+    // data cleared, or a cleaner extension): the safety copy must not be overwritten then.
+    let data = null, raw = null, writes = 0, countMemo = null, had = false, wiped = false;
     const load = () => {
       if (data) return data;
       countMemo = null;
       try { raw = storage.getItem(MARKS_KEY); data = JSON.parse(raw); } catch { data = null; raw = null; }
+      if (raw == null && had) wiped = true;
+      had = raw != null;
       if (!isObj(data) || !isObj(data.m)) data = { c: now(), m: {} };
       // One bad entry (hand-edited, or a half-written sync) mustn't break every later write.
       for (const [id, e] of Object.entries(data.m)) if (!isObj(e)) delete data.m[id];
@@ -422,7 +426,9 @@
       return !!b[k];
     };
     return {
-      invalidate() { data = null; raw = null; },
+      // `expected`: this script is emptying storage itself (Undo of a restore), not a wipe.
+      invalidate(expected = false) { data = null; raw = null; if (expected) had = false; },
+      takeWiped() { const w = wiped; wiped = false; return w; },
       // `full`: rows from a complete crawl of a search. Only then is a missing listing evidence of
       // a relist; one page (annotate, boot, re-check) says nothing about the rest.
       observe(rows, { full = false, features = true } = {}) {
@@ -1168,9 +1174,14 @@
 
   // No page data: a bot check (a short interstitial, or one that says so) pauses fetching; a
   // full-size REA page without it means REA changed its format, which pausing would only hide.
-  const CHALLENGE_WORDS = /captcha|verify (?:that )?you(?:'re| are) (?:a )?human|are you a robot|access denied|unusual traffic|just a moment|incapsula|kasada|perimeterx|cf-chl/i;
+  // A full-size page that says it's a check, in its title or its text (scripts left out: a real
+  // page may load reCAPTCHA or a bot-protection script, and listings say "just a moment's walk").
+  const CHALLENGE_TITLE = /just a moment|attention required|access denied|captcha|robot|security check|verify/i;
+  const CHALLENGE_WORDS = /\bcaptcha\b|verify (?:that )?you(?:'re| are) (?:a )?human|are you a robot|access denied|unusual traffic|incapsula|perimeterx|cf-chl/i;
   const FORMAT_MIN_CHARS = 20000; // REA's real pages are hundreds of KB; interstitials a few KB
-  const looksLikeFormatChange = (html) => String(html).length >= FORMAT_MIN_CHARS && !CHALLENGE_WORDS.test(html);
+  const saysChallenge = (html) => CHALLENGE_TITLE.test(html.match(/<title[^>]*>([^<]*)/i)?.[1] || '')
+    || CHALLENGE_WORDS.test(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>/gi, ' '));
+  const looksLikeFormatChange = (html) => String(html).length >= FORMAT_MIN_CHARS && !saysChallenge(String(html));
   const formatChange = (msg) => Object.assign(new Error(msg), { format: true });
   function extractResults(html) {
     const m = html.match(EXCHANGE_RE);
@@ -3142,12 +3153,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   /* Floating notes on REA's page: undo toast and saved-search reminder by the launcher, listing bar. */
-  #rf-toast,#rf-remind,#rf-lbar{position:fixed;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 12px;border-radius:10px;
+  #rf-toast,#rf-remind,#rf-lbar{box-sizing:border-box;position:fixed;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 12px;border-radius:10px;
     background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
   #rf-toast{right:20px;bottom:72px;max-width:min(360px,calc(100vw - 32px))}
   #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
   #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
-  #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px))}
+  #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
   #rf-lbar button[aria-pressed=true]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
   #rf-lbar button:focus-visible,#rf-lbar select:focus-visible{outline:2px solid var(--rf-accent);outline-offset:2px}
@@ -3333,7 +3344,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     recentErrors.push(t);
     while (recentErrors.length && t - recentErrors[0] > ERROR_WARN_MS) recentErrors.shift();
     if (recentErrors.length >= ERROR_WARN_N) setWarn('errors', `The script hit ${recentErrors.length} errors in the last minute (latest: ${name}). Copy report, then paste it into an issue on the script's GitHub page.`);
+    clearTimeout(errorsQuiet); // a quiet minute takes the warning down (the log keeps them for the report)
+    errorsQuiet = setTimeout(() => setWarn('errors', ''), ERROR_WARN_MS);
   };
+  let errorsQuiet = 0;
   const guard = (name, fn) => function guarded(...args) { try { return fn.apply(this, args); } catch (e) { noteError(name, e); return undefined; } };
   const presets = presetStore(storageOr('localStorage'));
   let rawSample = sampleOf(boot?.results);
@@ -3598,8 +3612,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     try {
       const req = indexedDB.open(MIRROR_DB, 1);
       req.onupgradeneeded = () => req.result.createObjectStore('kv');
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => { req.result.onversionchange = () => req.result.close(); resolve(req.result); }; // don't block a delete from another tab
       req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('blocked'));
     } catch (e) { reject(e); }
   });
   const idbDo = async (mode, fn) => {
@@ -3609,28 +3624,40 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         const tx = db.transaction('kv', mode), req = fn(tx.objectStore('kv'));
         tx.oncomplete = () => resolve(req?.result);
         tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('aborted')); // a quota error at commit aborts, it doesn't error
       });
     } finally { db.close(); }
   };
-  let mirrorTimer = 0;
-  const mirrorSoon = () => {
-    clearTimeout(mirrorTimer);
-    mirrorTimer = setTimeout(() => {
-      const data = marks.exportData();
-      if (!Object.keys(data.m).length) return; // never overwrite a copy with nothing (that's when it's needed)
-      data.presets = presets.exportData();
-      data.cfg = backupCfg(cfg);
-      idbDo('readwrite', (st) => st.put({ at: Date.now(), data }, 'copy')).catch(() => { /* private window, blocked */ });
-    }, MIRROR_DELAY_MS);
+  // What the copy holds that this browser doesn't (listings, hidden agencies and suburbs). Every
+  // change here is copied within seconds, so anything missing went without this script.
+  const mirrorLost = (copy, here) => ['m', 'ag', 'sb'].reduce((n, f) => n + (isObj(copy?.[f]) ? Object.keys(copy[f]).filter((k) => !Object.hasOwn(here[f] || {}, k)).length : 0), 0);
+  const mirrorWeight = (d) => ['m', 'ag', 'sb'].reduce((n, f) => n + (isObj(d?.[f]) ? Object.keys(d[f]).length : 0), 0);
+  // Held (no writes) until startup has compared the copy with what's here, and while an offer to
+  // restore it is unanswered: otherwise the first star after a wipe replaces the copy with one listing.
+  let mirrorTimer = 0, mirrorHeld = true;
+  const mirrorWrite = () => {
+    clearTimeout(mirrorTimer); mirrorTimer = 0;
+    if (marks.takeWiped()) { mirrorHeld = true; offerMirror(); } // storage emptied mid-visit
+    if (mirrorHeld) return;
+    const data = marks.exportData();
+    if (!mirrorWeight(data)) return; // never overwrite a copy with nothing (that's when it's needed)
+    data.presets = presets.exportData();
+    data.cfg = backupCfg(cfg);
+    idbDo('readwrite', (st) => st.put({ at: Date.now(), data }, 'copy')).catch(() => { /* private window, blocked */ });
   };
+  const mirrorSoon = () => { clearTimeout(mirrorTimer); mirrorTimer = setTimeout(mirrorWrite, MIRROR_DELAY_MS); };
+  // Leaving the tab: write now, so a change just made isn't later mistaken for a loss.
+  document.addEventListener('visibilitychange', () => { if (document.hidden && mirrorTimer) mirrorWrite(); });
   const offerMirror = async () => {
-    const c = marks.counts();
-    if (!isSearchPage(location.href) || c.starred || c.hidden || c.notes) return; // the offer lives in the drawer
     const rec = await idbDo('readonly', (st) => st.get('copy')).catch(() => null);
-    if (!isObj(rec?.data?.m) || !Object.keys(rec.data.m).length) return;
-    ui.offerRestore(rec.data, `Your shortlist in this browser has gone (its storage was cleared). A safety copy from ${ago(Date.now() - rec.at)} has`);
+    const here = marks.exportData(), lost = mirrorLost(rec?.data, here);
+    if (!lost) { if (mirrorHeld) releaseMirror(); return; }
+    mirrorHeld = true;
+    if (!isSearchPage(location.href) || !ui.offerRestore) return; // the offer lives in the drawer: the next search page asks
+    ui.offerRestore(rec.data, `${mirrorWeight(here) ? 'Some of your shortlist in this browser has' : 'Your shortlist in this browser has'} gone (its storage was cleared). A safety copy from ${ago(Date.now() - rec.at)} has`);
     ui.restoreFromMirror = true; // Cancel then drops the copy, so emptying the shortlist on purpose isn't asked about again
   };
+  const releaseMirror = () => { mirrorHeld = false; mirrorSoon(); };
   const dropMirror = () => idbDo('readwrite', (st) => st.delete('copy')).catch(() => {});
 
 
@@ -3711,7 +3738,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   panel.querySelector('[data-forget]').addEventListener('click', () => {
     if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
     for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
-    clearTimeout(mirrorTimer);
+    clearTimeout(mirrorTimer); mirrorTimer = 0; mirrorHeld = true;
     try { indexedDB.deleteDatabase(MIRROR_DB); } catch { /* blocked */ }
     document.getElementById('rf-remind')?.remove();
     marks.invalidate();
@@ -3780,7 +3807,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     restoreIn.hidden = true;
     ui.pendingRestore = null;
     if (b.dataset.restore !== 'yes' || !data) {
-      if (ui.restoreFromMirror) { ui.restoreFromMirror = false; dropMirror(); return setStatus('Safety copy discarded.'); }
+      if (ui.restoreFromMirror) { ui.restoreFromMirror = false; dropMirror().then(releaseMirror); return setStatus('Safety copy discarded.'); }
       return setStatus('Restore cancelled.');
     }
     // Undo puts the three stores and the settings back exactly as they were.
@@ -3788,6 +3815,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
     try {
       const n = marks.importJson(data);
+      mirrorHeld = false; // answered: copies resume (refreshMarks below writes one)
       const c = backupCfg(data.cfg);
       if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
       const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
@@ -3795,14 +3823,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       fillPresets();
       renderSaved();
       refreshMarks();
-      ui.restoreUndo = true;
       offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
         keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
-        marks.invalidate();
+        marks.invalidate(true);
         ui.applyCfg(cfgBefore);
         fillPresets(); renderSaved(); refreshMarks();
         setStatus('Restore undone.');
-      });
+      }, 'rf-undo-restore');
     } catch (err) { setStatus(err.message, true); }
   });
   }
@@ -3870,6 +3897,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   document.addEventListener('keydown', guard('keys', (e) => {
     if (e.altKey && e.shiftKey && (e.key === 'F' || e.key === 'f' || e.code === 'KeyF') && isSearchPage(location.href) && !typing(e.target)) {
       e.preventDefault();
+      if (!panel.dataset.rfReady) { ui.openWhenReady = true; return; } // like the launcher: open once restored
       setOpen(panel.hidden);
       if (!panel.hidden) { if (!ui.placedNow) ui.run.focus(); } else launch.focus();
       return;
@@ -4792,12 +4820,22 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // One-shot Undo link in the status line.
-  function offerUndo(msg, undo) {
+  function offerUndo(msg, undo, cls = '') {
     setStatus(msg);
-    const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: 'Undo' });
+    const b = Object.assign(document.createElement('button'), { className: `rf-undo ${cls}`.trim(), textContent: 'Undo' });
     b.addEventListener('click', () => { b.remove(); undo(); }, { once: true });
     ui.status.append(' ', b); // space: screen readers read "hidden. Undo", not "hidden.Undo"
+    ui.undoAt = Date.now();
   }
+  // Another tab's write redraws this one: an Undo offered in the last UNDO_KEEP_MS stays put
+  // (with its hide reasons) instead of turning into "N of M match".
+  const UNDO_KEEP_MS = 30000;
+  const keepingUndo = (fn) => {
+    const keep = ui.status.querySelector('.rf-undo') && Date.now() - (ui.undoAt || 0) < UNDO_KEEP_MS ? [...ui.status.childNodes] : null;
+    const err = ui.status.classList.contains('err');
+    fn();
+    if (keep) { ui.status.replaceChildren(...keep); ui.status.classList.toggle('err', err); }
+  };
 
   const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; ui.map.disabled = disabled; };
 
@@ -5009,6 +5047,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   function fillPresets() {
+    mirrorSoon(); // called after every preset save and delete (and restores): the copy carries them
     const list = presets.list();
     const bound = presets.forSearch(currentKey());
     ui.preset.innerHTML = `<option value="">${bound ? `Preset: ${esc(bound.name)}` : 'Presets…'}</option>` +
@@ -5226,6 +5265,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const moved = resultsPath.fallback ? [`results are now under ${resultsPath.key}.${resultsPath.field}`] : [];
       const drift = [...moved, ...drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`)];
       setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
+      setWarn('format', ''); // every page read: an earlier odd page was a one-off
       store.set(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0));
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
@@ -5482,6 +5522,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const el = e.target.closest('[data-l]');
     if (!el || (e.type === 'click' && el.tagName === 'SELECT')) return;
     const k = el.dataset.l;
+    if (k !== 'min') mirrorSoon(); // the bar's changes don't pass through refreshMarks
     if (k === 'min') lbarMin.set(!lbarMin.get());
     else if (k === 's' || k === 'h') marks.toggle(id, k, r);
     else if (k === 'as') marks.setStatus(id, el.value);
@@ -5828,11 +5869,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (e.key === SNAP_KEY || e.key === null) renderSaved(); // another tab's search or Check all
       // A restore's Undo puts back what was stored before it: after another tab has written, that
       // would silently undo the other tab too, so the offer goes.
-      if ((e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) && ui.restoreUndo) {
-        ui.restoreUndo = false;
-        ui.status.querySelector('.rf-undo')?.remove();
-      }
-      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
+      if (e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) ui.status.querySelector('.rf-undo-restore')?.remove();
+      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); keepingUndo(() => refreshMarks()); }
         // Settings saved in another tab: take its display settings (places, checklist, weights,
         // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
         if (e.key === CFG_KEY) {

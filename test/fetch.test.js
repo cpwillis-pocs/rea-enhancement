@@ -180,5 +180,7 @@ test('format change vs bot check: spacing is tolerated, a full REA page without 
   assert.throws(() => core.extractResults(big), (e) => e.format === true && !e.botCheck);
   assert.equal(core.classifyPage({ html: '<html>Please verify you are human</html>' }), 'challenge');
   assert.equal(core.classifyPage({ html: `${big}<p>Please complete the CAPTCHA</p>` }), 'challenge', 'a big page that says it is a check');
+  assert.equal(core.classifyPage({ html: `${big}<p>Just a moment's walk to Bondi Beach</p><script src="https://www.google.com/recaptcha/api.js"></script><div class="g-recaptcha"></div><script>window.KPSDK={kasada:1}</script>` }), 'format', "listing words and a real page's scripts aren't a check");
+  assert.equal(core.classifyPage({ html: `<html><head><title>Just a moment...</title></head>${big}` }), 'challenge', 'a big interstitial titled as one');
   assert.throws(() => core.extractResults('<html>x</html>'), (e) => e.botCheck === true);
 });

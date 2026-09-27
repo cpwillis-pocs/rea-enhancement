@@ -1864,6 +1864,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await page.textContent('.rf-warn-msg'), /may have changed its format/);
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
     assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/paused')), null, 'not a bot check: nothing paused');
+    await page.unroute('**/*'); await page.route('**/*', serve([], { pages: 3 }));
+    await page.click('#rf-refresh');
+    await page.waitForFunction(() => !/changed its format/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''), null, { timeout: 8000 });
     console.log('format change vs bot check: ok');
     await done(page); await ctx.close();
   });
@@ -1884,6 +1887,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     }
     await page.waitForFunction(() => /errors in the last minute \(latest: annotate\)/.test(document.querySelector('.rf-warn-msg')?.textContent || ''));
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
+    assert.match(await page.evaluate(() => window.reaFilter.selfcheck()), /annotate: boom from a test/);
+    await page.clock.runFor(61000); // a quiet minute: the warning goes, the log stays
+    await page.waitForFunction(() => !/errors in the last minute/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''));
     assert.match(await page.evaluate(() => window.reaFilter.selfcheck()), /annotate: boom from a test/);
     console.log('own errors logged and shown: ok');
     await done(page); await ctx.close();
@@ -1906,9 +1912,16 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.deepEqual(await copied(), [id], 'the shortlist is mirrored');
     await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    // A star on REA's card before the offer is answered doesn't replace the copy.
+    await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge [data-card-act=s]').length > 1);
+    const other = await page.$$eval('article > .rf-badge [data-card-act=s]', (bs, i) => bs.find((b) => b.dataset.id !== i).dataset.id, id);
+    await page.click(`article > .rf-badge [data-card-act=s][data-id="${other}"]`);
+    await page.clock.runFor(2500);
+    assert.deepEqual(await copied(), [id], 'copy held while its offer is unanswered');
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     await page.waitForSelector('.rf-restore-in:not([hidden])');
-    assert.match(await page.textContent('.rf-restore-msg'), /has gone \(its storage was cleared\)\. A safety copy from .* has 1 listing \(1 shortlisted/);
+    assert.match(await page.textContent('.rf-restore-msg'), /^Some of your shortlist in this browser has gone \(its storage was cleared\)\. A safety copy from .* has 1 listing \(1 shortlisted/);
     await page.click('[data-restore=yes]');
     await waitStatus(page, /^Restored 1 listing/);
     assert.equal((await marks(page))[id].s, 1, 'shortlist back');
@@ -1920,6 +1933,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-restore=no]');
     await waitStatus(page, /^Safety copy discarded/);
     await page.waitForFunction(() => new Promise((res) => { const r = indexedDB.open('rea-avail-filter/mirror', 1); r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(!g.result); r.result.close(); }; }; }));
+    // Answered: a star from the listing page's bar is copied again.
+    await page.goto(`${ORIGIN}/property-unit-nsw-bondi-${id}`); await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-lbar');
+    await page.click('#rf-lbar [data-l=s]');
+    await page.clock.runFor(2500);
+    assert.deepEqual(await copied(), [id], 'listing-bar changes are mirrored');
     console.log('safety copy: ok');
     await done(page); await ctx.close();
   });
@@ -1999,6 +2018,28 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.keyboard.press('Escape');
     assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false, "Esc outside the drawer is REA's");
     console.log('enter on buttons + esc scope: ok'); await done(page); await ctx.close(); });
+
+  // 57. Another tab writing marks (a search there records sightings) redraws this tab, but an
+  // Undo just offered here stays, with its hide reasons, and still works.
+  await block('57', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const id = await page.getAttribute('.rf-item', 'data-id');
+    await page.click(`.rf-item[data-id="${id}"] [data-act=h]`);
+    await waitStatus(page, /^Listing hidden/);
+    const other = await ctx.newPage();
+    await other.route('**/*', serve()); await other.goto(SEARCH);
+    await other.evaluate(() => { const k = 'rea-avail-filter/marks/v1', d = JSON.parse(localStorage.getItem(k)); d.m['146599999'] = { f: 1, l: 1, n: 'from the other tab' }; localStorage.setItem(k, JSON.stringify(d)); });
+    await page.waitForTimeout(300);
+    assert.match(await status(page), /^Listing hidden/, 'the Undo offer survives the redraw');
+    assert.ok(await page.$('.rf-status .rf-why'), 'hide reasons too');
+    await page.click('.rf-status .rf-undo');
+    assert.ok(!(await marks(page))[id]?.h, 'undo still works');
+    assert.equal((await marks(page))['146599999']?.n, 'from the other tab', "and keeps the other tab's change");
+    console.log('undo across tabs: ok');
+    await other.close(); await done(page); await ctx.close();
+  });
 
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
