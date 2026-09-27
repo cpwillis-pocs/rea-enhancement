@@ -1079,3 +1079,14 @@ test('views drawn in place of the list: escaped, best-per-row, route tags, map p
   assert.match(plan, /Suggested route/);
   assert.match(plan, /rf-tag rf-new">route/);
 });
+
+test('KEY_HELP: every shortcut in the ? help is handled, and the README lists it', () => {
+  const fs = require('fs'), path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../rea-availability-filter.user.js'), 'utf8');
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8').match(/^- \*\*Keyboard\*\*: (.*)$/m)[1];
+  for (const [shown, , keys] of core.KEY_HELP) {
+    for (const k of keys) assert.ok(src.includes(`case '${k}'`) || src.includes(`e.key === '${k}'`), `${JSON.stringify(k)} (${shown}) has a handler`);
+    const first = shown.split(/ \/ |, /)[0];
+    assert.ok(new RegExp(`(^|[\\s,(/])${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s,/;)]|$)`).test(readme), `README lists ${first}`);
+  }
+});

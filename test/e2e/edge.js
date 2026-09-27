@@ -493,6 +493,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await pop.close();
     await page.keyboard.press('?');
     assert.equal(await page.$eval('.rf-help', (h) => h.hidden), false);
+    assert.ok((await page.$$eval('.rf-help dt', (d) => d.map((x) => x.textContent))).includes('Alt+Shift+F'), 'help drawn from KEY_HELP');
     await page.keyboard.press('Escape');
     assert.equal(await page.$eval('.rf-help', (h) => h.hidden), true, 'Esc closes help first');
     await page.focus('.rf-list');

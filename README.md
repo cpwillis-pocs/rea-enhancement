@@ -48,7 +48,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Reviewed**: going past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed; **Not reviewed yet** (More filters) and "reviewed 34 of 150" in the status line keep your place across visits.
 - **Hidden for the price?** Give "price" as the reason and the listing comes back, tagged "$110 cheaper since you hid it", if its rent drops. Reasons can be set or changed later from a hidden listing's ⋯ menu.
 - **Inspections I can make**: keep only listings with an open home on a weekend or after 5pm.
-- **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, o or Enter open, t Results/Shortlist, m market view, f filters, d compact, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
+- **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, Shift+1–5 your rating, o or Enter open, t Results/Shortlist, m market view, v map, f filters, d compact, e expand, / keywords, ? help, Esc close; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
 ![Filters, amenity chips and active-filter chips](docs/screenshots/filters.jpg)

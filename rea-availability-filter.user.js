@@ -2969,6 +2969,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Checklist', (r) => checkSummary(r, checklistItems(cfg.checklist)), (r) => -Object.values(r.checks || {}).filter((v) => v === 'y').length, 'min'],
     ['Note', (r) => r.note || '', null],
   ];
+  // The ? help, one row per shortcut: [keys shown, what it does, e.key values the handler
+  // matches]. A unit test checks each is handled and that the README lists it.
+  const KEY_HELP = [
+    ['j / ↓, k / ↑', 'next / previous listing', ['j', 'ArrowDown', 'k', 'ArrowUp']], ['s', 'shortlist', ['s']], ['h', 'hide', ['h']],
+    ['n', 'note', ['n']], ['c', 'copy summary', ['c']], ['m', 'market view on/off', ['m']], ['v', 'map on/off', ['v']],
+    ['x', 'tick for Compare (shortlist)', ['x']], ['1–5', 'application status (shortlisted)', ['1', '5']], ['Shift+1–5', 'your rating (Shortlist tab)', []],
+    ['u', 'undo', ['u']], ['r', 'mark reviewed and move on (j also marks the one you leave)', ['r']], ['g / G, Home / End', 'first / last listing', ['g', 'G', 'Home', 'End']],
+    ['PgUp / PgDn', '5 up / down', ['PageUp', 'PageDown']], ['t', 'Results / Shortlist', ['t']], ['o / Enter', 'open listing', ['o', 'Enter']],
+    ['p / Space', 'large photo (j / k flip through)', ['p', ' ']], ['/', 'keyword filter (shortlist: search)', ['/']],
+    ['e', 'expand / shrink the drawer', ['e']], ['f', 'back to the filters', ['f']], ['d', 'compact list on/off', ['d']], ['?', 'this help', ['?']],
+    ['Esc', 'close', ['Escape']], ['Alt+Shift+F', 'open / close from anywhere on REA', []],
+  ];
   // `total`: listings on the list (to say when only some are compared); `picked`: ticked ones.
   function compareHtml(rows, cfg, { total = rows.length, picked = false } = {}) {
     const best = (score) => {
@@ -2989,7 +3001,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3621,9 +3633,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     </div>
     <div class="rf-help" id="rf-help" hidden>
       <strong>Keyboard</strong>
-      <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>v</dt><dd>map on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>Shift+1–5</dt><dd>your rating (Shortlist tab)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
-      <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
+      <dl>${KEY_HELP.map(([k, what]) => `<dt>${esc(k)}</dt><dd>${esc(what)}</dd>`).join('')}</dl>
     </div>
     <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
