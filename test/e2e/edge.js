@@ -1488,6 +1488,31 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 42. Theme: dark follows the system unless Settings says otherwise, and the launcher follows too.
+  await block('42', async () => {
+    const bg = (p, sel) => p.$eval(sel, (el) => getComputedStyle(el).backgroundColor);
+    const ctx = await browser.newContext({ colorScheme: 'dark' });
+    const page = await open(ctx);
+    await page.click('#rf-launch');
+    assert.equal(await bg(page, '#rf-panel'), 'rgb(28, 28, 32)', 'system dark');
+    await page.click('.rf-settings summary');
+    await page.selectOption('#rf-theme', 'light');
+    assert.equal(await bg(page, '#rf-panel'), 'rgb(255, 255, 255)', 'Light overrides a dark system');
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.rfTheme), 'light');
+    await page.selectOption('#rf-theme', '');
+    assert.equal(await bg(page, '#rf-panel'), 'rgb(28, 28, 32)', 'System again');
+    assert.equal(await page.evaluate(() => 'rfTheme' in document.documentElement.dataset), false);
+    await done(page); await ctx.close();
+    const light = await browser.newContext({ colorScheme: 'light' });
+    await light.addInitScript(() => localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ theme: 'dark' })));
+    const p2 = await open(light);
+    await p2.click('#rf-launch');
+    assert.equal(await bg(p2, '#rf-panel'), 'rgb(28, 28, 32)', 'Dark overrides a light system, from saved settings');
+    assert.equal(await p2.$eval('#rf-panel', (el) => getComputedStyle(el).colorScheme), 'dark');
+    console.log('theme setting: ok');
+    await done(p2); await light.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

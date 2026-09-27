@@ -1612,7 +1612,7 @@
     priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
     annotate: true, dimCards: true, compact: false, onlyStarred: false, showHidden: false,
-    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '',
+    remember: true, remindSaved: true, enquiry: '', places: '', checklist: '', wRent: '2', wTiming: '2', wDist: '2', wMovein: '2', icsAlarm: '60', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', leaseEnd: '', showGone: false, income: '', theme: '',
   };
 
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
@@ -1627,7 +1627,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm']; // Clear keeps your "from" point
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'annotate', 'dimCards', 'compact', 'remember', 'remindSaved', 'anchor', 'places', 'checklist', 'leaseEnd', 'income', 'enquiry', 'wRent', 'wTiming', 'wDist', 'wMovein', 'icsAlarm', 'theme']; // Clear keeps your "from" point
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -2379,15 +2379,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
   const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
-  // Colours are tokens on #rf-panel so the dark scheme only swaps values.
+  // Colours are tokens on #rf-panel so the dark scheme only swaps values. The Theme setting
+  // (data-rf-theme on <html>) overrides the system choice either way.
+  const RF_ROOTS = ':is(#rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast)';
+  const DARK_TOKENS = '--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;'
+    + '--rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e';
   const css = `
   #rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
     --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
     --rf-err:#c00;--rf-tag:#eee;--rf-up:#b34700;--rf-star-fg:#8a6100}
-  @media (prefers-color-scheme: dark){
-    #rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast{--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;
-      --rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e}
-  }
+  @media (prefers-color-scheme: dark){ :root:not([data-rf-theme=light]) ${RF_ROOTS}{${DARK_TOKENS}} }
+  :root[data-rf-theme=dark] ${RF_ROOTS}{${DARK_TOKENS};color-scheme:dark} :root[data-rf-theme=light] ${RF_ROOTS}{color-scheme:light}
   #rf-launch{position:fixed;right:20px;bottom:20px;z-index:2147483000;padding:11px 16px;border:0;border-radius:999px;
     background:var(--rf-accent);color:#fff;font:600 13px/1 system-ui,-apple-system,sans-serif;cursor:pointer;
     box-shadow:0 4px 16px rgba(0,0,0,.28)}
@@ -2839,6 +2841,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <label class="rf-check"><input type="checkbox" id="rf-annotate">Show badges and buttons on REA's result cards</label>
         <label class="rf-check"><input type="checkbox" id="rf-dimCards">Fade REA cards that don't match filters</label>
         <label class="rf-check" title="Small photos and the key facts only, so about twice as many listings fit on screen (d)"><input type="checkbox" id="rf-compact">Compact list</label>
+        <label>Theme<select id="rf-theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
         <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
         <label class="rf-check"><input type="checkbox" id="rf-remindSaved">Remind me to check saved searches (at most daily)</label>
         <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
@@ -3339,6 +3342,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     wireResize(panel, narrow);
     setWide(wideKey.get() === '1', false);
     panel.classList.toggle('rf-compact', !!cfg.compact);
+    applyTheme();
     const sortDir = panel.querySelector('.rf-sortdir'), sortDesc = panel.querySelector('#rf-sortDesc');
     sortDir.setAttribute('aria-pressed', String(!!cfg.sortDesc));
     sortDir.addEventListener('click', () => { sortDesc.checked = !sortDesc.checked; sortDesc.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -3397,6 +3401,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const wasRemember = cfg.remember;
       cfg = next;
       panel.classList.toggle('rf-compact', !!cfg.compact);
+      applyTheme();
       sortDir.setAttribute('aria-pressed', String(!!cfg.sortDesc));
       saveCfg(cfg);
       if (!cfg.remember || !cfg.remindSaved) document.getElementById('rf-remind')?.remove();
@@ -3999,6 +4004,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Data-format warnings sit in their own banner, so the status line keeps "N of M match".
   const warnings = {};
+  // On <html> so the launcher, notes and listing bar follow it too (a data-rf-* attribute only).
+  const applyTheme = () => {
+    const root = document.documentElement;
+    if (cfg.theme === 'light' || cfg.theme === 'dark') root.dataset.rfTheme = cfg.theme; else delete root.dataset.rfTheme;
+  };
   const setWarn = (kind, msg) => {
     if (msg) warnings[kind] = msg; else delete warnings[kind];
     const text = Object.values(warnings).join(' ');

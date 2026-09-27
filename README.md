@@ -90,7 +90,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 **Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). Spreadsheet columns include weekly rent, $/bed, move-in cost, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
 
-**Dark mode and mobile width** follow your system settings. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
+**Dark mode** follows your system, or pick Light or Dark under Settings → Theme. **Mobile width** follows the screen. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 
 <p><img src="docs/screenshots/drawer-dark.jpg" width="64%" alt="Dark mode"> <img src="docs/screenshots/mobile.jpg" width="24%" alt="Mobile width"></p>
 
