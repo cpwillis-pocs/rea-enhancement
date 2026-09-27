@@ -1765,6 +1765,32 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 52. Your rating: Shift+1-5 on the Shortlist tab, shown in Compare, and set from the
+  // listing-page bar.
+  await block('52', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const id = await page.$eval('.rf-item', (el) => el.dataset.id);
+    await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
+    await page.click('[data-view=shortlist]');
+    await page.focus(`.rf-item[data-id="${id}"]`);
+    await page.keyboard.press('Shift+Digit4');
+    await waitStatus(page, /^Rated 4 of 5/);
+    assert.equal((await marks(page))[id].rt, 4);
+    assert.equal(await page.getAttribute(`.rf-item[data-id="${id}"] [data-act=rate][data-v="4"]`, 'aria-pressed'), 'true');
+    await page.click('[data-sl=compare]');
+    assert.match(await page.textContent('.rf-list'), /My rating.*★★★★ 4\/5/s);
+    await page.click('[data-sl=compare]');
+    await page.goto(`${ORIGIN}/property-unit-nsw-bondi-${id}`); await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-lbar');
+    await page.click('#rf-lbar .rf-lbar-more summary');
+    await page.click('#rf-lbar [data-l=rt][data-v="2"]');
+    assert.equal((await marks(page))[id].rt, 2, 'rated from the listing page');
+    console.log('rating: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

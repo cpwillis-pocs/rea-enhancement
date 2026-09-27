@@ -1,6 +1,6 @@
 # rea-enhancement
 
-Tampermonkey userscript that adds what realestate.com.au rental search is missing: an **available-from** date filter, sort by availability, every results page merged into one list, extra filters, on-card availability badges, a shortlist, and CSV export.
+Tampermonkey userscript that adds what [realestate.com.au](https://www.realestate.com.au/) rental search is missing: an **available-from** date filter, sort by availability, every results page merged into one list, extra filters, on-card availability badges, a shortlist, and CSV export.
 
 REA has an `availableBefore=` ceiling but no floor, no availability sort and no cross-page view. The data is already in every results page (the SSR hydration blob, `window.ArgonautExchange`), so the script reads it and does the rest in your browser.
 
@@ -145,7 +145,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for layout, rules of thumb and the CI pip
 
 ## Disclaimer
 
-Not affiliated with, endorsed by or supported by REA Group. It reads pages you can already see, in your own browser, at human-ish speed. Use it in line with realestate.com.au's terms. Listing data belongs to REA and its agents.
+Not affiliated with, endorsed by or supported by REA Group. It reads pages you can already see, in your own browser, at human-ish speed. Use it in line with [realestate.com.au](https://www.realestate.com.au/)'s terms. Listing data belongs to REA and its agents.
 
 ## Licence
 

@@ -277,7 +277,7 @@
     return out;
   };
   const recordText = (v) => (v ? `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined` : ''}` : '');
-  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'as', 'ast', 'ck', 'rv']; // user choices a bulk action can change
+  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'as', 'ast', 'ck', 'rv', 'rt']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const PRUNE_EVERY = 20;
   const keep = (e) => e.s || e.h || e.n || e.as;
@@ -479,6 +479,7 @@
           r.priceHistory = Array.isArray(e?.ph) ? e.ph : [];
           r.note = e?.n || '';
           r.appStatus = e?.as || '';
+          r.rating = e?.rt >= 1 && e.rt <= 5 ? e.rt : 0;
           r.appAt = e?.as && e.ast ? e.ast : null;
           r.agencyHidden = !!(r.agency && ag?.[agencyKey(r.agency)]);
           r.suburbHidden = !!(r.suburb && sb?.[agencyKey(r.suburb)]);
@@ -544,6 +545,10 @@
       setOpened(id) {
         if (isListingId(id)) edit(id, (e) => { e.o = now(); });
       },
+      // Your 1-5 after an inspection; the same number again clears it.
+      setRating(id, n) {
+        return edit(id, (e) => { if (Number.isInteger(n) && n >= 1 && n <= 5 && e.rt !== n) e.rt = n; else delete e.rt; e.rv = now(); return e.rt || 0; });
+      },
       setNote(id, text) {
         const n = clip(String(text ?? '').trim(), NOTE_MAX);
         edit(id, (e) => { if (n) e.n = n; else delete e.n; e.rv = now(); });
@@ -571,7 +576,7 @@
               beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
               ...moveIn(d.bo, priceNum), agency: d.ag || '',
               starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
-              gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck),
+              gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
               // The latest inspection that has already happened (the display list drops past ones).
               lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
               inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
@@ -585,7 +590,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, nd: e.nd, li: e.li, ic: e.ic, ht: e.ht, hp: e.hp, rv: e.rv, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, nd: e.nd, li: e.li, ic: e.ic, ht: e.ht, hp: e.hp, rv: e.rv, rt: e.rt, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -607,6 +612,7 @@
           if (typeof e.x === 'number' && !(seenHere > e.x)) cur.x = e.x; // seen live here since: not gone
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
+          if (Number.isInteger(e.rt) && e.rt >= 1 && e.rt <= 5) cur.rt = e.rt;
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
           for (const k of ['nd', 'li', 'rv']) if (typeof e[k] === 'number') cur[k] = Math.max(cur[k] || 0, e[k]);
@@ -2332,7 +2338,7 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2583,7 +2589,7 @@ ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` :
 <div class="p">${esc(r.price)}</div><div class="a">${esc(r.address)}</div>
 <div class="m">${esc(factsLine(r, ' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
-${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}
+${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}${r.rating ? `<div class="m">My rating: ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</div>` : ''}
 ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
 </div></div>`).join('')}</body></html>`;
 
@@ -2946,6 +2952,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-dot-star{stroke:var(--rf-fg);stroke-width:1.5}
   .rf-dot-lo{fill:var(--rf-accent);color:var(--rf-accent)} .rf-dot-mid{fill:#6b7cb3;color:#6b7cb3} .rf-dot-hi{fill:var(--rf-up);color:var(--rf-up)} .rf-dot-na{fill:var(--rf-soft);color:var(--rf-soft)}
   .rf-map-sub{font-size:10px;fill:var(--rf-muted);paint-order:stroke;stroke:var(--rf-hover);stroke-width:3px} .rf-map-pin rect{fill:var(--rf-fg)} .rf-map-pin text,.rf-map-scale text{font-size:10px;fill:var(--rf-fg)}
+  .rf-rate button{border:0;background:none;padding:0 1px;font-size:15px;line-height:1;color:var(--rf-star-fg);cursor:pointer} .rf-rate button[aria-pressed=true]{font-weight:700}
+  #rf-lbar .rf-rate button{border:0;background:none;padding:2px;font-size:18px}
   .rf-map-far path{fill:var(--rf-fg)}
   .rf-map-scale line{stroke:var(--rf-fg);stroke-width:2}
   .rf-market-t{overflow-x:auto;max-width:100%}
@@ -3261,7 +3269,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     <div class="rf-help" id="rf-help" hidden>
       <strong>Keyboard</strong>
       <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>v</dt><dd>map on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
+      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>v</dt><dd>map on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>Shift+1–5</dt><dd>your rating (Shortlist tab)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
       <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
     </div>
     <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
@@ -3362,6 +3370,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const i = cur ? items.indexOf(cur) : -1;
     const move = (d) => { const n = items[Math.max(0, Math.min(items.length - 1, i + d))] || items[0]; n.focus(); n.scrollIntoView({ block: 'nearest' }); if (ui.peekId) ui.showPeek(n); };
     const act = (a) => (cur || items[0]).querySelector(`[data-act="${a}"]`)?.click();
+    if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { // Shift+1-5: rate a shortlisted listing
+      const it = cur || items[0], b = it?.querySelector(`[data-act=rate][data-v="${e.code.slice(5)}"]`);
+      if (!b) return false;
+      b.click();
+      return true;
+    }
     switch (e.key) {
       case 'j': case 'ArrowDown': if (cur && e.key === 'j' && ui.view !== 'shortlist') markReviewed(cur); move(i < 0 ? 0 : 1); return true;
       case 'r': { const it = cur || items[0]; markReviewed(it, !rowOf(it.dataset.id)?.reviewedAt || it.dataset.rv !== '1'); move(i < 0 ? 0 : 1); return true; }
@@ -3482,7 +3496,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       onChange({ type: 'change' });
       return setStatus(`Showing ${plural(ui.rows?.length ?? r.buildingN, 'listing')} at ${r.buildingAddr}. Remove the Building chip to go back.`);
     }
-    const b = e.target.closest('.rf-acts button');
+    const b = e.target.closest('.rf-acts button, .rf-rate button');
     if (!b) return;
     const id = b.closest('.rf-item')?.dataset.id;
     if (!id) return;
@@ -3507,6 +3521,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
     if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
     if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
+    if (b.dataset.act === 'rate') {
+      const n = marks.setRating(id, +b.dataset.v);
+      refreshMarks();
+      itemEl(id, `[data-act=rate][data-v="${b.dataset.v}"]`)?.focus();
+      return setStatus(n ? `Rated ${n} of 5.` : 'Rating cleared.');
+    }
     if (b.dataset.act === 'case') {
       const r = rowOf(id);
       if (r) copyText(testCaseText(r)).then((ok) => setStatus(ok ? 'Tag phrases copied as test cases (the tables in test/amenities.test.js): paste them into an issue or a fix.' : 'Clipboard blocked.', !ok));
@@ -4606,6 +4626,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
     ['Places', (r) => placesLabel(r), (r) => worstKm(r) ?? Infinity, 'min'],
     ['Of income', (r) => (incomePct(r, cfg.income) != null ? `${incomePct(r, cfg.income)}%` : ''), (r) => incomePct(r, cfg.income) ?? Infinity, 'min'],
+    ['My rating', (r) => (r.rating ? `${'★'.repeat(r.rating)} ${r.rating}/5` : ''), (r) => -(r.rating || 0), 'min'],
     ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
@@ -4727,6 +4748,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         const v = r.checks?.[k];
         return checkBtn(k, v, 'class="rf-chip"');
       }).join('')}</div>` : ''}
+      ${r.starred && sl ? `<div class="rf-app">${ratingHtml(r, 'data-act="rate"')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
@@ -5186,7 +5208,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const v = r.checks?.[k];
       return checkBtn(k, v, 'data-l="ck"');
     }).join('');
-    return `<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist and details</summary>
+    return `<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
+      <div class="rf-lbar-checks">${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
   }
   function onListingBar(e) {
@@ -5197,6 +5220,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (k === 'min') lbarMin.set(!lbarMin.get());
     else if (k === 's' || k === 'h') marks.toggle(id, k, r);
     else if (k === 'as') marks.setStatus(id, el.value);
+    else if (k === 'rt') {
+      marks.setRating(id, +el.dataset.v);
+      renderListingBar();
+      return bar.querySelector(`[data-l="rt"][data-v="${el.dataset.v}"]`)?.focus();
+    }
     else if (k === 'ck') {
       marks.cycleCheck(id, el.dataset.ck);
       renderListingBar();
@@ -5213,6 +5241,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
+  // Your 1-5 rating: five buttons, the current one pressed; pressing it again clears it.
+  const ratingHtml = (r, attr) => `<span class="rf-rate" role="group" aria-label="My rating">${[1, 2, 3, 4, 5].map((n) =>
+    `<button type="button" ${attr} data-v="${n}" aria-pressed="${r.rating === n}" aria-label="Rate ${n} of 5" title="Rate ${n} of 5 (Shift+${n})">${n <= (r.rating || 0) ? '★' : '☆'}</button>`).join('')}</span>`;
   // One checklist item: unknown -> ✓ good -> ✗ problem.
   const checkBtn = (k, v, attrs) => `<button type="button" ${attrs} data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
   const hideWord = (r) => (r.resurfaced ? 'Hide again' : r.hidden ? 'Unhide' : 'Hide');

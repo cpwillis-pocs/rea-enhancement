@@ -650,3 +650,19 @@ test('shortlist keeps the floor size, so Compare and exports have it', () => {
   assert.equal(s.sqm, 82);
   assert.equal(s.sqmFromText, true);
 });
+
+test('rating: 1-5 on a listing, the same number again clears it, and it survives backup and restore', () => {
+  const m = core.marksStore(mem());
+  assert.equal(m.setRating('146500010', 4), 4);
+  assert.equal(m.setRating('146500010', 4), 0, 'same again clears');
+  m.setRating('146500010', 2);
+  m.toggle('146500010', 's', core.toRow(listing({ id: '146500010' }), false));
+  assert.equal(m.shortlist()[0].rating, 2);
+  const back = core.marksStore(mem());
+  back.importJson(m.exportData());
+  assert.equal(back.shortlist()[0].rating, 2);
+  const bad = core.marksStore(mem());
+  bad.importJson({ app: 'rea-enhancement', kind: 'marks', m: { 146500011: { s: 1, rt: 9, d: { u: 'https://www.realestate.com.au/property-x-146500011' } } } });
+  assert.equal(bad.shortlist()[0].rating, 0, 'out of range is dropped');
+  assert.ok(core.toCsv([{ ...m.shortlist()[0], rating: 2 }]).split(/\r?\n/)[0].includes('my_rating'));
+});
