@@ -1,0 +1,86 @@
+{
+ "note": "Synthetic baseline: the shape of the e2e fixture listing, as reaFilter.shape() prints it. Real shapes from issues or `npm run live` go alongside it.",
+ "expect": {
+  "fill": [
+   "availability",
+   "price",
+   "inspections",
+   "coordinates",
+   "agency",
+   "photos"
+  ],
+  "row": {
+   "available": "Available now",
+   "priceNum": 550,
+   "type": "Apartment",
+   "floorplan": true, "photos": 4
+  }
+ },
+ "script": "2.25.0",
+ "resultsPath": "resi-property_listing-experience-web.urqlClientCache",
+ "listing": {
+  "_links": {
+   "canonical": {
+    "href": "url"
+   }
+  },
+  "address": {
+   "display": {
+    "fullAddress": "string(33)"
+   },
+   "location": {
+    "latitude": "number",
+    "longitude": "number"
+   },
+   "suburb": "string(5)"
+  },
+  "availableDate": {
+   "display": "Available now"
+  },
+  "bond": {
+   "display": "$2200"
+  },
+  "description": "string(65)",
+  "generalFeatures": {
+   "bathrooms": {
+    "value": "number"
+   },
+   "bedrooms": {
+    "value": "number"
+   },
+   "parkingSpaces": {
+    "value": "number"
+   }
+  },
+  "id": "string(9)",
+  "inspections": [
+   {
+    "startTime": "iso-date"
+   },
+   "(1 items)"
+  ],
+  "listingCompany": {
+   "name": "string(12)"
+  },
+  "media": {
+   "floorplans": [
+    "number",
+    "(1 items)"
+   ],
+   "images": [
+    "number",
+    "(4 items)"
+   ],
+   "mainImage": {
+    "templatedUrl": "url"
+   }
+  },
+  "price": {
+   "display": "$550 per week"
+  },
+  "propertyType": {
+   "display": "Apartment"
+  },
+  "title": "string(34)"
+ }
+}

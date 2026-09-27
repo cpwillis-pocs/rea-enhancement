@@ -67,6 +67,12 @@ Put new logic above the guard where you can, and give it a unit test.
 
 If a search fails or fields go blank, open an issue with the "REA data format changed" template and paste `reaFilter.selfcheck()` and `reaFilter.probe()` output from the DevTools console. That shows which paths still exist and which fields usually fill.
 
+### Shapes as regression tests
+
+`test/shapes/*.json` holds `reaFilter.shape()` output: the structure of one real listing with its words taken out. `test/shapes.test.js` rebuilds a listing from each (`listingFromShape()` in `test/helpers.js` fills in plausible values) and checks it still parses: an id and link, the fields in `expect.fill` read (names from `fillRates`: availability, price, inspections, coordinates, agency, features, listed, photos), and any values in `expect.row`.
+
+When a drift report comes in, save its `shape()` output as `test/shapes/<date>-<what>.json`, add an `expect` block for what should be read, watch the test fail, then fix the parser. `npm run live` saves a fresh shape from a real search too.
+
 ## Issues and labels
 
 Blank issues are off; the templates are **Bug** (`bug`), **REA data format changed** (`rea-drift`) and **Idea** (`idea`). Security problems go through private vulnerability reporting ([SECURITY.md](SECURITY.md)), not issues. What the script stores and shares is in [PRIVACY.md](PRIVACY.md); keep it true when you add a storage key or an export.
