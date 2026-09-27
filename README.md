@@ -33,10 +33,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Same building**: see other units in the building, spot the same place listed twice, or keep one listing per building.
 - **Rent vs median** for the same bed count in your results (eg "12% below 2-bed median"); when a search spans several suburbs, each listing is compared with its own suburb ("at median for Maroubra 2-bed").
 - **Taken listings**: "Deposit taken", "Under application" or "Leased" in the listing text is tagged in the drawer and on REA's cards; **Hide listings already taken** filters them out.
-- **Market view**: rent spread per bed count and a week-by-week availability chart for what you're looking at; click a week to filter to it.
+- **Market view**: rent spread per bed count, per-agency patterns (rent drops, relists, taken-but-listed, days listed; counts, not ratings) and a week-by-week availability chart for what you're looking at; click a week to filter to it.
 - **Map view** (v): the listings shown on a simple map (no map tiles), coloured by rent vs the median, with your places as pins; click a dot to jump to the listing.
 - **Why this tag?** Hover an amenity or heads-up tag for the sentence it was read from; with a keyword filter, each listing says where it matched.
-- **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval, lease-break terms, a required professional clean, rent payment fees and garden/pool upkeep, picked out of the listing text; **Hide if mentioned** filters them out.
+- **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval, lease-break terms, a required professional clean, rent payment fees, garden/pool upkeep, and noise (a busy road, shops or a bar below, a rail line, a flight path, construction nearby, when said of the home itself), picked out of the listing text; **Hide if mentioned** filters them out.
 - **Household income** (optional): rent as a share of income, flagged over 30%.
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.
 - **Presets**: save filter sets by name, or one per search that applies automatically when you come back.
@@ -93,7 +93,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 
 ![Map view](docs/screenshots/map.jpg)
 
-**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). The whole-list export also adds all-day reminders to follow up applications with no answer, for application deadlines, and for your own lease end. Spreadsheet columns include weekly rent, $/bed, move-in cost, cash to move (move-in plus any lease overlap), apply-by date, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
+**Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). The whole-list export also adds all-day reminders to follow up applications with no answer, for application deadlines, for your own lease end, and for the last day to give notice (enter your notice period in Settings; it depends on your state and lease). Spreadsheet columns include weekly rent, $/bed, move-in cost, cash to move (move-in plus any lease overlap), apply-by date, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
 
 **Dark mode** follows your system, or pick Light or Dark under Settings → Theme. **Mobile width** follows the screen. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 

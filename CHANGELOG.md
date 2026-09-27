@@ -2,6 +2,15 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.31.0
+
+- **Noise heads-ups**: busy road, above shops or a bar, next to a rail line, under a flight path, construction nearby. Only when the text says it of the home ("on a busy road", "above a popular bar"), not of what's near it ("close to Parramatta Rd shops", "walk to the station"). Each can be hidden under More filters like the other heads-ups.
+- **Market view by agency**: for agencies with 2+ of the listings shown, how many dropped their rent, were relisted or say they're taken while still up, and the median days listed. Counts from these listings, labelled as not a rating.
+- **Notice to vacate**: enter the notice your lease and state need (Settings → Notice I must give) and the calendar export adds a "Give notice" reminder before your lease end. You set the days; the script doesn't assume a state's rules.
+- **Preset names** are typed in a field next to the menu (Enter saves, Esc cancels) instead of a browser prompt. No browser prompts are left.
+- Settings are drawn from one spec that also sets their defaults, what a backup carries and which values are accepted: a hand-edited file or backup with an unknown theme, an out-of-range number or over-long text no longer gets through.
+- The restore preview lists settings in the order they appear in Settings.
+
 ## 2.30.0
 
 - **Applications close**: a deadline in the listing text ("Applications close Fri 3 Oct", "closing date for applications: 3/10") shows as "Apply by …"; within 3 days of it, a shortlisted listing you haven't applied for goes under Needs action with Mark applied. It's in CSV (`apply_by`), Compare and the calendar.

@@ -22,7 +22,7 @@ The script is folded into `// #region` blocks (VS Code and most editors fold the
 3. **extraction**: reading REA's page data, format-change vs bot-check, listing pages.
 4. **text heuristics**: amenities, heads-up, availability, apply-by, lease terms, size, taken.
 5. **rows**: `toRow()`, one row per listing.
-6. **filters and sorts**: `DEFAULT_CFG`, `sanitizeCfg`, sorts, inspection times, filters, chips, medians, scores, lease fit.
+6. **filters and sorts**: `SETTINGS` (the Settings section's spec: markup, defaults, backup, value checks), `DEFAULT_CFG`, `sanitizeCfg`, sorts, inspection times, filters, chips, medians, scores, lease fit.
 7. **exports**: CSV/TSV columns, calendar (ICS) with reminders.
 8. **share links**: shortlist in a URL fragment, re-validated on the way in.
 9. **health**: fill-rate canary for REA drift.
@@ -127,7 +127,7 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 
 ## Tests at a glance
 
-- **Unit:** `test/*.test.js` (211 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
+- **Unit:** `test/*.test.js` (214 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
 - **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (74 blocks, numbered 1–60 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Shapes:** `test/shapes.test.js` rebuilds a listing from each `test/shapes/*.json` (`reaFilter.shape()` output) and checks it still parses.
