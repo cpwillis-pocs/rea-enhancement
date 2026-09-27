@@ -22,7 +22,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
 - Weekly rent min/max (monthly and annual rents converted to weekly), max move-in cost, min beds/baths/cars, property type (pick several, eg Apartment and Unit), photo required, inspection on a given day, listed over 3 weeks ago.
 - Keywords over headline, description, address and features: `pool|balcony -studio "north facing"` (`a|b` is either; accents are ignored).
-- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking, solar, NBN fibre, EV charging, step-free. Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
+- **Amenities**: pets, furnished, air con, dishwasher, own laundry, outdoor space, built-in robes, pool, study, ensuite, heating, gas cooking, lift, secure parking, solar, NBN fibre, EV charging, step-free, water efficient. Tags carry detail where the text gives it: "Pets welcome" vs "Pets on application", "Heating: ducted". Click a chip to require it, again to exclude it. Read from REA's feature list and the description ("no pets" counts as no); unknown never counts as yes.
 - **Other places**: up to 3 named points (work, school, partner) with km to each and a "Nearest to all places" sort.
 - **Distance** from any point: paste coordinates or a Google Maps link (right-click a spot, copy the numbers). Shows km on every listing, filters by max km, sorts nearest first. Straight-line distance, no lookups.
 - **Hide an agency** you've ruled out (undo, or unhide later); photo count and "Has a floorplan" filter.
@@ -41,6 +41,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Bulk actions** (shortlist or hide everything shown, set a status across the shortlist) with Undo.
 - **Expand** (⤢ in the drawer's header, or e): near full screen, with the filters in a left column and results in a grid of cards; remembered until you shrink it again. Or drag the drawer's left edge to any width (two results per row from 760px).
 - **Compact list** (Settings, or d): small photos and the key facts, about twice as many listings on screen.
+- **Back where you were**: reload the page or come back to the search and the drawer opens on the listing you were on (same filters and sort).
 - **Photo peek**: p or Space (or hover a thumbnail) shows a large photo; j/k flip through listings with it open.
 - **Reviewed**: going past a listing with j, pressing r, or shortlisting, hiding or noting it marks it reviewed; **Not reviewed yet** (More filters) and "reviewed 34 of 150" in the status line keep your place across visits.
 - **Hidden for the price?** Give "price" as the reason and the listing comes back, tagged "$110 cheaper since you hid it", if its rent drops. Reasons can be set or changed later from a hidden listing's ⋯ menu.
@@ -99,7 +100,8 @@ REA's data format is undocumented and changes. The script tries several likely f
 ```js
 reaFilter.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue
 reaFilter.probe()     // every field path the script reads, and whether it exists (plus discovered paths)
-reaFilter.raw()       // one raw listing object
+reaFilter.shape()     // one listing's structure with names, addresses and descriptions taken out - safe to paste
+reaFilter.raw()       // one raw listing object (includes the listing's text)
 ```
 
 Then [open an issue](../../issues/new?template=rea-format-changed.md) with the output.

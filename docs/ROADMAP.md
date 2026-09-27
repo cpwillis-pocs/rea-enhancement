@@ -2,20 +2,20 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.22.0)
+## Where it stands (v2.23.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
 | Area | What exists |
 |---|---|
 | **Finding** | Crawl every page of a search (one page at a time, capped, resumable after a failure). Filters: dates, rent, move-in cost, beds/baths/cars, several property types, 18 amenities, heads-up clauses, lease length, taken listings, inspection day or "inspections I can make", distance to up to 3 places, building. Keywords with OR and accent folding. 11 sorts, each reversible. |
-| **Judging** | Rent vs the median in the listing's own suburb, best-match score with adjustable weights, move-in cost and bond flag, lease overlap or gap against your current lease, share of income, price and date change history, relists, twin listings, market view. |
+| **Judging** | Amenity detail (pets welcome vs on application, heating type, water efficient), rent vs the median in the listing's own suburb, best-match score with adjustable weights, move-in cost and bond flag, lease overlap or gap against your current lease, share of income, price and date change history, relists, twin listings, market view. |
 | **Deciding** | Shortlist across searches with notes, checklist, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text. |
 | **Inspecting** | Inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders, after-inspection prompts, cancelled-inspection notices. |
 | **Returning** | Remembered and pinned searches with new / gone listings, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
-| **Using it** | Side drawer that scrolls as one page (resizable, compact mode) or expanded near full screen. Full keyboard control, dark mode, phone layout, screen-reader labels, badges and quick actions on REA's own cards, a bar on listing pages. |
-| **Keeping it working** | Several fallback field paths, discovery by shape, drift warnings, `reaFilter.selfcheck()` / `probe()`, storage-full warning, a one-time what's-new note after updates. |
-| **Project** | 163 unit tests, 49 e2e scenario blocks plus a smoke flow, 98%+ UI line coverage, a lint for privacy and storage rules, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload) or expanded near full screen. Full keyboard control, dark mode, phone layout, screen-reader labels, badges and quick actions on REA's own cards, a bar on listing pages. |
+| **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>`, drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a one-time what's-new note after updates. |
+| **Project** | 165 unit tests, 51 e2e scenario blocks plus a smoke flow (`E2E_JOBS=4` runs the edge suite in about half the time), 98%+ UI line coverage, a lint for privacy and storage rules, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -46,14 +46,12 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 
 ## Ideas not built yet
 
-Candidates from the audits, roughly in value order. None needs new permissions or non-REA network access.
+All six ideas from the previous list were built in 2.23.0: keep my place across reloads, cards without `<article>`, `reaFilter.shape()`, the `build()` split (941 → 713 lines: `panelHtml()`, `wireResize()`, `wirePeek()`), parallel e2e (`E2E_JOBS`), and finer text understanding. Smaller follow-ups that remain, none needing new permissions or non-REA network access:
 
-1. **Keep my place across reloads.** Tab switches keep your scroll position now. Restoring the focused listing after a reload or after returning to the search would need a sessionStorage key per search and filters.
-2. **Find REA's cards when they stop being `<article>` elements.** Climb from each `a[href*="/property-"]` to its card, switch the CSS to `[data-rf-id]`, and report card matching in `selfcheck()`.
-3. **`reaFilter.shape()`.** A redacted listing structure (keys and types only) so people can report format changes without pasting agent text, and maintainers can turn it into a fixture.
-4. **Split `build()`.** It is about 750 lines. The panel template could move out as a pure `panelHtml()` without risk; wiring (filters, list, shortlist bar) could follow.
-5. **Parallel e2e locally** (`E2E_JOBS=n`). The edge suite takes about 30 s, so this matters little today.
-6. **More text understanding.** Heating type, water efficiency, and "pets on application" vs "pets welcome" nuance. Each needs a `FEAT_V` bump (append-only lists).
+1. **Warn when no cards are recognised.** `selfcheck()` reports `cards: 0 found (none)`, but there is no banner. It needs care: on a slow page the cards arrive after the script starts.
+2. **Keep my place in the Shortlist tab across reloads.** Results remember the listing you were on; the Shortlist tab only keeps its place while the page is open.
+3. **Split `build()` further.** Keyboard handling and the list's click delegation share closure state (`fields`, `read`/`write`, `onChange`, the press deferral), so they need explicit parameters to move out.
+4. **Use `E2E_JOBS` in CI.** It would shorten the e2e job, but local runs are the proving ground for now. CI keeps one block at a time for easier failure reading.
 
 When you build one, move it into the CHANGELOG, update this page, and add its e2e block number to [ARCHITECTURE.md](ARCHITECTURE.md#tests-at-a-glance).
 

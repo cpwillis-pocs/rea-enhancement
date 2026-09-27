@@ -2,6 +2,14 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.23.0
+
+- **Back where you were**: reloading the page or coming back to a search opens the drawer on the listing you were on, as long as the filters and sort are the same (a different list starts at the top).
+- **Clearer amenity tags**: "Pets welcome" vs "Pets on application", "Heating: ducted, gas" and so on, when the listing text says. New amenity **Water efficient** (in NSW and VIC, tenants can only be charged for water usage when the home meets water-efficiency standards).
+- **Still works if REA's result cards stop being `<article>` elements**: each card is found from its listing link, so badges, card buttons and fading keep working. `reaFilter.selfcheck()` says how cards were found.
+- **`reaFilter.shape()`**: copies one listing's structure with names, addresses and descriptions taken out, safe to paste into a "REA data format changed" issue.
+- Internals: the drawer's markup, resize and photo-peek wiring moved out of `build()` (941 → 713 lines); `E2E_JOBS=4` (`npm run e2e:fast`) runs the browser tests in parallel locally.
+
 ## 2.22.0
 
 - **Compact list** (Settings, or d): small photos and the key facts only, so about twice as many listings fit on screen; a listing's buttons appear when you point at it or move to it.
