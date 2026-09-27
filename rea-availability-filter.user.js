@@ -330,6 +330,8 @@
     };
     const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
+    // Read-modify-write of one listing's entry: fn(entry, all marks) returns what the setter returns.
+    const edit = (id, fn) => { const { m } = fresh(); const out = fn(entry(m, id), m); save(); return out; };
     const bag = (d, f) => (d[f] = isObj(d[f]) ? d[f] : {});
     const setAs = (e, status) => { if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } };
     // Hidden agencies (ag) and suburbs (sb): name -> shown name, keyed case/space-insensitively.
@@ -450,69 +452,51 @@
       },
       // `row` lets a newly shortlisted listing carry its summary for the cross-search view.
       toggle(id, k, row) {
-        const { m } = fresh();
-        const e = entry(m, id);
-        // Hide flips what you see, including a hide inherited from the listing this one relists.
-        if (k === 'h' && resurfacedEntry(e)) stampHide(e, now()); // Hide again, from any button
-        else if (k === 'h') { e.h = hiddenOf(e, e.rl ? m[e.rl] : null) ? 0 : 1; stampHide(e, now()); }
-        else e[k] = e[k] ? 0 : 1;
-        e.rv = now(); // deciding on it counts as having reviewed it
-        if (k === 's') {
-          if (e.s) { e.st = now(); delete e.ic; if (row) e.d = summary(row); } else { delete e.st; }
-        }
-        save();
-        return !!e[k];
+        return edit(id, (e, m) => {
+          // Hide flips what you see, including a hide inherited from the listing this one relists.
+          if (k === 'h' && resurfacedEntry(e)) stampHide(e, now()); // Hide again, from any button
+          else if (k === 'h') { e.h = hiddenOf(e, e.rl ? m[e.rl] : null) ? 0 : 1; stampHide(e, now()); }
+          else e[k] = e[k] ? 0 : 1;
+          e.rv = now(); // deciding on it counts as having reviewed it
+          if (k === 's') {
+            if (e.s) { e.st = now(); delete e.ic; if (row) e.d = summary(row); } else { delete e.st; }
+          }
+          return !!e[k];
+        });
       },
       note: (id) => load().m[id]?.n || '',
       setStatus(id, status) {
-        if (!APP_STATUSES.includes(status)) return;
-        const { m } = fresh();
-        const e = entry(m, id);
-        setAs(e, status);
-        save();
+        if (APP_STATUSES.includes(status)) edit(id, (e) => setAs(e, status));
       },
       // Re-check outcome: gone (REA took it down) or seen again (clears gone).
       setGone(id, gone) {
-        const { m } = fresh();
-        const e = entry(m, id);
-        if (gone) e.x = now(); else delete e.x;
-        save();
+        edit(id, (e) => { if (gone) e.x = now(); else delete e.x; });
       },
       // Cycle one checklist item: unknown -> yes -> no -> unknown.
       cycleCheck(id, label) {
-        const { m } = fresh();
-        const e = entry(m, id), k = clip(String(label || ''), 30);
+        const k = clip(String(label || ''), 30);
         if (!k) return '';
-        const ck = cleanChecks(e.ck), next = !ck[k] ? 'y' : ck[k] === 'y' ? 'n' : '';
-        if (next) ck[k] = next; else delete ck[k];
-        if (Object.keys(ck).length) e.ck = ck; else delete e.ck;
-        save();
-        return next;
+        return edit(id, (e) => {
+          const ck = cleanChecks(e.ck), next = !ck[k] ? 'y' : ck[k] === 'y' ? 'n' : '';
+          if (next) ck[k] = next; else delete ck[k];
+          if (Object.keys(ck).length) e.ck = ck; else delete e.ck;
+          return next;
+        });
       },
       // "Didn't go" on the after-inspection prompt: don't ask again for inspections up to now.
-      answerInspect(id) { const { m } = fresh(); entry(m, id).nd = now(); save(); },
+      answerInspect(id) { edit(id, (e) => { e.nd = now(); }); },
       // Still not interested at the new price: hidden again from here.
-      rehide(id) { const { m } = fresh(); const e = entry(m, id); e.h = 1; stampHide(e, now()); save(); },
+      rehide(id) { edit(id, (e) => { e.h = 1; stampHide(e, now()); }); },
       setHideReason(id, reason) {
-        const { m } = fresh();
-        const e = entry(m, id);
-        if (HIDE_REASONS.includes(reason)) e.hr = reason; else delete e.hr;
-        save();
+        edit(id, (e) => { if (HIDE_REASONS.includes(reason)) e.hr = reason; else delete e.hr; });
       },
       // You opened the listing (from the drawer, a card or its page): "opened 2d ago", Not-opened filter.
       setOpened(id) {
-        if (!isListingId(id)) return;
-        const { m } = fresh();
-        entry(m, id).o = now();
-        save();
+        if (isListingId(id)) edit(id, (e) => { e.o = now(); });
       },
       setNote(id, text) {
-        const { m } = fresh();
-        const e = entry(m, id);
         const n = clip(String(text ?? '').trim(), NOTE_MAX);
-        if (n) e.n = n; else delete e.n;
-        e.rv = now();
-        save();
+        edit(id, (e) => { if (n) e.n = n; else delete e.n; e.rv = now(); });
       },
       // Triage progress that survives visits (unlike "new since last visit"): looked at and moved on.
       setReviewed(ids, on = true) {
@@ -717,6 +701,9 @@
     get() { try { return storage.getItem(key); } catch { return null; } },
     set(v) { try { storage.setItem(key, v); } catch { /* quota/blocked */ } },
     clear() { try { storage.removeItem(key); } catch { /* blocked */ } },
+    // Parsed value, or null when missing or corrupt; callers still check its shape.
+    getJson() { try { return JSON.parse(this.get()); } catch { return null; } },
+    setJson(v) { this.set(JSON.stringify(v)); },
   });
   const toolKeys = (storage) => {
     const out = [];
@@ -2677,14 +2664,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-warn-x{border:0;background:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;min-width:24px;min-height:24px}
   .rf-group,.rf-nudge{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px}
   .rf-nudge{padding:6px 8px;border-radius:6px;background:var(--rf-hover)}
-  @media (max-width:480px){ .rf-group,.rf-nudge{margin-left:9px} }
   .rf-checks{display:flex;flex-wrap:wrap;gap:4px;margin:6px 9px 0 124px}
   .rf-checks .rf-chip{font-size:11px;padding:2px 7px}
   .rf-checks .rf-chip[data-state=no]{text-decoration:none;background:transparent;color:var(--rf-err);border-color:var(--rf-err)}
-  @media (max-width:480px){ .rf-checks{margin-left:9px} }
   .rf-weights{border:1px solid var(--rf-line);border-radius:8px;padding:6px 10px;margin:6px 0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
   .rf-weights legend{font-size:12px;color:var(--rf-muted);padding:0 4px}
-  @media (max-width:480px){ .rf-weights{grid-template-columns:repeat(2,minmax(0,1fr))} }
   .rf-menu{position:relative}
   .rf-menu>summary{list-style:none;cursor:pointer}
   .rf-menu>summary::-webkit-details-marker{display:none}
@@ -2781,7 +2765,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
     .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:48vh}
     .rf-actions{flex-wrap:wrap} .rf-actions .rf-bulk{flex:1 1 100%}
-    .rf-acts,.rf-note,.rf-note-edit,.rf-app{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
+    .rf-acts,.rf-note,.rf-note-edit,.rf-app,.rf-group,.rf-nudge,.rf-checks{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
+    .rf-weights{grid-template-columns:repeat(2,minmax(0,1fr))}
     .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px}
     .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1 1 100%}
     .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} .rf-expand,.rf-resize{display:none} }
@@ -3204,6 +3189,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   function wireList(panel, { write, onChange }) {
   ui.list.addEventListener('click', (e) => {
     if (e.target.closest('.rf-more-btn')) return renderMore();
+    const week = e.target.closest('[data-week]'); // market view and the inspection planner live in the list too
+    if (week) return ui.pickWeek?.(week);
+    const plan = e.target.closest('[data-plan-ics]');
+    if (plan) return ui.planIcs?.(plan);
     const ck = e.target.closest('[data-ck]');
     if (ck) {
       const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
@@ -3672,9 +3661,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ui.market.setAttribute('aria-pressed', String(ui.marketOn));
       showResults();
     });
-    ui.list.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-week]');
-      if (!b || !ui.rows) return;
+    ui.pickWeek = (b) => {
+      if (!ui.rows) return;
       const w = marketStats(ui.rows).byWeek[+b.dataset.week];
       const later = new Date(); later.setDate(later.getDate() + 1 + MARKET_WEEKS * 7);
       const range = w.label === 'Now' ? { from: '', to: ymdLocal(new Date()) } : w.label === 'Later' ? { from: ymdLocal(later), to: '' } : { from: w.from, to: w.to };
@@ -3686,7 +3674,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       applyCfg(next);
       showResults(); // also when the dates didn't change (same week again)
       (ui.list.querySelector('.rf-item') || ui.market).focus();
-    });
+    };
     ui.active.addEventListener('click', (e) => {
       const b = e.target.closest('[data-chip]');
       const chip = b && ui.activeChips?.[+b.dataset.chip];
@@ -3740,9 +3728,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       shareIn.hidden = true;
       ui.pendingShare = null;
     });
-    ui.list.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-plan-ics]');
-      if (!btn || !ui.planDay) return;
+    ui.planIcs = (btn) => {
+      if (!ui.planDay) return;
       const day = ui.planDay;
       let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day) }));
       if (btn.dataset.planIcs === 'route') { // just the suggested sessions
@@ -3750,7 +3737,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         rows = rows.map((r) => ({ ...r, inspections: r.inspections.filter((i) => picked.some((x) => x.r.id === r.id && x.at === i.at)) })).filter((r) => r.inspections.length);
       }
       downloadIcs(rows);
-    });
+    };
     // The More menu closes once an item is chosen (or on a click elsewhere).
     const slMenu = ui.slBar.querySelector('.rf-menu');
     slMenu.addEventListener('click', (e) => { if (e.target.closest('.rf-menu-list button')) slMenu.open = false; });
@@ -4403,8 +4390,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const PRESET_PREV_KEY = `${TOOL_PREFIX}preset-prev/v1`;
   const prevKey = keyStore(storageOr('localStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
   const prevStore = {
-    get() { try { const v = JSON.parse(prevKey.get()); return isObj(v) ? sanitizeCfg(v) : null; } catch { return null; } },
-    set: (v) => prevKey.set(JSON.stringify(v)),
+    get() { const v = prevKey.getJson(); return isObj(v) ? sanitizeCfg(v) : null; },
+    set: (v) => prevKey.setJson(v),
     clear: () => prevKey.clear(),
   };
   function enterSearchPresets(key) {
@@ -4510,7 +4497,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const SL_PLACE = 'shortlist';
   const placeFor = (view = ui.view) => (view === 'shortlist' ? JSON.stringify([ui.slFilter?.value, ui.slQuery?.value]) : JSON.stringify(PRESET_KEYS.map((k) => cfg[k])));
   const placeSlot = (view = ui.view) => (view === 'shortlist' ? SL_PLACE : cacheKey);
-  const readPlaces = () => { try { const p = JSON.parse(placeKey.get() || '{}'); return isObj(p) ? p : {}; } catch { return {}; } };
+  const readPlaces = () => { const p = placeKey.getJson(); return isObj(p) ? p : {}; };
   let placeTimer = null;
   function notePlace() {
     clearTimeout(placeTimer);
@@ -4525,7 +4512,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (!at || items.indexOf(at) === 0) delete places[slot];
       else places[slot] = { id: at.dataset.id, shown: items.length, sig: placeFor(), t: Date.now() };
       const keep = Object.entries(places).sort(([, a], [, b]) => b.t - a.t).slice(0, PLACE_MAX);
-      placeKey.set(JSON.stringify(Object.fromEntries(keep)));
+      placeKey.setJson(Object.fromEntries(keep));
     }, 400);
   }
   let pendingPlace = null;
