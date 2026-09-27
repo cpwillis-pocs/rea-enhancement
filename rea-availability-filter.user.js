@@ -1256,12 +1256,14 @@
   ];
   // "X: No" per amenity, built once.
   for (const a of AMENITIES) a.kvNo = new RegExp(`(?:${a.pos.source})${AMEN_NO}`);
+  const KV_NO_GATE = /[:?\-]\s*n/;
   // Only what the listing says about itself (features, headline, description), never the
   // address or property type ("North Terrace", type "Terrace" are not outdoor space).
   const amenitiesOf = (row) => {
     const text = `${(row.features || []).join(' | ')} | ${row.amenText ?? row.text ?? ''}`.toLowerCase();
+    const kv = KV_NO_GATE.test(text); // every kvNo needs this, and most listings have none
     return Object.fromEntries(AMENITIES.map((a) => [a.id, a.gate && !text.includes(a.gate) ? null
-      : a.neg.test(text) ? 'no' : !a.pos.test(text) ? null : a.kvNo.test(text) ? 'no' : 'yes'])); // kvNo only matches where pos does
+      : a.neg.test(text) ? 'no' : !a.pos.test(text) ? null : kv && a.kvNo.test(text) ? 'no' : 'yes'])); // kvNo only matches where pos does
   };
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
@@ -2035,8 +2037,9 @@
   const icsFold = (line) => {
     const out = [];
     let cur = '', bytes = 0;
+    if (line.length <= 75 && /^[\x00-\x7f]*$/.test(line)) return line; // ASCII: one octet a character
     for (const ch of line) {
-      const b = new TextEncoder().encode(ch).length;
+      const c = ch.codePointAt(0), b = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
       if (bytes + b > 75) { out.push(cur); cur = ' '; bytes = 1; }
       cur += ch; bytes += b;
     }
@@ -3857,10 +3860,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.bulkRows = slots ? [...new Set(slots.map((x) => x.r))] : cmp || null;
     labelBulk(ui.slBulk, (ui.bulkRows || rows).length);
     const total = marks.counts().starred;
-    ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
-      : slots ? planHtml(slots, ui.planDay)
-      : cmp ? compareHtml(cmp)
-      : listHtml(rows);
+    if (rows.length && !slots && !cmp) paintList(rows);
+    else ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
+      : slots ? planHtml(slots, ui.planDay) : compareHtml(cmp);
     setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
   }
 
@@ -4038,7 +4040,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    ui.list.innerHTML = ui.marketOn ? marketHtml(marketStats(rows)) : listHtml(rows);
+    if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows)); else paintList(rows);
     toListTop();
   }
 
@@ -4123,11 +4125,37 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
   const moreHtml = (left) => (left > 0 ? `<button class="rf-btn sec rf-more-btn">Show ${Math.min(left, RENDER_CHUNK)} more (${left} left)</button>` : '');
   // First chunk (or as many as were showing, on a re-render) plus the "Show more" button.
-  const listHtml = (rows) => { const n = Math.max(RENDER_CHUNK, ui.keepShown || 0); return itemsHtml(rows.slice(0, n), 0, rows.length) + moreHtml(rows.length - n); };
+  // Same listings in the same order as on screen (a shortlist/hide/note/status click, most
+  // re-renders): only the items whose markup changed are swapped, so the rest keep their nodes
+  // (and focus). Anything else, or most items changed, is one innerHTML.
+  const paintList = (rows) => {
+    const n = Math.max(RENDER_CHUNK, ui.keepShown || 0), parts = itemParts(rows.slice(0, n), 0, rows.length);
+    const els = ui.list.querySelectorAll(':scope > .rf-item');
+    const same = els.length === parts.length && parts.every((p, i) => els[i]._rf?.id === p.id);
+    const changed = same ? parts.filter((p, i) => els[i]._rf.html !== p.html).length : Infinity;
+    if (changed > parts.length / 2) {
+      ui.list.innerHTML = parts.map((p) => p.html).join('') + moreHtml(rows.length - n);
+      ui.list.querySelectorAll(':scope > .rf-item').forEach((el, i) => { el._rf = parts[i]; });
+      return;
+    }
+    const tpl = document.createElement('template');
+    parts.forEach((p, i) => {
+      if (els[i]._rf.html === p.html) return;
+      tpl.innerHTML = p.html;
+      const el = tpl.content.firstElementChild;
+      el._rf = p;
+      els[i].replaceWith(el);
+    });
+    ui.list.querySelector(':scope > .rf-more-btn')?.remove();
+    ui.list.insertAdjacentHTML('beforeend', moreHtml(rows.length - n));
+  };
   function renderMore() {
     const shown = ui.list.querySelectorAll('.rf-item').length;
     ui.list.querySelector('.rf-more-btn')?.remove();
-    ui.list.insertAdjacentHTML('beforeend', itemsHtml(ui.rows.slice(shown, shown + RENDER_CHUNK), shown, ui.rows.length) + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
+    const parts = itemParts(ui.rows.slice(shown, shown + RENDER_CHUNK), shown, ui.rows.length);
+    ui.list.insertAdjacentHTML('beforeend', parts.map((p) => p.html).join('') + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
+    const els = ui.list.querySelectorAll(':scope > .rf-item');
+    parts.forEach((p, i) => { if (els[shown + i]) els[shown + i]._rf = p; });
   }
 
   // Money facts in one line: move-in (bond flag), lease overlap/gap, share of income, vs median.
@@ -4144,9 +4172,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : '');
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
   // `offset`/`total`: this chunk's place in the whole list, for screen readers ("12 of 150").
-  function itemsHtml(rows, offset = 0, total = rows.length) {
+  const itemsHtml = (rows, offset, total) => itemParts(rows, offset, total).map((p) => p.html).join('');
+  function itemParts(rows, offset = 0, total = rows.length) {
     const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist);
-    return rows.map((r, i) => {
+    return rows.map((r, i) => ({ id: r.id, html: itemHtml(r, i) }));
+    function itemHtml(r, i) {
       const name = [r.price, r.address, r.available && r.available !== '-' ? `available ${r.available.replace(/^available\s*/i, '')}` : ''].filter(Boolean).join(', ');
       const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       const na = sl ? needsAction(r, now) : '';
@@ -4200,8 +4230,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ${r.agency ? `<button data-act="ag" title="${r.agencyHidden ? 'Show' : 'Hide'} every listing from ${esc(r.agency)}" aria-label="${r.agencyHidden ? 'Unhide' : 'Hide'} agency ${esc(r.agency)}">${r.agencyHidden ? 'Unhide agency' : 'Hide agency'}</button>` : ''}
         </div></details>`}
       </div>
-      </div>`;
-    }).join('');
+      </div>`.trim();
+    }
   }
 
   function fillPresets() {
@@ -4659,15 +4689,28 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // /property- link (up to CARD_CLIMB levels) that still holds links to one listing only.
   const CARD_CLIMB = 8;
   const cardInfo = { mode: 'none', found: 0 }; // for selfcheck()
-  const climbToCard = (a) => {
-    let el = a, best = null;
-    for (let d = 0; d < CARD_CLIMB && el.parentElement && el.parentElement !== document.body; d++) {
-      el = el.parentElement;
-      const ids = new Set([...el.querySelectorAll('a[href*="/property-"]')].map((x) => listingId(x.getAttribute('href'))).filter(Boolean));
-      if (ids.size > 1) break;
-      best = el;
+  // One pass up from every listing link: each ancestor learns the one listing it holds ('' for
+  // several), instead of each climb re-querying ever larger subtrees.
+  const climber = (links) => {
+    const owner = new Map();
+    for (const a of links) {
+      const id = listingId(a.getAttribute('href'));
+      if (!id) continue;
+      for (let el = a.parentElement; el; el = el.parentElement) {
+        const o = owner.get(el);
+        if (o === '') break; // already shared: so are its ancestors
+        owner.set(el, o === undefined || o === id ? id : '');
+      }
     }
-    return best;
+    return (a) => {
+      let el = a, best = null;
+      for (let d = 0; d < CARD_CLIMB && el.parentElement && el.parentElement !== document.body; d++) {
+        el = el.parentElement;
+        if (!owner.get(el)) break;
+        best = el;
+      }
+      return best;
+    };
   };
   function cardsOnPage() {
     const collect = (links, cardOf) => {
@@ -4687,7 +4730,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     };
     let cards = collect(document.querySelectorAll('article a[href]'), (a) => a.closest('article'));
     cardInfo.mode = 'article';
-    if (!cards.size) { cards = collect(document.querySelectorAll('a[href*="/property-"]'), climbToCard); cardInfo.mode = cards.size ? 'fallback' : 'none'; }
+    if (!cards.size) { const links = document.querySelectorAll('a[href*="/property-"]'); cards = collect(links, climber(links)); cardInfo.mode = cards.size ? 'fallback' : 'none'; }
     cardInfo.found = cards.size;
     return cards;
   }

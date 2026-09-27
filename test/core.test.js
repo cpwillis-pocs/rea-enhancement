@@ -841,3 +841,12 @@ test('reversed sort: highest first, listings without the value still last, ties 
   assert.equal(ids({ sort: 'avail', sortDesc: true }).slice(0, 2), 'cd', 'latest available first');
   assert.equal(core.sanitizeCfg({ sortDesc: true }).sortDesc, true);
 });
+
+test('calendar folding counts octets (accents, emoji) and photo peek image size', () => {
+  const now = Date.now();
+  const ics = core.toIcs([{ id: '146500001', url: 'https://www.realestate.com.au/p-1', address: 'Café Street, Coogée — ☕ '.repeat(8), inspections: [{ at: now + 864e5, label: 'x' }] }], now);
+  for (const line of ics.split('\r\n')) assert.ok(Buffer.byteLength(line) <= 75, `${Buffer.byteLength(line)} octets`);
+  assert.ok(ics.includes('Café Street'));
+  assert.equal(core.bigImg('https://i2.au.reastatic.net/345x260/abc/main.jpg'), 'https://i2.au.reastatic.net/800x600/abc/main.jpg');
+  assert.equal(core.bigImg('https://i2.au.reastatic.net/other/main.jpg'), 'https://i2.au.reastatic.net/other/main.jpg');
+});
