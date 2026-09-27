@@ -1483,6 +1483,50 @@
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCHOUTS.some((w) => w.id === id));
   const watchTags = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)?.label).filter(Boolean);
 
+  // "Why this tag?": the words around the first match, so a wrong tag can be seen for what it
+  // read (and turned into a test case). Text is the row's folded text, so quotes are lowercase.
+  const EVIDENCE_W = 30;
+  const evidenceOf = (text, re) => {
+    const t = String(text || '');
+    if (!t || !re) return '';
+    const m = new RegExp(re.source, re.flags.replace('g', '')).exec(t.toLowerCase());
+    if (!m) return '';
+    // The sentence it sits in, clipped to EVIDENCE_W either side at a word boundary.
+    let a = Math.max(0, m.index - EVIDENCE_W), b = Math.min(t.length, m.index + m[0].length + EVIDENCE_W);
+    const stop = t.slice(a, m.index).search(/[.!?;](?=[^.!?;]*$)/);
+    if (stop >= 0) a += stop + 1; else if (a > 0) a = t.indexOf(' ', a) + 1 || a;
+    const end = t.slice(m.index + m[0].length, b).search(/[.!?;]/);
+    if (end >= 0) b = m.index + m[0].length + end; else if (b < t.length) b = t.lastIndexOf(' ', b) > m.index + m[0].length ? t.lastIndexOf(' ', b) : b;
+    const cut = /[.!?;]\s*$/.test(t.slice(0, a)) || a === 0 ? '' : '…', more = b >= t.length || /^[.!?;]/.test(t.slice(b)) ? '' : '…';
+    return `${cut}${t.slice(a, b).replace(/\s+/g, ' ').trim()}${more}`;
+  };
+  const NO_PHRASE = 'Read from the listing text (the saved copy is shortened: Refresh to see the phrase)';
+  // [label, why] per tag, in the order amenityTags / watchTags give them.
+  const amenityTagItems = (r) => AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => {
+    const feat = (r.features || []).find((f) => a.pos.test(String(f).toLowerCase()));
+    const quote = feat ? '' : evidenceOf(r.text, a.pos);
+    return [amenDetail(a.id, r.text) || a.yes, feat ? `From REA's feature list: ${feat}` : quote ? `From the listing text: "${quote}"` : r.text ? NO_PHRASE : '', a.id, quote];
+  });
+  const watchTagItems = (r) => String(r.watch || '').split(',').map((id) => WATCHOUTS.find((w) => w.id === id)).filter(Boolean).map((w) => {
+    const quote = evidenceOf(r.text, w.re);
+    return [w.label, quote ? `From the listing text: "${quote}". Worth asking the agent.` : r.text ? NO_PHRASE : '', w.id, quote];
+  });
+  // With a keyword filter on: where the first wanted term was found.
+  const keywordEvidence = (text, keyword) => {
+    const terms = String(keyword || '').match(/"[^"]+"|\S+/g) || [];
+    for (const term of terms) {
+      if (term.startsWith('-')) continue;
+      for (const alt of term.replace(/"/g, '').split('|')) {
+        const w = fold(alt).trim();
+        if (w && String(text || '').includes(w)) return evidenceOf(text, new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      }
+    }
+    return '';
+  };
+  // "Copy as test case": each tag's phrase in the unit tests' table format.
+  const testCaseText = (r) => [...amenityTagItems(r), ...watchTagItems(r)].filter(([, , , q]) => q)
+    .map(([, , id, q]) => `[${JSON.stringify(q.replace(/^…|…$/g, ''))}, '${id}'],`).join('\n');
+
   // Extra named places ("Work: -33.87,151.21", one per line, up to 3) shown beside the main point.
   const PLACES_MAX = 3;
   const parsePlaces = (v) => String(v || '').split(/\n+/).map((line, i) => {
@@ -2470,7 +2514,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3295,6 +3339,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
     if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
     if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
+    if (b.dataset.act === 'case') {
+      const r = rowOf(id);
+      if (r) copyText(testCaseText(r)).then((ok) => setStatus(ok ? 'Tag phrases copied as test cases (the tables in test/amenities.test.js): paste them into an issue or a fix.' : 'Clipboard blocked.', !ok));
+      return;
+    }
     if (b.dataset.act === 'enq') {
       const r = rowOf(id);
       if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
@@ -4381,15 +4430,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return parts.length ? `<div class="rf-meta">${parts.join(' · ')}</div>` : '';
   }
 
-  const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : '');
+  // Tags are labels, or [label, why] for a per-tag tooltip.
+  const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => (Array.isArray(t)
+    ? `<span${t[1] ? ` title="${esc(t[1])}"` : ''}>${esc(t[0])}</span>` : `<span>${esc(t)}</span>`)).join('')}</div>` : '');
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
   // `offset`/`total`: this chunk's place in the whole list, for screen readers ("12 of 150").
   function itemParts(rows, offset = 0, total = rows.length) {
     const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist);
     return rows.map((r, i) => ({ id: r.id, html: itemHtml(r, i) }));
     function itemHtml(r, i) {
+      const kq = cfg.keyword.trim() ? keywordEvidence(r.text, cfg.keyword) : '';
       const name = [r.price, r.address, r.available && r.available !== '-' ? `available ${r.available.replace(/^available\s*/i, '')}` : ''].filter(Boolean).join(', ');
-      const am = amenityTags(r), wt = watchTags(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
+      const am = amenityTagItems(r), wt = watchTagItems(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       const na = sl ? needsAction(r, now) : '';
       return `
       <div tabindex="-1" role="article" aria-posinset="${offset + i + 1}" aria-setsize="${total}" aria-label="${esc(`${offset + i + 1} of ${total}: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
@@ -4404,6 +4456,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           ${metaLine([r.agency, sl && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
           ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : ''].filter(Boolean), ' rf-sec')}
           ${tagsHtml(wt, ' rf-watch rf-sec', 'Mentioned in the listing text: worth asking the agent')}
+          ${kq ? `<div class="rf-meta rf-sec rf-kwq">matched: ${esc(kq)}</div>` : ''}
           ${moneyLine(r, inc, med)}
           ${metaLine([
             r.lastSeen && sl ? `seen ${ago(now - r.lastSeen)}` : '',
@@ -4434,6 +4487,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
+          ${am.some((t) => t[3]) || wt.some((t) => t[3]) ? '<button data-act="case" title="A wrong tag? Copy the phrases each tag was read from, in the unit-test table format, for a bug report or a fix">Copy tags as test cases</button>' : ''}
           ${r.hidden ? `<span class="rf-meta">Why hidden?</span>${HIDE_REASONS.map((x) => `<button data-act="why" data-r="${x}" aria-pressed="${r.hideReason === x}">${x}</button>`).join('')}` : ''}
           ${r.inspections?.some((i) => typeof i.at === 'number' && i.at > now) ? '<button data-act="ics" title="Download this listing\'s inspection times for your calendar">Add to calendar</button>' : ''}
           ${r.lat != null ? `<button data-act="anchor" title="Measure distances from this listing">Measure from here</button><button data-act="place" title="Add this listing's location to Other places">Add as a place</button>` : ''}

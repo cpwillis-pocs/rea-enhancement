@@ -1651,6 +1651,25 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(p3); await many.close();
   });
 
+  // 48. Why this tag: a tag's tooltip quotes what it was read from, a keyword shows where it
+  // matched, and the phrases copy as unit-test rows.
+  await block('48', async () => {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
+    await run(page);
+    const item = '.rf-item[data-id="146500004"]'; // "6 month lease only. Dishwasher."
+    assert.match(await page.$eval(`${item} .rf-watch span`, (el) => el.title), /From the listing text: "[^"]*6 month lease only"/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-keyword', 'lease'); await page.dispatchEvent('#rf-keyword', 'change');
+    await page.waitForSelector(`${item} .rf-kwq`);
+    assert.match(await page.textContent(`${item} .rf-kwq`), /matched: .*6 month lease only/);
+    await page.hover(item); await page.click(`${item} .rf-acts-more summary`); await page.click(`${item} [data-act=case]`);
+    await waitStatus(page, /^Tag phrases copied as test cases/);
+    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /"[^"]*6 month lease only", 'short'\],/);
+    console.log('why this tag: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

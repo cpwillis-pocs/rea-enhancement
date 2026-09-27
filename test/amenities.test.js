@@ -105,3 +105,20 @@ test('water efficient: statements that it is not are not a yes', () => {
     assert.notEqual(we(x), 'yes', x);
   assert.equal(we('Water efficient fixtures throughout.'), 'yes');
 });
+
+test('why this tag: the sentence each tag was read from, keyword matches, and test-case rows', () => {
+  const cases = [
+    ['Sunny unit. Pets considered on application. Lift.', /pets? considered/, 'Pets considered on application'],
+    ['a very long sentence with lots of words before the dishwasher and many more words after it without stopping', /dishwasher/, '…lots of words before the dishwasher and many more words after it…'],
+    ['no match here', /pool/, ''], ['', /pool/, ''],
+  ];
+  for (const [text, re, want] of cases) assert.equal(core.evidenceOf(text, re), want, text);
+  const r = core.toRow(listing({ id: '146500111', description: 'Sunny unit. Pets considered on application. Water usage charged to tenant.' }), false);
+  const [pets] = core.amenityTagItems(r);
+  assert.deepEqual(pets.slice(0, 2), ['Pets on application', 'From the listing text: "pets considered on application"']);
+  const withFeature = core.toRow(listing({ id: '146500112', features: ['Dishwasher'] }), false);
+  assert.match(core.amenityTagItems(withFeature).find((t) => t[2] === 'dishwasher')[1], /^From REA's feature list: Dishwasher/);
+  assert.equal(core.keywordEvidence(r.text, '-studio "on application"|garden'), 'pets considered on application');
+  assert.equal(core.keywordEvidence(r.text, '-pets'), '', 'excluded terms are not "matched"');
+  assert.equal(core.testCaseText(r), `["pets considered on application", 'pets'],\n["water usage charged to tenant", 'water'],`);
+});
