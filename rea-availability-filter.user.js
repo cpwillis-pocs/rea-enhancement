@@ -3816,6 +3816,44 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const dropMirror = () => idbDo('readwrite', (st) => st.delete('copy')).catch(() => {});
 
 
+  // The presets menu: apply, delete, and save under a name typed next to it.
+  function wirePresets() {
+  // The name is typed in a field next to the menu (themed and labelled, unlike a prompt):
+  // Enter saves, Esc cancels, leaving it saves what's typed; focus goes back to the menu.
+  const askPresetName = (key) => {
+    ui.preset.parentElement.querySelector('.rf-preset-name')?.remove();
+    const input = Object.assign(document.createElement('input'), { type: 'text', className: 'rf-preset-name', maxLength: 40,
+      placeholder: key ? 'Name (applies on this search); Enter saves' : 'Preset name; Enter saves' });
+    input.setAttribute('aria-label', key ? 'Preset name (auto-applies on this search)' : 'Preset name');
+    ui.preset.after(input);
+    input.focus();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const saved = save && input.value.trim() && presets.save(input.value, cfg, key);
+      input.remove();
+      if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
+      fillPresets();
+      ui.preset.focus();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // typing a name isn't a shortcut, and Esc doesn't close the drawer
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+  };
+  ui.preset.addEventListener('change', () => {
+    const v = ui.preset.value;
+    ui.preset.value = '';
+    if (v === 'c:save' || v === 'c:bind') return askPresetName(v === 'c:bind' ? currentKey() : null);
+    else if (v.startsWith('d:')) {
+      presets.remove(v.slice(2));
+      setStatus(`Deleted preset "${v.slice(2)}".`);
+    } else if (v.startsWith('a:')) applyPreset(presets.get(v.slice(2)));
+    fillPresets();
+  });
+  }
   // #endregion
   // #region shortlist bar
   // Shortlist bar: Backup, Restore (preview, then undo), Share, Re-check, Print and the More menu,
@@ -4563,41 +4601,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (ui.planDay && ui.compare) ui.slBar.querySelector('[data-sl=compare]').click(); // one view at a time
       renderShortlist();
     });
-    // The name is typed in a field next to the menu (themed and labelled, unlike a prompt):
-    // Enter saves, Esc cancels, leaving it saves what's typed; focus goes back to the menu.
-    const askPresetName = (key) => {
-      ui.preset.parentElement.querySelector('.rf-preset-name')?.remove();
-      const input = Object.assign(document.createElement('input'), { type: 'text', className: 'rf-preset-name', maxLength: 40,
-        placeholder: key ? 'Name (applies on this search); Enter saves' : 'Preset name; Enter saves' });
-      input.setAttribute('aria-label', key ? 'Preset name (auto-applies on this search)' : 'Preset name');
-      ui.preset.after(input);
-      input.focus();
-      let done = false;
-      const finish = (save) => {
-        if (done) return;
-        done = true;
-        const saved = save && input.value.trim() && presets.save(input.value, cfg, key);
-        input.remove();
-        if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
-        fillPresets();
-        ui.preset.focus();
-      };
-      input.addEventListener('keydown', (e) => {
-        e.stopPropagation(); // typing a name isn't a shortcut, and Esc doesn't close the drawer
-        if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') finish(false);
-      });
-      input.addEventListener('blur', () => finish(true));
-    };
-    ui.preset.addEventListener('change', () => {
-      const v = ui.preset.value;
-      ui.preset.value = '';
-      if (v === 'c:save' || v === 'c:bind') return askPresetName(v === 'c:bind' ? currentKey() : null);
-      else if (v.startsWith('d:')) {
-        presets.remove(v.slice(2));
-        setStatus(`Deleted preset "${v.slice(2)}".`);
-      } else if (v.startsWith('a:')) applyPreset(presets.get(v.slice(2)));
-      fillPresets();
-    });
+    wirePresets();
     // Bulk actions: one write, one re-render, one undo that restores the exact previous state.
     const bulk = (sel, fn) => sel.addEventListener('change', () => {
       const v = sel.value;
