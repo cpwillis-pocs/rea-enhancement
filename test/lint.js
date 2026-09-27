@@ -69,6 +69,25 @@ if (fs.existsSync(archPath)) {
   const docRv = fs.readFileSync(archPath, 'utf8').match(/`ROWS_VERSION` \((\d+)\)/)?.[1], rv = src.match(/\bROWS_VERSION = (\d+)/)?.[1];
   if (docRv && rv && docRv !== rv) err(`docs/ARCHITECTURE.md says ROWS_VERSION ${docRv}, the script has ${rv}`);
 }
+// Regions (// #region name ... // #endregion) fold in editors: flat, balanced, and listed in
+// ARCHITECTURE.md's "Section index" by name, in file order.
+{
+  const marks = [...src.matchAll(/^\s*\/\/ #(region|endregion)\b ?(.*)$/gm)];
+  const names = [];
+  let open = null;
+  for (const m of marks) {
+    const at = lineOf(m.index);
+    if (m[1] === 'region') { if (open) err(`#region "${m[2]}" opens inside "${open}"`, at); open = m[2].trim(); names.push(open); }
+    else { if (!open) err('#endregion with no open #region', at); open = null; }
+  }
+  if (open) err(`#region "${open}" is never closed`);
+  if (new Set(names).size !== names.length) err('two #regions share a name');
+  if (fs.existsSync(archPath) && names.length) {
+    const idx = fs.readFileSync(archPath, 'utf8').match(/## Section index\n([\s\S]*?)(?=\n## |$)/)?.[1] || '';
+    const listed = [...idx.matchAll(/^\d+\. \*\*([^*]+)\*\*/gm)].map((m) => m[1]);
+    if (listed.join('|') !== names.join('|')) err(`docs/ARCHITECTURE.md "Section index" lists ${listed.join(', ') || 'nothing'}; the script's regions are ${names.join(', ')}`);
+  }
+}
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
 

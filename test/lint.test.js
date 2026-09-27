@@ -99,3 +99,16 @@ test('CI change classifier: docs skip everything, unit-only skips e2e, e2e-only 
     assert.deepEqual(classify(['README.md', f]), { unit: true, e2e: true, nodes: [20, 22, 24] }, f);
   }
 });
+
+test('lint keeps #regions flat, closed and in step with the ARCHITECTURE section index', () => {
+  const dir = copy();
+  fs.mkdirSync(path.join(dir, 'docs'));
+  fs.copyFileSync(path.join(root, 'docs/ARCHITECTURE.md'), path.join(dir, 'docs/ARCHITECTURE.md'));
+  fs.copyFileSync(path.join(root, 'docs/ROADMAP.md'), path.join(dir, 'docs/ROADMAP.md'));
+  edit(dir, (s) => s.replace('  // #endregion\n  // #region stores\n', '  // #region stores\n').replace('// #region keys', '// #region keyboard'));
+  const r = lint(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /#region "stores" opens inside "config"/);
+  assert.match(r.stderr, /"Section index" lists config, stores.*keys.*; the script's regions are .*keyboard/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

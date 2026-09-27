@@ -124,6 +124,7 @@
   const NARROW_MQ = '(max-width: 480px)'; // phones: drawer is full-screen (keep in sync with the CSS)
 
   // ---------------------------------------------------------------- config
+  // #region config
 
   // `building` narrows one search's results, so it is never stored (or carried to the next search).
   // Outcome of the last write of something you chose (shortlist/notes, settings, presets): the UI
@@ -347,6 +348,8 @@
   const resurfacedEntry = (e) => !!e?.h && e.hr === 'price' && typeof e.hp === 'number' && typeof e.p === 'number' && e.p < e.hp;
   const hiddenOf = (e, was) => e?.h === 1 || (e?.h !== 0 && !!was?.h && !e?.s);
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  // #endregion
+  // #region stores
   const marksStore = (storage, now = () => Date.now()) => {
     // `wiped`: storage held marks and now holds none, without this script removing them (site
     // data cleared, or a cleaner extension): the safety copy must not be overwritten then.
@@ -1052,6 +1055,8 @@
   const safeUrl = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) && !/[\s\u0000-\u001f"<>]/.test(u) ? u : ''); // no CR/LF smuggling into ICS/CSV
 
   // ------------------------------------------------------------ extraction
+  // #endregion
+  // #region extraction
 
   const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
@@ -1450,6 +1455,8 @@
   // Amenities from feature labels + description. Negations are checked first, so "no pets"
   // is 'no' rather than matching "pets". State per amenity: 'yes' | 'no' | null (unknown).
   const AMEN_NO = String.raw`\s*[:?\-]\s*(?:no|none|n)\b`; // key/value style: "Pets allowed: No"
+  // #endregion
+  // #region text heuristics
   const AMENITIES = [
     { id: 'pets', label: 'Pets', yes: 'Pets OK',
       neg: /\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
@@ -1786,6 +1793,8 @@
     ...itemsOf(results?.surrounding).map((i) => i?.listing && safeRow(i.listing, true)),
   ].filter(Boolean);
 
+  // #endregion
+  // #region rows
   const toRow = (listing, surrounding) => {
     const display = str(listing.availableDate);
     const price = str(listing.price);
@@ -1920,6 +1929,8 @@
   }
 
   // --------------------------------------------------------------- filter
+  // #endregion
+  // #region filters and sorts
 
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
@@ -2488,6 +2499,8 @@
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
   const ppbLabel = (r) => (+r.beds > 1 && Number.isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
 
+  // #endregion
+  // #region exports
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['applyBy', 'apply_by'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
@@ -2591,6 +2604,8 @@
       .map(icsFold).join('\r\n') + '\r\n';
   };
 
+  // #endregion
+  // #region share links
   // Share a shortlist as a link: the data rides in the URL fragment (after #), which browsers
   // never send to the server. Decoding is untrusted input: every field is re-validated.
   const SHARE_MAX = 30;
@@ -2797,6 +2812,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     listed: (r) => r.listed instanceof Date, photos: (r) => r.photos != null,
   };
   const fillRates = (rows) => Object.fromEntries(Object.entries(HEALTH_FIELDS).map(([k, f]) => [k, rows.length ? rows.filter(f).length / rows.length : 0]));
+  // #endregion
+  // #region health
   const healthStore = (storage) => {
     const load = () => {
       try {
@@ -2862,6 +2879,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return out;
   };
 
+  // #endregion
+  // #region views
   // Node test harness: expose pure functions, skip all DOM work.
   // Views drawn in place of the list (day planner, map, market, compare): pure, so unit-tested.
   function planHtml(slots, day) {
@@ -2976,6 +2995,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // ------------------------------------------------------------------- ui
+  // #endregion
+  // #region ui state
 
   // Double-run guard: a second copy (an installed and a dev copy, or a fork) would draw a second
   // drawer and fight over storage. The first one to load wins; the flag is set before any await.
@@ -3022,6 +3043,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
   const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
+  // #endregion
+  // #region styles
   // Colours are tokens on #rf-panel so the dark scheme only swaps values. The Theme setting
   // (data-rf-theme on <html>) overrides the system choice either way.
   const RF_ROOTS = ':is(#rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast)';
@@ -3737,6 +3760,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const dropMirror = () => idbDo('readwrite', (st) => st.delete('copy')).catch(() => {});
 
 
+  // #endregion
+  // #region shortlist bar
   // Shortlist bar: Backup, Restore (preview, then undo), Share, Re-check, Print and the More menu,
   // plus the incoming-share offer. Needs the drawer pieces build() made.
   function wireShortlistBar(panel) {
@@ -3910,6 +3935,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   });
   }
 
+  // #endregion
+  // #region keys
   // Keyboard: list keys (j/k, s, h, r, p, 1-5…) and drawer keys (Esc, ?, e, f, t, d, m, /), plus
   // the focus trap on phones. Needs the drawer pieces build() made.
   function wireKeys(panel, { launch, narrow, help, toggleHelp, setOpen, expandBtn }) {
@@ -4124,6 +4151,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   });
   }
 
+  // #endregion
+  // #region build
   function build() {
     const style = document.createElement('style');
     style.textContent = css;
@@ -4979,6 +5008,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Bulk menus say how many listings they will touch.
   const labelBulk = (sel, n) => { for (const o of sel.options) if (o.value) o.textContent = o.dataset.label.replace('{n}', n); };
 
+  // #endregion
+  // #region list
   function render(rows) {
     ui.rows = rows; // first: renderMore()/refreshMarks() read it even when the list is empty
     labelBulk(ui.bulk, rows.length);
@@ -5301,6 +5332,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   };
 
   let runCtrl = null; // AbortController of the in-flight search, aborted on navigation
+  // #endregion
+  // #region search
   // `resume`: after a search stopped partway, fetch from where it failed (pages already read
   // come from pageMemo, without a pause).
   async function run(force = false, { resume = false } = {}) {
@@ -5365,6 +5398,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // ------------------------------------------------------------ annotate
+  // #endregion
+  // #region fetching and notes
   // Adds a badge to REA's own result cards. Append-only (never reorders or removes
   // React-owned nodes) and idempotent, so the MutationObserver can't feed back on itself.
 
@@ -5513,6 +5548,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
   const lbarKey = keyStore(storageOr('localStorage'), LBAR_MIN_KEY);
   const lbarMin = { get: () => lbarKey.get() === '1', set: (v) => (v ? lbarKey.set('1') : lbarKey.clear()) };
+  // #endregion
+  // #region listing bar
   function renderListingBar({ onlyIfMoved = false } = {}) {
     let bar = document.getElementById('rf-lbar');
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
@@ -5646,6 +5683,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     bar.querySelector(`[data-l="${k}"]`)?.focus();
   }
 
+  // #endregion
+  // #region card badges
   // Star / hide right on REA's card. Buttons live inside our badge (append-only), and the
   // click is stopped in the capture phase so REA's card link doesn't navigate.
   // Your 1-5 rating: five buttons, the current one pressed; pressing it again clears it.
@@ -5944,6 +5983,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     },
   };
 
+  // #endregion
+  // #region startup
   // Each step isolated: a failure in one (eg REA drift) must not take the others down.
   const step = (name, fn) => {
     const fail = (e) => { console.warn(`[reaFilter] ${name}:`, e); logError(`${name}: ${e?.message || e}`); };
@@ -6014,4 +6055,5 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }, 0);
     }, 0);
   }
+  // #endregion
 })();

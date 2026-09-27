@@ -13,6 +13,32 @@ The userscript is a single IIFE with `@grant none` and no dependencies. A `typeo
 
 New logic goes in the pure half wherever possible, with a unit test.
 
+## Section index
+
+The script is folded into `// #region` blocks (VS Code and most editors fold them; there is no build step). Lint checks they are flat, closed, and listed here in file order.
+
+1. **config**: storage keys, limits, versions, the marks summary (`summary()` / `fromSummary()`).
+2. **stores**: `marksStore`, `snapshotStore` (packed rows), `presetStore`, backup import.
+3. **extraction**: reading REA's page data, format-change vs bot-check, listing pages.
+4. **text heuristics**: amenities, heads-up, availability, apply-by, lease terms, size, taken.
+5. **rows**: `toRow()`, one row per listing.
+6. **filters and sorts**: `DEFAULT_CFG`, `sanitizeCfg`, sorts, inspection times, filters, chips, medians, scores, lease fit.
+7. **exports**: CSV/TSV columns, calendar (ICS) with reminders.
+8. **share links**: shortlist in a URL fragment, re-validated on the way in.
+9. **health**: fill-rate canary for REA drift.
+10. **views**: plan, map, market and compare, then the `module.exports` guard.
+11. **ui state**: the UI half starts; error guard, stores in use.
+12. **styles**: tokens and CSS.
+13. **shortlist bar**: backup, restore, safety copy, share, More menu.
+14. **keys**: keyboard handling.
+15. **build**: `panelHtml()` and `build()`.
+16. **list**: rendering the list and its items.
+17. **search**: `run()` and the results cache.
+18. **fetching and notes**: pause gate, page fetches, what's new, backup and saved-search nudges.
+19. **listing bar**: the property-page bar.
+20. **card badges**: star/hide on REA's cards, annotate, SPA navigation.
+21. **startup**: the staged start (`step()`), cross-tab sync.
+
 ## Data flow
 
 1. **Read.** The results page embeds a hydration blob (`window.ArgonautExchange`, or the `<script>` tag if REA's app has already consumed it). `parseExchange` finds the search results by the known path (`resi-property_listing-experience-web` → `urqlClientCache` → `rentSearch.results`). If REA renames either, it falls back to any cache entry shaped like results (`exact.items` + `pagination`) and records that in `resultsPath`.
