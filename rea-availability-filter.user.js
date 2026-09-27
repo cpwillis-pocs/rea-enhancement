@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis/rea-enhancement
-// @version      2.24.0
+// @version      2.24.1
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
-// @homepageURL  https://github.com/cpwillis/rea-enhancement
-// @supportURL   https://github.com/cpwillis/rea-enhancement/issues
+// @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
+// @supportURL   https://github.com/cpwillis-pocs/rea-enhancement/issues
 // @license      MIT
-// @updateURL    https://raw.githubusercontent.com/cpwillis/rea-enhancement/main/rea-availability-filter.user.js
-// @downloadURL  https://raw.githubusercontent.com/cpwillis/rea-enhancement/main/rea-availability-filter.user.js
+// @updateURL    https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js
+// @downloadURL  https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js
 // @match        https://www.realestate.com.au/*
 // @run-at       document-idle
 // @grant        none

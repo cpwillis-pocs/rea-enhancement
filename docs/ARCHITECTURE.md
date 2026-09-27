@@ -60,6 +60,10 @@ A failed write of something you chose (marks, settings, presets) goes to `writeS
 
 `MARK_FIELDS` lists the fields a bulk action may change, so bulk Undo can restore them exactly. `keep()` decides what survives pruning and goes into backups: shortlisted, hidden, noted, or with an application status.
 
+## Script identity
+
+Tampermonkey tells scripts apart by `@name` plus `@namespace`. `@namespace` is still `https://github.com/cpwillis/rea-enhancement`, the repo's first home. Leave it, even though the repo now lives at `cpwillis-pocs/rea-enhancement`: changing it would make existing installs treat the update as a second, separate script. The update and download URLs point at the current home. The lint checks them, and a move means changing those URLs and bumping `@version`.
+
 ## Versions that must move
 
 | Constant | Bump when | Why |

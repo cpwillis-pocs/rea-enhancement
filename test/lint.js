@@ -23,7 +23,7 @@ for (const t of ['name', 'namespace', 'version', 'description', 'author', 'licen
 if (tag('version') && !/^\d+\.\d+\.\d+$/.test(tag('version'))) err(`@version "${tag('version')}" is not x.y.z`, 1);
 if (tag('grant') !== 'none') err('@grant must stay "none" (no privileged GM_* APIs)', 1);
 if ((tags.match || []).some((m) => !m.startsWith('https://www.realestate.com.au/'))) err('@match must only cover https://www.realestate.com.au/', 1);
-const RAW = `https://raw.githubusercontent.com/cpwillis/rea-enhancement/main/${FILE}`;
+const RAW = `https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/${FILE}`;
 if (tag('updateURL') !== RAW || tag('downloadURL') !== RAW) err(`@updateURL and @downloadURL must both be ${RAW}`, 1);
 if (tag('license') !== 'MIT' || !/MIT License/.test(read('LICENSE'))) err('@license must be MIT and match LICENSE', 1);
 
