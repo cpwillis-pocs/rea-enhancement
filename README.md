@@ -49,12 +49,16 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, o or Enter open, t Results/Shortlist, m market view, f filters, d compact, e expand, / keywords, ? help; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
+![Filters, amenity chips and active-filter chips](docs/screenshots/filters.jpg)
+
 **On REA's own result cards**
 - Badges: availability, next inspection, $/bed, distance, pets, shortlisted, new, price changed.
 - **Star** and **Hide** buttons right on each card.
 - Cards that don't match your filters fade out; hover to bring one back.
 
 ![Badges on REA's result cards](docs/screenshots/badges.jpg)
+
+![Cards that don't match faded out](docs/screenshots/dimmed.jpg)
 
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
@@ -75,6 +79,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
 ![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
+
+![The Shortlist tab across searches](docs/screenshots/shortlist-tab.jpg)
+
+![The bar on a listing page](docs/screenshots/listing-bar.jpg)
 
 ![Compare shortlisted listings](docs/screenshots/compare.jpg)
 
@@ -124,6 +132,8 @@ More docs:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the script works, what it stores, and which versions to bump.
 - [docs/ROADMAP.md](docs/ROADMAP.md): current status, decisions taken, known limitations, ideas not built yet, and the release checklist.
 - [CHANGELOG.md](CHANGELOG.md): every release.
+- [PRIVACY.md](PRIVACY.md): what is stored, where, and what leaves your browser.
+- [SECURITY.md](SECURITY.md): reporting a vulnerability privately, and what the script treats as untrusted.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for layout, rules of thumb and the CI pipeline (which can also be run on demand from the Actions tab, eg to repeat the browser tests or regenerate screenshots). Screenshots use generated fixture data, not real listings.
 

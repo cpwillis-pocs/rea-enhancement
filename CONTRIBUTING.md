@@ -67,6 +67,10 @@ Put new logic above the guard where you can, and give it a unit test.
 
 If a search fails or fields go blank, open an issue with the "REA data format changed" template and paste `reaFilter.selfcheck()` and `reaFilter.probe()` output from the DevTools console. That shows which paths still exist and which fields usually fill.
 
+## Issues and labels
+
+Blank issues are off; the templates are **Bug** (`bug`), **REA data format changed** (`rea-drift`) and **Idea** (`idea`). Security problems go through private vulnerability reporting ([SECURITY.md](SECURITY.md)), not issues. What the script stores and shares is in [PRIVACY.md](PRIVACY.md); keep it true when you add a storage key or an export.
+
 ## Pull requests
 
 The PR template lists the checks: `npm run ci` passes, new UI code has an e2e scenario, and a script change bumps `@version` with a CHANGELOG section. CI runs the same gate on the PR.

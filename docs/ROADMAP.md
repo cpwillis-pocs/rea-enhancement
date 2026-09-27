@@ -78,3 +78,16 @@ When you build one, move it into the CHANGELOG, update this page, and add its e2
 4. If the UI changed visibly, run `npm run screenshots` and commit `docs/screenshots`.
 5. Bump `ROWS_VERSION` or `FEAT_V` if their rules apply ([ARCHITECTURE.md](ARCHITECTURE.md#versions-that-must-move)).
 6. Push to `main`. Installs auto-update from the raw file URL.
+
+## Before going public
+
+The repo is private with no installs. Before making it public:
+
+- [ ] **Security → Private vulnerability reporting** on (SECURITY.md and the issue-template contact link point there).
+- [ ] **Actions → Fork pull request workflows**: require approval for all outside contributors, so forks can't spend Actions minutes.
+- [ ] **Branch protection on `main`**: require the CI checks on PRs; the maintainer can still push directly.
+- [ ] **Labels**: `bug`, `rea-drift` and `idea` (the issue templates apply them).
+- [ ] **Secrets and history scan**: run GitHub's secret scanning (or `gitleaks detect`) over the full history, and check commit author emails are the ones you want public.
+- [ ] **Screenshots**: `npm run screenshots`, and check none shows a real listing or personal data (they use generated fixtures).
+- [ ] **Install URL**: once public, open the README's install link and check Tampermonkey offers the script; then check an update from the previous version installs over it rather than beside it.
+- [ ] **Scope**: `@match` covers all of `www.realestate.com.au` (REA is a single-page app, so a visit that starts on the home page must still load it), and the script only acts on `/rent` searches and listing pages. Check that is still true, and that the README says so.

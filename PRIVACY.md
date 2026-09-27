@@ -1,0 +1,30 @@
+# Privacy
+
+The script has no server, no analytics and no third-party requests. It talks only to `www.realestate.com.au`, and only to read the same result pages your browser would load if you clicked through them.
+
+## What it stores, and where
+
+Everything is in your browser, under keys starting `rea-avail-filter/`. The full list is in [ARCHITECTURE.md](docs/ARCHITECTURE.md#storage).
+
+| What | Where | How long |
+|---|---|---|
+| Settings, filters, presets | localStorage | Until you change or delete them |
+| Your marks: shortlist, hidden, notes, application status, checklist, reviewed | localStorage | Unmarked listings are dropped 90 days after last seen; at most 5000 listings |
+| Sighting history (price and date changes, relists) | localStorage | Same as marks |
+| Remembered searches (slim rows for "new since last visit") | localStorage | The 3 most recent, pinned kept first |
+| Results cache, place in the list, bot-check pause | sessionStorage | This tab only; cleared when it closes |
+
+**Settings → Delete all my data** removes every key. **Backup** downloads your choices as a JSON file on your machine; nothing is uploaded.
+
+## What REA's own page can see
+
+The script runs inside REA's page (`@grant none`), so REA's scripts share the same localStorage and could read the keys above, including notes. Don't write anything in a note you wouldn't want the site to be able to see. REA also sees the result-page requests the script makes, as it would if you paged through the search yourself.
+
+## What leaves your browser, and only when you do it
+
+- **Share links** hold the listings you share (id, link, address, price, availability, beds/baths/cars), and your notes only if you answer yes to "Include your notes?". The data is in the `#` fragment, which browsers don't send to REA's servers, but anyone with the link can read it.
+- **Exports** (CSV, TSV, calendar, print, enquiry text) are files or clipboard text you then send on.
+- **Console helpers** for bug reports:
+  - `reaFilter.selfcheck()`: script version, page path (no query string), row count, field fill rates, card detection mode, the data paths found, and recent error messages. No listing text or search terms.
+  - `reaFilter.shape()`: the structure of one listing with every value replaced by its type, except a short list of non-personal keys (eg property type); addresses, names, emails, phone numbers and descriptions are always redacted. Safe to paste in an issue.
+  - `reaFilter.raw()`: one listing exactly as REA sent it, including agent names and contact details. Don't paste it publicly.

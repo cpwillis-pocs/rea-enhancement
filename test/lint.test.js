@@ -12,7 +12,7 @@ const lint = (dir) => spawnSync(process.execPath, [path.join(__dirname, 'lint.js
 const copy = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rea-lint-'));
   fs.mkdirSync(path.join(dir, 'test'));
-  for (const f of ['rea-availability-filter.user.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
+  for (const f of ['rea-availability-filter.user.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'SECURITY.md', 'PRIVACY.md']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
   for (const f of fs.readdirSync(__dirname).filter((x) => x.endsWith('.test.js'))) fs.copyFileSync(path.join(__dirname, f), path.join(dir, 'test', f));
   return dir;
 };
