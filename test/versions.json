@@ -42,7 +42,7 @@
   "url",
   "watch"
  ],
- "FEAT_V": 5,
+ "FEAT_V": 6,
  "amenityIds": [
   "pets",
   "furnished",
@@ -73,7 +73,12 @@
   "break",
   "clean",
   "payfee",
-  "garden"
+  "garden",
+  "road",
+  "above",
+  "rail",
+  "flight",
+  "build"
  ],
- "detection": "8e62e50d0f80abe4"
+ "detection": "40079840a3615560"
 }

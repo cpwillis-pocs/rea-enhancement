@@ -2101,6 +2101,23 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 60. Noise heads-ups: said of the home ("above a popular bar, on a busy road"), tagged, and
+  // the Busy road chip hides it.
+  await block('60', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
+    await run(page);
+    const item = '.rf-item[data-id="146500006"]';
+    assert.match(await page.textContent(`${item} .rf-watch`), /Above shops\/bar[\s\S]*Busy road|Busy road[\s\S]*Above shops\/bar/);
+    assert.doesNotMatch(await page.textContent(`${item}`), /Next to rail line/, '"walk to the station" is not a rail heads-up');
+    await page.click('#rf-more summary');
+    await page.click('[data-nowatch=road]');
+    await page.waitForFunction((s) => !document.querySelector(s), item);
+    assert.ok(await page.$('.rf-achip:has-text("No busy road")'), 'chip shown');
+    console.log('noise heads-ups: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

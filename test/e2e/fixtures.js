@@ -25,6 +25,7 @@ const EXTRAS = {
   3: { address: '10/2 Curlewis St', listingCompany: { name: 'Other Agency' } }, // same unit, second agency
   4: { description: '6 month lease only. Dishwasher.' },
   5: { title: 'DEPOSIT TAKEN - Bright 2 bed', description: 'Professional clean required on vacating.' },
+  6: { description: 'Apartment above a popular bar, on a busy road. Walk to the station.' },
 };
 // noInspectFor: ids whose open homes were cancelled (the rest keep theirs).
 function pageResults(n, { pages = 3, perPage = 6, noInspections = false, extras = false, noInspectFor = [] } = {}) {

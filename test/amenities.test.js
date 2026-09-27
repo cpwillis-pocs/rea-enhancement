@@ -87,6 +87,18 @@ test('watchOf: negations next to a mention are not heads-ups; broader phrasing c
   for (const [text, want] of cases) assert.equal(core.watchOf(text).join(','), want, text);
 });
 
+test('watchOf: noise heads-ups are about the home itself, not what is nearby', () => {
+  const cases = [
+    ['Unit on a busy road with double glazing.', 'road'], ['Overlooking a main road.', 'road'], ['Main road frontage.', 'road'],
+    ['Close to Parramatta Rd shops and cafes.', ''], ['Set back from the main road.', ''], ['Moments from the main street.', ''], ['Traffic noise is minimal.', ''],
+    ['Located above the shops in a vibrant strip.', 'above'], ['Apartment above a popular bar.', 'above'], ['Above ground pool.', ''], ['Walk to shops above the station.', ''],
+    ['Backs onto the railway line.', 'rail'], ['Next to the train tracks.', 'rail'], ['Walk to the station.', ''], ['Close to the train line.', ''],
+    ['Under the flight path.', 'flight'], ['Not under the flight path.', ''], ['Book your flight path to success', ''],
+    ['Construction next door finishes in June.', 'build'], ['No construction next door.', ''], ['New development nearby with shops', 'build'],
+  ];
+  for (const [text, want] of cases) assert.equal(core.watchOf(text).join(','), want, text);
+});
+
 test('amenity detail: pets welcome vs on application, heating type, water efficient', () => {
   const tags = (x) => core.amenityTags({ amen: core.amenitiesOf({ text: x.toLowerCase() }), text: x.toLowerCase() });
   assert.deepEqual(tags('Pets considered on application.'), ['Pets on application']);
