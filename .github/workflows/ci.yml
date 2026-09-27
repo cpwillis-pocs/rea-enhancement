@@ -36,6 +36,28 @@ env:
   FORCE_COLOR: 1
 
 jobs:
+  # Docs-only PRs (Markdown, docs/, screenshots, issue templates) skip the unit and e2e jobs.
+  # A job skipped by its `if` counts as passing for required checks; paths-ignore would leave
+  # them pending instead. On-demand runs always count as code.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          code=$(git diff --name-only "$BASE" HEAD | grep -Ev '(\.md$|^docs/|^LICENSE$|^\.github/ISSUE_TEMPLATE/|^\.github/pull_request_template\.md$)' || true)
+          echo "changed code: ${code:-none}"
+          [ -n "$code" ] && echo "code=true" >> "$GITHUB_OUTPUT" || echo "code=false" >> "$GITHUB_OUTPUT"
+
   lint:
     if: github.event_name != 'workflow_dispatch' || inputs.suite != 'screenshots' # every suite but screenshots builds on it
     runs-on: ubuntu-latest
@@ -49,8 +71,8 @@ jobs:
         run: npm run lint
 
   unit:
-    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","unit"]'), inputs.suite)
-    needs: lint
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","unit"]'), inputs.suite))
+    needs: [lint, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -83,8 +105,8 @@ jobs:
           retention-days: 14
 
   e2e:
-    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","e2e"]'), inputs.suite)
-    needs: lint
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","e2e"]'), inputs.suite))
+    needs: [lint, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
