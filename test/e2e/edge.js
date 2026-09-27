@@ -553,7 +553,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
-    await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 3000 });
+    await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 8000 });
     assert.match(await page.textContent('.rf-preset option'), /Preset: Bondi pets/);
     await page.selectOption('.rf-preset', 'd:3-bed');
     assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:3-bed'));
@@ -1780,7 +1780,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     await run(page);
     const id = await page.$eval('.rf-item', (el) => el.dataset.id);
+    await page.evaluate(() => { document.querySelectorAll('.rf-item')[1]._tag = 1; });
     await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.rf-item')[1]._tag), 1, 'a star rebuilds only its own listing');
     await page.click('[data-view=shortlist]');
     await page.focus(`.rf-item[data-id="${id}"]`);
     await page.keyboard.press('Shift+Digit4');

@@ -3533,7 +3533,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (ck) {
       const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
       marks.cycleCheck(id, label);
-      refreshMarks();
+      refreshMarks([id]);
       itemEl(id, `[data-ck="${CSS.escape(label)}"]`)?.focus();
       return;
     }
@@ -3584,7 +3584,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
     if (b.dataset.act === 'rate') {
       const n = marks.setRating(id, +b.dataset.v);
-      refreshMarks();
+      refreshMarks([id]);
       itemEl(id, `[data-act=rate][data-v="${b.dataset.v}"]`)?.focus();
       return setStatus(n ? `Rated ${n} of 5.` : 'Rating cleared.');
     }
@@ -3615,7 +3615,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const act = b.dataset.act;
     const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
     const on = marks.toggle(id, act, rowById(id));
-    refreshMarks();
+    refreshMarks(act === 's' ? [id] : null); // a star changes only its own listing (unless a filter drops it)
     // Re-render replaced the button: put focus back (or on the next item if this one left the list).
     const q = (i) => itemEl(i, `[data-act="${act}"]`);
     (q(id) || (next && q(next)) || ui.list).focus?.();
@@ -4472,7 +4472,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ta.addEventListener('blur', () => finish(true));
   }
 
-  function refreshMarks() {
+  // `only`: the listings whose marks changed, when nothing else on screen can (a star, rating,
+  // checklist tick): the list then rebuilds just those, if its order is unchanged.
+  function refreshMarks(only = null) {
+    ui.onlyIds = only ? new Set(only) : null;
     ui.paintStorage?.();
     marks.decorate([...known.values()]); // cache rows are mostly these same objects (learn)
     if (cache) marks.decorate(cache.filter((r) => known.get(r.id) !== r));
@@ -4486,6 +4489,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (ui.view === 'shortlist') renderShortlist();
     else if (cache) showResults();
     ui.keepShown = 0;
+    ui.onlyIds = null;
     scroller.scrollTop = top;
     scheduleAnnotate();
   }
@@ -4725,8 +4729,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // re-renders): only the items whose markup changed are swapped, so the rest keep their nodes
   // (and focus). Anything else, or most items changed, is one innerHTML.
   const paintList = (rows) => {
-    const n = Math.max(RENDER_CHUNK, ui.keepShown || 0), parts = itemParts(rows.slice(0, n), 0, rows.length);
+    const n = Math.max(RENDER_CHUNK, ui.keepShown || 0);
     const els = ui.list.querySelectorAll(':scope > .rf-item');
+    const only = ui.onlyIds;
+    if (only && els.length === Math.min(n, rows.length) && rows.length === ui.lastPaintTotal && [...els].every((el, i) => el._rf?.id === rows[i].id)) {
+      els.forEach((el, i) => {
+        if (!only.has(rows[i].id)) return;
+        const [p] = itemParts([rows[i]], i, rows.length);
+        if (el._rf.html === p.html) return;
+        const tpl = document.createElement('template');
+        tpl.innerHTML = p.html;
+        tpl.content.firstElementChild._rf = p;
+        el.replaceWith(tpl.content.firstElementChild);
+      });
+      return;
+    }
+    ui.lastPaintTotal = rows.length;
+    const parts = itemParts(rows.slice(0, n), 0, rows.length);
     const same = els.length === parts.length && parts.every((p, i) => els[i]._rf?.id === p.id);
     const changed = same ? parts.filter((p, i) => els[i]._rf.html !== p.html).length : Infinity;
     if (changed > parts.length / 2) {
