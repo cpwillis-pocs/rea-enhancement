@@ -46,6 +46,14 @@ const axeLocal = JSON.parse(read('package.json')).scripts?.['e2e:setup']?.match(
 const axeCi = fs.existsSync(ciPath) ? fs.readFileSync(ciPath, 'utf8').match(/AXE_VERSION:\s*(\S+)/)?.[1] : axeLocal;
 if (axeLocal !== axeCi) err(`package.json e2e:setup installs axe-core@${axeLocal}, CI pins ${axeCi}: keep them the same`);
 if (!pwLocal || pwLocal !== pwCi) err(`package.json e2e:setup installs playwright@${pwLocal}, CI pins ${pwCi}: keep them the same`);
+// build() only shrinks: new drawer wiring goes in its own wire*() function. Lower the budget when
+// it gets smaller; never raise it.
+const BUILD_MAX_LINES = 480;
+const buildAt = src.indexOf('\n  function build() {');
+if (buildAt >= 0) {
+  const lines = src.slice(buildAt + 1).split('\n'), len = lines.findIndex((l, i) => i > 0 && l === '  }');
+  if (len > BUILD_MAX_LINES) err(`build() is ${len} lines (budget ${BUILD_MAX_LINES}): move the new wiring into a wire*() function`, lineOf(buildAt + 1));
+}
 // Docs that go stale at release time (npm run release updates them).
 const roadmapPath = path.join(root, 'docs/ROADMAP.md'), archPath = path.join(root, 'docs/ARCHITECTURE.md'), edgePath = path.join(root, 'test/e2e/edge.js');
 if (fs.existsSync(roadmapPath)) {

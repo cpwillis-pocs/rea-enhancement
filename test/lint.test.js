@@ -35,6 +35,7 @@ test('lint catches header, changelog, privacy, storage and dynamic-code violatio
     [(s) => s.replace('const nullStorage', "localStorage.setItem('x', 1);\n  const nullStorage"), /literal key/],
     [(s) => s.replace('const nullStorage', "eval('1');\n  const nullStorage"), /dynamic code/],
     [(s) => s.replace('const nullStorage', "new WebSocket('wss://www.realestate.com.au');\n  const nullStorage"), /WebSocket is not used/],
+    [(s) => s.replace('\n  function build() {', `\n  function build() {\n${'    void 0;\n'.repeat(200)}`), /build\(\) is \d+ lines \(budget/],
   ];
   for (const [fn, re] of cases) {
     const dir = copy();

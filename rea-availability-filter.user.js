@@ -142,9 +142,11 @@
     for (const k of Object.keys(after)) if (after[k] !== before[k]) out[k] = after[k];
     return out;
   };
-  const saveCfg = (cfg) => {
-    try { const { building, ...c } = cfg; localStorage.setItem(CFG_KEY, JSON.stringify(c)); writeState.report(true); } catch { writeState.report(false); }
+  // A write of something you chose: success or failure goes to writeState (the storage-full banner).
+  const persistJson = (storage, key, value) => {
+    try { storage.setItem(key, JSON.stringify(value)); writeState.report(true); return true; } catch { writeState.report(false); return false; }
   };
+  const saveCfg = (cfg) => { const { building, ...c } = cfg; persistJson(localStorage, CFG_KEY, c); };
 
   // Only the amenities the listing answered (most are unknown): what caches and snapshots keep.
   const knownAmen = (amen) => Object.fromEntries(AMENITIES.map((a) => [a.id, amen?.[a.id]]).filter(([, v]) => v === 'yes' || v === 'no'));
@@ -997,7 +999,7 @@
       } catch { /* corrupt */ }
       return { v: 1, list: [] };
     };
-    const save = (d) => { try { storage.setItem(PRESETS_KEY, JSON.stringify(d)); writeState.report(true); } catch { writeState.report(false); } };
+    const save = (d) => persistJson(storage, PRESETS_KEY, d);
     const pick = (cfg) => Object.fromEntries(PRESET_KEYS.filter((k) => k in cfg).map((k) => [k, cfg[k]]));
     return {
       list: () => load().list,
@@ -3561,6 +3563,169 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   });
   }
 
+  // Shortlist bar: Backup, Restore (preview, then undo), Share, Re-check, Print and the More menu,
+  // plus the incoming-share offer. Needs the drawer pieces build() made.
+  function wireShortlistBar(panel) {
+  ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
+    const data = marks.exportData();
+    data.presets = presets.exportData();
+    if (cfg.remember) data.snapshots = snaps.exportData();
+    data.cfg = backupCfg(cfg);
+    download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
+    backupAt.set(String(Date.now()));
+    setWarn('backup', '');
+    ui.paintStorage?.();
+  });
+  ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
+  ui.slBar.querySelector('[data-sl=share]').addEventListener('click', async () => {
+    const rows = shortlistRows();
+    if (!rows.length) return setStatus('Nothing on the shortlist to share.', true);
+    const notes = rows.some((r) => r.note) && window.confirm('Include your notes in the share link?');
+    const url = shareUrl(rows, { notes });
+    const ok = await copyText(url);
+    setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? ', with notes' : ''}). Anyone with this script can open it.`
+      : 'Clipboard blocked - could not copy the share link.', !ok);
+  });
+  // Incoming share (#rf-share=...): offer to import, then strip it from the URL.
+  const shareIn = panel.querySelector('.rf-share-in');
+  ui.offerShare = (rows) => {
+    if (!rows?.length) return;
+    shareIn.hidden = false;
+    shareIn.querySelector('.rf-share-msg').textContent = `${plural(rows.length, 'shared listing')}:`;
+    ui.pendingShare = rows;
+    ui.launch.hidden = false;
+    ui.setOpen(true);
+  };
+  shareIn.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-share]');
+    if (!b) return;
+    const rows = ui.pendingShare || [];
+    if (b.dataset.share === 'add') {
+      const n = marks.setMany(rows, 's', true);
+      for (const r of rows) if (r.note && !marks.note(r.id)) marks.setNote(r.id, `Shared: ${r.note}`);
+      refreshMarks();
+      setView('shortlist');
+      setStatus(`Added ${plural(n, 'shared listing')} to your shortlist.`);
+    }
+    shareIn.hidden = true;
+    ui.pendingShare = null;
+  });
+  ui.planIcs = (btn) => {
+    if (!ui.planDay) return;
+    const day = ui.planDay;
+    let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
+      inspectCancelledAt: typeof r.inspectCancelledAt === 'number' && ymdIn(r.inspectCancelledAt, tzOf(r)) === day ? r.inspectCancelledAt : null })); // this day's cancellations only
+    if (btn.dataset.planIcs === 'route') { // just the suggested sessions
+      const picked = [...bestRoute(planDay(rows, day)).picked];
+      rows = rows.map((r) => ({ ...r, inspections: r.inspections.filter((i) => picked.some((x) => x.r.id === r.id && x.at === i.at)) })).filter((r) => r.inspections.length);
+    }
+    downloadIcs(rows);
+  };
+  // The More menu closes once an item is chosen (or on a click elsewhere).
+  const slMenu = ui.slBar.querySelector('.rf-menu');
+  slMenu.addEventListener('click', (e) => { if (e.target.closest('.rf-menu-list button')) slMenu.open = false; });
+  document.addEventListener('click', (e) => { if (slMenu.open && !slMenu.contains(e.target)) slMenu.open = false; });
+  ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
+  const storageLine = panel.querySelector('.rf-storage-n');
+  const paintStorage = () => {
+    const ls = storageOr('localStorage'), ss = storageOr('sessionStorage');
+    const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
+    const per = snaps.sizes().map((x) => `${searchLabel(x.key)} ${fmtBytes(x.bytes)}${x.lite ? ' (text trimmed to fit)' : ''}`);
+    const last = +backupAt.get() || 0;
+    storageLine.textContent = `Last backup: ${last ? ago(Date.now() - last) : 'never'}. Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`
+      + (per.length ? ` Remembered: ${per.join(' · ')}.` : '');
+  };
+  ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
+  panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
+  panel.querySelector('[data-forget]').addEventListener('click', () => {
+    if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
+    for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
+    document.getElementById('rf-remind')?.remove();
+    marks.invalidate();
+    location.reload();
+  });
+  ui.saved = panel.querySelector('.rf-saved');
+  ui.savedResult = new Map();
+  ui.saved.querySelector('[data-saved-check]').addEventListener('click', (e) => checkSaved(e.currentTarget));
+  ui.saved.querySelector('.rf-saved-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-saved-pin]');
+    if (!b) return;
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    const ok = snaps.pin(b.dataset.savedPin, on);
+    setWarn('saved', '');
+    renderSaved();
+    if (!ok) return setStatus("Couldn't save that: browser storage is full.", true);
+    ui.saved.querySelector(`[data-saved-pin="${CSS.escape(b.dataset.savedPin)}"]`)?.focus();
+    setStatus(on ? `Pinned ${searchLabel(b.dataset.savedPin)}.` : `Unpinned ${searchLabel(b.dataset.savedPin)}.`);
+  });
+  ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
+    const rows = shortlistRows();
+    if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
+    const w = window.open('', '_blank');
+    if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
+    w.document.open();
+    w.document.write(printHtml(rows, new Date(), checklistItems(cfg.checklist)));
+    w.document.close();
+    w.addEventListener('load', () => w.print(), { once: true });
+  });
+  ui.slBar.querySelector('[data-sl=compare]').addEventListener('click', (e) => {
+    ui.compare = !ui.compare;
+    if (ui.compare) { ui.planDay = null; ui.plan.value = ''; }
+    e.currentTarget.setAttribute('aria-pressed', String(ui.compare));
+    ui.panel.classList.toggle('rf-wide', ui.compare);
+    renderShortlist();
+  });
+  ui.slFile.addEventListener('change', async () => {
+    const f = ui.slFile.files?.[0];
+    ui.slFile.value = '';
+    if (!f) return;
+    try {
+      if (f.size > BACKUP_MAX_BYTES) throw new Error('File too large for a backup.');
+      let data;
+      try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
+      if (data?.app !== 'rea-enhancement' || data?.kind !== 'marks' || !isObj(data.m)) throw new Error('Not an rea-enhancement backup.');
+      // Say what it will do first: a restore merges into what's here and can change settings.
+      const sm = backupSummary(data, cfg);
+      const parts = [plural(sm.listings, 'listing') + (sm.listings ? ` (${sm.shortlisted} shortlisted, ${sm.hidden} hidden)` : ''),
+        cfg.remember && sm.searches ? plural(sm.searches, 'saved search', 'es') : '', sm.presets ? plural(sm.presets, 'preset') : ''].filter(Boolean);
+      restoreIn.querySelector('.rf-restore-msg').textContent = `Restore ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
+      restoreIn.hidden = false;
+      ui.pendingRestore = data;
+      restoreIn.querySelector('[data-restore=yes]').focus();
+    } catch (err) { setStatus(err.message, true); }
+  });
+  const restoreIn = panel.querySelector('.rf-restore-in');
+  restoreIn.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-restore]');
+    if (!b) return;
+    const data = ui.pendingRestore;
+    restoreIn.hidden = true;
+    ui.pendingRestore = null;
+    if (b.dataset.restore !== 'yes' || !data) return setStatus('Restore cancelled.');
+    // Undo puts the three stores and the settings back exactly as they were.
+    const ls = storageOr('localStorage'), keys = [MARKS_KEY, SNAP_KEY, PRESETS_KEY];
+    const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
+    try {
+      const n = marks.importJson(data);
+      const c = backupCfg(data.cfg);
+      if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
+      const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
+      presets.importData(data.presets);
+      fillPresets();
+      renderSaved();
+      refreshMarks();
+      ui.restoreUndo = true;
+      offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
+        keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
+        marks.invalidate();
+        ui.applyCfg(cfgBefore);
+        fillPresets(); renderSaved(); refreshMarks();
+        setStatus('Restore undone.');
+      });
+    } catch (err) { setStatus(err.message, true); }
+  });
+  }
+
   // Keyboard: list keys (j/k, s, h, r, p, 1-5…) and drawer keys (Esc, ?, e, f, t, d, m, /), plus
   // the focus trap on phones. Needs the drawer pieces build() made.
   function wireKeys(panel, { launch, narrow, help, toggleHelp, setOpen, expandBtn }) {
@@ -4230,165 +4395,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const sb = e.target.closest('[data-unhide-sb]');
       if (sb) { marks.toggleSuburb(sb.dataset.unhideSb); refreshMarks(); }
     });
-    ui.slBar.querySelector('[data-sl=backup]').addEventListener('click', () => {
-      const data = marks.exportData();
-      data.presets = presets.exportData();
-      if (cfg.remember) data.snapshots = snaps.exportData();
-      data.cfg = backupCfg(cfg);
-      download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
-      backupAt.set(String(Date.now()));
-      setWarn('backup', '');
-      ui.paintStorage?.();
-    });
-    ui.slBar.querySelector('[data-sl=restore]').addEventListener('click', () => ui.slFile.click());
-    ui.slBar.querySelector('[data-sl=share]').addEventListener('click', async () => {
-      const rows = shortlistRows();
-      if (!rows.length) return setStatus('Nothing on the shortlist to share.', true);
-      const notes = rows.some((r) => r.note) && window.confirm('Include your notes in the share link?');
-      const url = shareUrl(rows, { notes });
-      const ok = await copyText(url);
-      setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? ', with notes' : ''}). Anyone with this script can open it.`
-        : 'Clipboard blocked - could not copy the share link.', !ok);
-    });
-    // Incoming share (#rf-share=...): offer to import, then strip it from the URL.
-    const shareIn = panel.querySelector('.rf-share-in');
-    ui.offerShare = (rows) => {
-      if (!rows?.length) return;
-      shareIn.hidden = false;
-      shareIn.querySelector('.rf-share-msg').textContent = `${plural(rows.length, 'shared listing')}:`;
-      ui.pendingShare = rows;
-      launch.hidden = false;
-      setOpen(true);
-    };
-    shareIn.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-share]');
-      if (!b) return;
-      const rows = ui.pendingShare || [];
-      if (b.dataset.share === 'add') {
-        const n = marks.setMany(rows, 's', true);
-        for (const r of rows) if (r.note && !marks.note(r.id)) marks.setNote(r.id, `Shared: ${r.note}`);
-        refreshMarks();
-        setView('shortlist');
-        setStatus(`Added ${plural(n, 'shared listing')} to your shortlist.`);
-      }
-      shareIn.hidden = true;
-      ui.pendingShare = null;
-    });
-    ui.planIcs = (btn) => {
-      if (!ui.planDay) return;
-      const day = ui.planDay;
-      let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
-        inspectCancelledAt: typeof r.inspectCancelledAt === 'number' && ymdIn(r.inspectCancelledAt, tzOf(r)) === day ? r.inspectCancelledAt : null })); // this day's cancellations only
-      if (btn.dataset.planIcs === 'route') { // just the suggested sessions
-        const picked = [...bestRoute(planDay(rows, day)).picked];
-        rows = rows.map((r) => ({ ...r, inspections: r.inspections.filter((i) => picked.some((x) => x.r.id === r.id && x.at === i.at)) })).filter((r) => r.inspections.length);
-      }
-      downloadIcs(rows);
-    };
-    // The More menu closes once an item is chosen (or on a click elsewhere).
-    const slMenu = ui.slBar.querySelector('.rf-menu');
-    slMenu.addEventListener('click', (e) => { if (e.target.closest('.rf-menu-list button')) slMenu.open = false; });
-    document.addEventListener('click', (e) => { if (slMenu.open && !slMenu.contains(e.target)) slMenu.open = false; });
-    ui.slBar.querySelector('[data-sl=recheck]').addEventListener('click', (e) => recheckShortlist(e.currentTarget));
-    const storageLine = panel.querySelector('.rf-storage-n');
-    const paintStorage = () => {
-      const ls = storageOr('localStorage'), ss = storageOr('sessionStorage');
-      const c = marks.counts(), n = Object.keys(snaps.exportData()).length;
-      const per = snaps.sizes().map((x) => `${searchLabel(x.key)} ${fmtBytes(x.bytes)}${x.lite ? ' (text trimmed to fit)' : ''}`);
-      const last = +backupAt.get() || 0;
-      storageLine.textContent = `Last backup: ${last ? ago(Date.now() - last) : 'never'}. Stored in this browser only: ${fmtBytes(toolBytes(ls) + toolBytes(ss))} (${c.starred} shortlisted, ${c.hidden} hidden, ${plural(n, 'remembered search', 'es')}).`
-        + (per.length ? ` Remembered: ${per.join(' · ')}.` : '');
-    };
-    ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
-    panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
-    panel.querySelector('[data-forget]').addEventListener('click', () => {
-      if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
-      for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
-      document.getElementById('rf-remind')?.remove();
-      marks.invalidate();
-      location.reload();
-    });
-    ui.saved = panel.querySelector('.rf-saved');
-    ui.savedResult = new Map();
-    ui.saved.querySelector('[data-saved-check]').addEventListener('click', (e) => checkSaved(e.currentTarget));
-    ui.saved.querySelector('.rf-saved-list').addEventListener('click', (e) => {
-      const b = e.target.closest('[data-saved-pin]');
-      if (!b) return;
-      const on = b.getAttribute('aria-pressed') !== 'true';
-      const ok = snaps.pin(b.dataset.savedPin, on);
-      setWarn('saved', '');
-      renderSaved();
-      if (!ok) return setStatus("Couldn't save that: browser storage is full.", true);
-      ui.saved.querySelector(`[data-saved-pin="${CSS.escape(b.dataset.savedPin)}"]`)?.focus();
-      setStatus(on ? `Pinned ${searchLabel(b.dataset.savedPin)}.` : `Unpinned ${searchLabel(b.dataset.savedPin)}.`);
-    });
-    ui.slBar.querySelector('[data-sl=print]').addEventListener('click', () => {
-      const rows = shortlistRows();
-      if (!rows.length) return setStatus('Nothing on the shortlist to print.', true);
-      const w = window.open('', '_blank');
-      if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
-      w.document.open();
-      w.document.write(printHtml(rows, new Date(), checklistItems(cfg.checklist)));
-      w.document.close();
-      w.addEventListener('load', () => w.print(), { once: true });
-    });
-    ui.slBar.querySelector('[data-sl=compare]').addEventListener('click', (e) => {
-      ui.compare = !ui.compare;
-      if (ui.compare) { ui.planDay = null; ui.plan.value = ''; }
-      e.currentTarget.setAttribute('aria-pressed', String(ui.compare));
-      ui.panel.classList.toggle('rf-wide', ui.compare);
-      renderShortlist();
-    });
-    ui.slFile.addEventListener('change', async () => {
-      const f = ui.slFile.files?.[0];
-      ui.slFile.value = '';
-      if (!f) return;
-      try {
-        if (f.size > BACKUP_MAX_BYTES) throw new Error('File too large for a backup.');
-        let data;
-        try { data = JSON.parse(await f.text()); } catch { throw new Error('Not a JSON file.'); }
-        if (data?.app !== 'rea-enhancement' || data?.kind !== 'marks' || !isObj(data.m)) throw new Error('Not an rea-enhancement backup.');
-        // Say what it will do first: a restore merges into what's here and can change settings.
-        const sm = backupSummary(data, cfg);
-        const parts = [plural(sm.listings, 'listing') + (sm.listings ? ` (${sm.shortlisted} shortlisted, ${sm.hidden} hidden)` : ''),
-          cfg.remember && sm.searches ? plural(sm.searches, 'saved search', 'es') : '', sm.presets ? plural(sm.presets, 'preset') : ''].filter(Boolean);
-        restoreIn.querySelector('.rf-restore-msg').textContent = `Restore ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
-        restoreIn.hidden = false;
-        ui.pendingRestore = data;
-        restoreIn.querySelector('[data-restore=yes]').focus();
-      } catch (err) { setStatus(err.message, true); }
-    });
-    const restoreIn = panel.querySelector('.rf-restore-in');
-    restoreIn.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-restore]');
-      if (!b) return;
-      const data = ui.pendingRestore;
-      restoreIn.hidden = true;
-      ui.pendingRestore = null;
-      if (b.dataset.restore !== 'yes' || !data) return setStatus('Restore cancelled.');
-      // Undo puts the three stores and the settings back exactly as they were.
-      const ls = storageOr('localStorage'), keys = [MARKS_KEY, SNAP_KEY, PRESETS_KEY];
-      const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
-      try {
-        const n = marks.importJson(data);
-        const c = backupCfg(data.cfg);
-        if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
-        const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
-        presets.importData(data.presets);
-        fillPresets();
-        renderSaved();
-        refreshMarks();
-        ui.restoreUndo = true;
-        offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
-          keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
-          marks.invalidate();
-          ui.applyCfg(cfgBefore);
-          fillPresets(); renderSaved(); refreshMarks();
-          setStatus('Restore undone.');
-        });
-      } catch (err) { setStatus(err.message, true); }
-    });
-
+    wireShortlistBar(panel);
     ui.run.addEventListener('click', () => busy || run());
     ui.partial.querySelector('[data-resume]').addEventListener('click', () => busy || run(true, { resume: true }));
     ui.refresh.addEventListener('click', () => busy || run(true));
