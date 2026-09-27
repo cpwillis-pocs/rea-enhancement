@@ -132,12 +132,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'a partial crawl is not remembered');
     assert.notEqual(await page.getAttribute('#rf-run', 'aria-disabled'), 'true', 'usable after failure');
     assert.match(await page.textContent('.rf-warn-msg'), /bot check, so fetching is paused until/, 'the bot check pauses fetching');
-    assert.ok(await page.evaluate(() => +sessionStorage.getItem('rea-avail-filter/paused') > Date.now()));
+    assert.ok(await page.evaluate(() => +localStorage.getItem('rea-avail-filter/paused') > Date.now()));
     blocked = false; hits.length = 0;
     await page.click('.rf-partial [data-resume]');
     await page.waitForFunction(() => /Paused/.test(document.querySelector('.rf-partial').textContent));
     assert.deepEqual(hits, [], 'nothing fetched while paused');
-    await page.evaluate(() => sessionStorage.removeItem('rea-avail-filter/paused')); // the 10 minutes are up
+    await page.evaluate(() => localStorage.removeItem('rea-avail-filter/paused')); // the 10 minutes are up
     await page.click('.rf-partial [data-resume]');
     await waitStatus(page, /18 listings match|of 18 listings match/);
     assert.ok(await page.$('.rf-partial[hidden]'), 'resume clears the notice');
@@ -244,6 +244,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('11', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
+    const other = await open(ctx); // a second tab on the same site
     await run(page);
     const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
@@ -1480,7 +1481,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const base = serve([], { pages: 2 });
     const hits = [];
-    await ctx.addInitScript(() => sessionStorage.setItem('rea-avail-filter/paused', String(Date.now() + 5 * 60 * 1000)));
+    await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/paused', String(Date.now() + 5 * 60 * 1000)));
     const page = await open(ctx, SEARCH, { route: (route) => { const u = route.request().url(); if (/\/list-2/.test(u)) hits.push(u); return base(route); } });
     await page.click('#rf-launch');
     assert.match(await page.textContent('.rf-warn-msg'), /fetching is paused until/);
@@ -1595,6 +1596,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
       if (/\/property-/.test(route.request().url())) { hits++; return route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Please verify you are human</html>' }); }
       return base(route);
     } });
+    const other = await open(ctx); // a second tab on the same site
     await run(page);
     const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
@@ -1603,8 +1605,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await waitStatus(page, /Re-check stopped after 0 listings\. Paused:/, 20000);
     assert.equal(hits, 1, 'no second listing fetched into the challenge');
     assert.match(await page.textContent('.rf-warn-msg'), /fetching is paused until/);
-    console.log('re-check challenge page pauses: ok');
-    await done(page); await ctx.close();
+    await other.click('#rf-launch');
+    await other.waitForFunction(() => /fetching is paused until/.test(document.querySelector('.rf-warnbar:not([hidden]) .rf-warn-msg')?.textContent || ''));
+    console.log('re-check challenge page pauses, in every tab: ok');
+    await done(page); await done(other); await ctx.close();
   });
 
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
@@ -1618,7 +1622,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const report = await page.evaluate(() => window.reaFilter.selfcheck());
     assert.match(report, /inspections 0%\/\d+%/);
     assert.match(report, /page: \/rent\//);
-    console.log('drift canary + selfcheck: ok');
+    await page.click('.rf-warnbar .rf-report');
+    await waitStatus(page, /^Report copied/);
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    assert.match(copied, /^rea-enhancement .*[\s\S]*listing shape:\n\{/, 'selfcheck and shape in one paste');
+    assert.ok(!/Curlewis|Bondi Realty|Pets considered/.test(copied), 'no listing text, names or addresses');
+    console.log('drift canary + selfcheck + copy report: ok');
     await done(page); await ctx.close();
   });
 

@@ -153,5 +153,6 @@ test('pauseGate: trips for PAUSE_MS, then lifts; bad or past values mean not pau
   now = t - 1; assert.equal(g.until(), t, 'still paused a moment before');
   now = t; assert.equal(g.until(), 0, 'lifted at the time');
   m.setItem('rea-avail-filter/paused', 'junk'); assert.equal(g.until(), 0);
+  now = 5000; m.setItem('rea-avail-filter/paused', '4000'); assert.equal(g.until(), 0); assert.equal(m.getItem('rea-avail-filter/paused'), null, 'expired value removed');
   g.trip(5); g.clear(); assert.equal(g.until(), 0);
 });

@@ -1044,10 +1044,12 @@
 
   // A refusal that looks like REA's bot protection: the caller pauses all fetching (pauseGate).
   const botCheck = (msg) => Object.assign(new Error(msg), { botCheck: true });
-  // sessionStorage `paused` = when fetching may resume. Per tab, so a new tab can try again.
+  // localStorage `paused` = when fetching may resume, for every tab: a second tab fetching into
+  // an active bot check would make it worse. An expired value is removed when read.
+  const PAUSE_KEY = `${TOOL_PREFIX}paused`;
   const pauseGate = (storage, now = () => Date.now()) => {
-    const k = keyStore(storage, `${TOOL_PREFIX}paused`);
-    const until = () => { const t = +k.get() || 0; return t > now() ? t : 0; };
+    const k = keyStore(storage, PAUSE_KEY);
+    const until = () => { const raw = k.get(); if (raw == null) return 0; const t = +raw || 0; if (t > now()) return t; k.clear(); return 0; };
     return { until, trip(ms = PAUSE_MS) { const t = now() + ms; k.set(String(t)); return t; }, clear: () => k.clear() };
   };
 
@@ -2988,6 +2990,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <label class="rf-check"><input type="checkbox" id="rf-remember">Remember results between visits</label>
         <label class="rf-check"><input type="checkbox" id="rf-remindSaved">Remind me to check saved searches (at most daily)</label>
         <div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
+          <button type="button" class="rf-btn sec" data-report title="Diagnostics for a bug report: fields found, recent errors and one listing's structure (no listing text, names or addresses)">Copy report</button>
           <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>
         <fieldset class="rf-weights"><legend>Best match: how much each counts</legend>
           ${[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([id, label]) => `<label>${label}<select id="rf-${id}">
@@ -3055,7 +3058,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <button class="rf-btn" data-share="add">Add to my shortlist</button>
       <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
     </div>
-    <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
+    <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-btn sec rf-report" data-report hidden>Copy report</button><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
     <div class="rf-peek" hidden role="dialog" aria-label="Photo"><img alt=""><div class="rf-peek-cap"></div></div>
     <div class="rf-news" hidden role="note"><span class="rf-news-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss what's new">×</button></div>
     <div class="rf-status" role="status" aria-live="polite"></div>
@@ -3613,6 +3616,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     };
     toFilters.addEventListener('click', () => ui.toFilters());
     wirePeek(panel);
+    for (const b of panel.querySelectorAll('[data-report]')) b.addEventListener('click', async () => {
+      const ok = await copyText(reportText());
+      setStatus(ok ? 'Report copied: paste it into an issue ("REA data format changed"). It has no listing text, names or addresses.' : 'Clipboard blocked - run reaFilter.selfcheck() in the console instead.', !ok);
+    });
     ui.warnbar.querySelector('.rf-warn-x').addEventListener('click', () => { ui.warnDismissed = ui.warnbar.querySelector('.rf-warn-msg').textContent; ui.warnbar.hidden = true; });
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
     // Its root is whatever scrolls the results (the drawer, or the list when expanded), so it is
@@ -4174,6 +4181,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (msg) warnings[kind] = msg; else delete warnings[kind];
     const text = Object.values(warnings).join(' ');
     ui.warnbar.hidden = !text || ui.warnDismissed === text;
+    ui.warnbar.querySelector('.rf-report').hidden = !(warnings.drift || warnings.cards || warnings.schema);
     ui.warnbar.querySelector('.rf-warn-msg').textContent = text;
   };
   const setStatus = (msg, isErr) => {
@@ -4202,7 +4210,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       (truncated ? ` Only the first ${MAX_PAGES} pages were read - narrow the search for full coverage.` : '') +
       (note ? ` ${note}` : '') + matchHint);
     const warn = schemaWarnings(cache);
-    setWarn('schema', warn.length ? `REA's data format may have changed (${warn.join('; ')}). Run reaFilter.probe() in the console and report the output.` : '');
+    setWarn('schema', warn.length ? `REA's data format may have changed (${warn.join('; ')}). Copy report, then paste it into an issue on the script's GitHub page.` : '');
   }
 
   // Nothing matches: offer the filters whose removal brings back the most listings.
@@ -4643,7 +4651,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       try { drops = health.record(res.rows); } catch (e) { logError(`health: ${e.message}`); }
       const moved = resultsPath.fallback ? [`results are now under ${resultsPath.key}.${resultsPath.field}`] : [];
       const drift = [...moved, ...drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`)];
-      setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Run reaFilter.selfcheck() in the console and report it.` : '');
+      setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
       store.set(key, res.rows, res.truncated);
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
@@ -4676,7 +4684,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const memoFresh = (url) => { const hit = pageMemo.get(url); return !!hit && !hit.signal?.aborted && Date.now() - hit.at < ROWS_TTL_MS; };
   // Bot check: every fetch (search, Check all, Re-check, card annotation) stops until PAUSE_MS
   // has passed, so retrying doesn't make a block worse. Pages already read are still served.
-  const pause = pauseGate(storageOr('sessionStorage'));
+  const pause = pauseGate(storageOr('localStorage'));
   let pauseTimer = 0;
   const pauseMsg = (t) => `REA showed a bot check, so fetching is paused until ${dtf({ hour: 'numeric', minute: '2-digit' }).format(t)}. Browse REA normally for a while; the drawer still works on what's already read.`;
   const pausedErr = (t) => Object.assign(new Error(`Paused: ${pauseMsg(t)}`), { paused: true });
@@ -4970,7 +4978,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (cardWarnTimer) return;
     cardWarnTimer = setTimeout(() => {
       cardWarnTimer = null;
-      if (isSearchPage(location.href) && !cardsOnPage().size) setWarn('cards', "REA's result cards weren't recognised, so the badges and card buttons are off (the drawer still works). Run reaFilter.selfcheck() in the console and report it.");
+      if (isSearchPage(location.href) && !cardsOnPage().size) setWarn('cards', "REA's result cards weren't recognised, so the badges and card buttons are off (the drawer still works). Copy report, then paste it into an issue on the script's GitHub page.");
     }, CARD_WARN_MS);
   };
   function annotate() {
@@ -5086,6 +5094,27 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // Console helpers: reaFilter.probe() shows which listing fields exist in live data.
+  // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
+  const selfcheckText = () => {
+    // Before any search, page 1's own data stands in, so the fill rates aren't all 0%.
+    const early = !cache && !!boot && boot.key === searchKey(location.href); // not another search's page 1 after in-app navigation
+    const rows = cache || (early ? rowsFrom(boot.results) : []);
+    const rates = fillRates(rows), usual = health.usual();
+    const report = [
+      `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${early ? ' (page 1 only: no search run yet)' : truncated ? ' (truncated)' : ''}`,
+      `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
+      `cards: ${cardInfo.found} found (${cardInfo.mode === 'fallback' ? 'fallback: REA no longer uses <article>' : cardInfo.mode})`,
+      `results path: ${resultsPath.key ? `${resultsPath.key}.${resultsPath.field}${resultsPath.fallback ? ' (fallback: REA renamed it)' : ''}` : 'not read yet'}`,
+      `discovered paths: ${Object.entries(found).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'}`,
+      `schema warnings: ${schemaWarnings(rows).join('; ') || 'none'}`,
+      `recent errors: ${errorLog.length ? `\n  ${errorLog.join('\n  ')}` : 'none'}`,
+    ].join('\n');
+    return report;
+  };
+  // Paste-safe structure of one listing (no descriptions, names or addresses) for issues.
+  const shapeText = () => (rawSample ? JSON.stringify({ script: window.reaFilter.version, resultsPath: `${resultsPath.key}.${resultsPath.field}`, listing: shapeOf(rawSample) }, null, 1) : '');
+  // Both, for the Copy report buttons: what an "REA data format changed" issue asks for.
+  const reportText = () => [selfcheckText(), shapeText()].filter(Boolean).join('\n\nlisting shape:\n');
   window.reaFilter = {
     version: (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev',
     rows: () => cache,
@@ -5101,29 +5130,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return out;
     },
     raw: () => rawSample,
-    // Paste-safe structure of one listing (no descriptions, names or addresses) for issues.
     shape: () => {
-      if (!rawSample) return 'No listing seen yet - load a results page or run a search.';
-      const out = JSON.stringify({ script: window.reaFilter.version, resultsPath: `${resultsPath.key}.${resultsPath.field}`, listing: shapeOf(rawSample) }, null, 1);
+      const out = shapeText();
+      if (!out) return 'No listing seen yet - load a results page or run a search.';
       console.log(out);
       copyText(out).catch(() => {});
       return out;
     },
-    // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
     selfcheck: () => {
-      // Before any search, page 1's own data stands in, so the fill rates aren't all 0%.
-      const early = !cache && !!boot && boot.key === searchKey(location.href); // not another search's page 1 after in-app navigation
-      const rows = cache || (early ? rowsFrom(boot.results) : []);
-      const rates = fillRates(rows), usual = health.usual();
-      const report = [
-        `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${early ? ' (page 1 only: no search run yet)' : truncated ? ' (truncated)' : ''}`,
-        `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
-        `cards: ${cardInfo.found} found (${cardInfo.mode === 'fallback' ? 'fallback: REA no longer uses <article>' : cardInfo.mode})`,
-        `results path: ${resultsPath.key ? `${resultsPath.key}.${resultsPath.field}${resultsPath.fallback ? ' (fallback: REA renamed it)' : ''}` : 'not read yet'}`,
-        `discovered paths: ${Object.entries(found).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'}`,
-        `schema warnings: ${schemaWarnings(rows).join('; ') || 'none'}`,
-        `recent errors: ${errorLog.length ? `\n  ${errorLog.join('\n  ')}` : 'none'}`,
-      ].join('\n');
+      const report = selfcheckText();
       console.log(report);
       copyText(report).catch(() => {});
       return report;
@@ -5151,7 +5166,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
       step('sync', () => window.addEventListener('storage', (e) => {
         // Another tab changed the shortlist/hidden/notes: pick it up here.
-        if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
+        if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
+      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); refreshMarks(); }
         // Settings saved in another tab: take its display settings (places, checklist, weights,
         // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
         if (e.key === CFG_KEY) {
