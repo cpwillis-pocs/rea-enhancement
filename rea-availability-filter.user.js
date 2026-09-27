@@ -193,7 +193,6 @@
   });
   // Summary fields a search result always carries in full (empty means none, not unknown).
   const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk', 'bp'];
-  // Label of an upcoming stored inspection missing from the fresh list ('' if none went).
   // The upcoming stored inspection missing from the fresh list (null if none went). A session
   // still listed by label only (no time) is not missing.
   const cancelledInspection = (old, next, t) => {
@@ -473,7 +472,6 @@
         if (gone) e.x = now(); else delete e.x;
         save();
       },
-      // You opened the listing (from the drawer, a card or its page): "opened 2d ago", Not-opened filter.
       // Cycle one checklist item: unknown -> yes -> no -> unknown.
       cycleCheck(id, label) {
         const { m } = fresh();
@@ -495,6 +493,7 @@
         if (HIDE_REASONS.includes(reason)) e.hr = reason; else delete e.hr;
         save();
       },
+      // You opened the listing (from the drawer, a card or its page): "opened 2d ago", Not-opened filter.
       setOpened(id) {
         if (!isListingId(id)) return;
         const { m } = fresh();
@@ -2573,13 +2572,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)}
   .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-  #rf-toast{position:fixed;right:20px;bottom:72px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(360px,calc(100vw - 32px));
-    padding:10px 12px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
+  /* Floating notes on REA's page: undo toast and saved-search reminder by the launcher, listing bar. */
+  #rf-toast,#rf-remind,#rf-lbar{position:fixed;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 12px;border-radius:10px;
+    background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
+  #rf-toast{right:20px;bottom:72px;max-width:min(360px,calc(100vw - 32px))}
   #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
-  #rf-remind{position:fixed;right:20px;bottom:72px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:min(340px,calc(100vw - 32px));
-    padding:10px 12px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
-  #rf-lbar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:min(420px,calc(100vw - 32px));
-    padding:8px;border-radius:10px;background:var(--rf-bg);color:var(--rf-fg);border:1px solid var(--rf-line);box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px system-ui,sans-serif}
+  #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
+  #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px))}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
   #rf-lbar button[aria-pressed=true]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
   #rf-lbar button:focus-visible,#rf-lbar select:focus-visible{outline:2px solid var(--rf-accent);outline-offset:2px}
@@ -2665,6 +2664,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   const EMPTY_INTRO = 'Set your dates, then search.<br>Every result page is merged and sorted by availability.';
   // What scrolls the results: the list itself when expanded, else the whole drawer.
+  // A listing (or a control inside it) found again after a re-render, by id.
+  const itemEl = (id, inner = '') => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"]${inner ? ` ${inner}` : ''}`);
   const listScroller = () => (ui.panel.classList.contains('rf-full') ? ui.list : ui.panel);
   // New results start at their top; in the side drawer only scroll up if the list's top has
   // gone above the header (a filter change near the top of the drawer stays put).
@@ -2849,7 +2850,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <ul class="rf-saved-list"></ul>
         <button type="button" class="rf-btn sec" data-saved-check title="Fetch each remembered search (one page at a time) and count what's new">Check all for new listings</button>
       </details>
-      <div class="rf-row rf-presets">
+      <div class="rf-row">
         <select class="rf-preset" aria-label="Filter presets"></select>
       </div>
       <div class="rf-row">
@@ -3010,7 +3011,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (!sel) return false;
         sel.value = APP_STATUSES[+e.key];
         sel.dispatchEvent(new Event('change', { bubbles: true }));
-        ui.list.querySelector(`.rf-item[data-id="${CSS.escape(it.dataset.id)}"]`)?.focus(); // after the re-render
+        itemEl(it.dataset.id)?.focus(); // after the re-render
         return true;
       }
       // Space on a button inside the listing presses the button; on the listing itself it's the photo.
@@ -3048,7 +3049,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         const at = document.activeElement.closest?.('.rf-item')?.dataset.id, c = panel.querySelector('#rf-compact');
         c.checked = !c.checked;
         c.dispatchEvent(new Event('change', { bubbles: true }));
-        if (at) ui.list.querySelector(`.rf-item[data-id="${CSS.escape(at)}"]`)?.focus();
+        if (at) itemEl(at)?.focus();
         return;
       }
       if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
@@ -3078,7 +3079,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
       marks.cycleCheck(id, label);
       refreshMarks();
-      ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] [data-ck="${CSS.escape(label)}"]`)?.focus();
+      itemEl(id, `[data-ck="${CSS.escape(label)}"]`)?.focus();
       return;
     }
     const drop = e.target.closest('[data-drop-chip]');
@@ -3150,7 +3151,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const on = marks.toggle(id, act, rowById(id));
     refreshMarks();
     // Re-render replaced the button: put focus back (or on the next item if this one left the list).
-    const q = (i) => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(i)}"] [data-act="${act}"]`);
+    const q = (i) => itemEl(i, `[data-act="${act}"]`);
     (q(id) || (next && q(next)) || ui.list).focus?.();
     if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
   });
@@ -3469,7 +3470,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const id = sel.closest('.rf-item').dataset.id;
       marks.setStatus(id, sel.value);
       refreshMarks();
-      ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"] select[data-app]`)?.focus();
+      itemEl(id, 'select[data-app]')?.focus();
     });
 
     for (const tab of ui.tabs) {
@@ -3961,7 +3962,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.status.append(why);
   }
 
-  // One-shot Undo link in the status line.
   // A search that stopped partway: say how far it got, offer to pick up from there.
   function showPartial(failed) {
     if (!ui.partial) return;
@@ -3969,6 +3969,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (failed) ui.partial.querySelector('.rf-partial-msg').textContent = `Read ${failed.page - 1} of ${failed.max} pages; page ${failed.page} failed (${failed.message}). Showing the listings read so far.`;
   }
 
+  // One-shot Undo link in the status line.
   function offerUndo(msg, undo) {
     setStatus(msg);
     const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: 'Undo' });
@@ -4079,7 +4080,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
       <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
         const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
-        const inner = `<span class="rf-bar-l">${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;
+        const inner = `<span>${esc(weekLabel(w))}</span><span class="rf-bar" style="width:${Math.round((w.n / top) * 100)}%"></span><span class="rf-bar-n">${w.n}</span>`;
         return `<li>${data && w.n ? `<button type="button"${data} title="Show listings available ${w.from ? `${esc(shortDate(w.from))} to ${esc(shortDate(w.to))}` : esc(w.label.toLowerCase())}">${inner}</button>` : `<div>${inner}</div>`}</li>`;
       }).join('')}</ul>
       <div class="rf-meta">Over the listings your filters show. Medians need ${MEDIAN_MIN}+ priced listings. Click a week to filter to it.</div></div>`;
@@ -4395,7 +4396,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
   function goToPlace(p) {
     for (let n = 0; n < 20 && ui.list.querySelectorAll('.rf-item').length < p.shown && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
-    const el = ui.list.querySelector(`.rf-item[data-id="${CSS.escape(p.id)}"]`);
+    const el = itemEl(p.id);
     if (!el) return false;
     el.scrollIntoView({ block: 'start' });
     el.focus({ preventScroll: true });
