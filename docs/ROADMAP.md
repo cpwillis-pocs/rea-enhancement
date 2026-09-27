@@ -2,7 +2,7 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.28.0)
+## Where it stands (v2.29.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
@@ -14,8 +14,8 @@ The project went from a single-purpose availability-date filter (1.0.0) to a ful
 | **Inspecting** | The next stop and your checklist on the listing page, inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders, after-inspection prompts, cancelled-inspection notices. |
 | **Returning** | Remembered and pinned searches with new / gone listings and a rent trend, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
 | **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Full keyboard control, dark mode (system, or set in Settings), phone layout, screen-reader labels (card buttons named per listing), High Contrast styles, a first-run welcome, badges and quick actions on REA's own cards, a bar on listing pages. |
-| **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a size budget for remembered searches, a 10-minute pause after a bot check, a double-run guard, a one-time what's-new note after updates. |
-| **Project** | 197 unit tests (including shapes from `reaFilter.shape()`), 67 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, a local live check (`npm run live`), and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a safety copy in IndexedDB, a size budget for remembered searches, a 10-minute pause after a bot check, a double-run guard, a one-time what's-new note after updates. |
+| **Project** | 203 unit tests (including shapes from `reaFilter.shape()`), 70 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, a local live check (`npm run live`), and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -44,24 +44,23 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 - **Storage is per browser** and shared with REA's own code. Backups (Settings) are the way to move data between browsers. Reviewed marks are only backed up for listings you also shortlisted, hid, noted or gave a status (so storage doesn't grow with every listing you look at).
 - **Floor size is only as good as the listing**: most rentals don't state it, and the text reading can pick a figure that isn't the internal area. Min m² leaves out listings that don't say.
 - **A challenge page that still carries results isn't detected** by the bot-check pause.
-- **Very large remembered searches stay over the size budget**: past about 1000 listings, even packed rows without text add up to more than 400K characters.
+- **Very large remembered searches stay over the size budget**: past about 1100 listings, even packed rows without text add up to more than 400K characters.
 - **The map is a flat projection with straight lines**: fine at suburb scale, no streets, and only listings REA gives coordinates for.
 - **Photo peek assumes REA serves an 800×600 version** of each photo. If it doesn't, the peek falls back to the thumbnail.
 
 ## Ideas not built yet
 
-Everything from the 2.27.0 audit (ten ideas, its bugs and its slow spots) shipped in 2.28.0 (see the [CHANGELOG](../CHANGELOG.md#2280)), except two parts judged not worth their risk: checking a results page after the first for a data blob with no pagination (a false positive would pause every tab), and throttling status announcements (the status line is already `aria-busy` during searches, Check all and Re-check). Still open from earlier: doing the end-of-search save in a later task, and merging the stores' try-save-report code and the `SORTS` / `SORT_UNKNOWN` accessors. Run a fresh audit for the next list. When you build one, move it into the CHANGELOG, update this page, and add its e2e block (lint checks the count in [ARCHITECTURE.md](ARCHITECTURE.md#tests-at-a-glance)).
+Everything from the 2.28.0 audit (ten ideas, its bugs and its slow spots) shipped in 2.29.0 (see the [CHANGELOG](../CHANGELOG.md#2290)), except, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. Also still open: doing the end-of-search save in a later task. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
 
 ## Releasing
 
-1. `npm run release x.y.z` bumps `@version`, adds a CHANGELOG stub and updates the version and test counts here and in ARCHITECTURE.md (lint checks the version and e2e block count). Fill in the CHANGELOG section.
-1. `npm run ci` and `COVERAGE_MIN=98 npm run coverage` pass locally.
-1. `npm run live` passes (local only: one real search, core paths, card detection). If it saves a shape that differs from the last one in `test/shapes/`, check it has nothing personal and commit it.
-2. Bump `// @version`, and add a `## x.y.z` section at the top of CHANGELOG.md.
-3. For a release worth announcing, update `WHATS_NEW` (at most 3 short lines). Lint checks its version.
-4. If the UI changed visibly, run `npm run screenshots` and commit `docs/screenshots`.
-5. Bump `ROWS_VERSION` or `FEAT_V` if their rules apply ([ARCHITECTURE.md](ARCHITECTURE.md#versions-that-must-move)).
-6. Push to `main`. Installs auto-update from the raw file URL.
+1. `npm run release x.y.z`: bumps `@version`, adds a CHANGELOG stub, updates the version and test counts here and in ARCHITECTURE.md (lint checks the version and e2e block count), and warns when there is no recent real shape. Fill in the CHANGELOG section.
+2. For a release worth announcing, update `WHATS_NEW` (at most 3 short lines). Lint checks its version.
+3. Bump `ROWS_VERSION` or `FEAT_V` if `test/versions.test.js` says so ([ARCHITECTURE.md](ARCHITECTURE.md#versions-that-must-move)).
+4. If the UI changed visibly, `npm run screenshots` and commit `docs/screenshots`.
+5. `npm run ci` (lint, unit, smoke, edge, accessibility) and `COVERAGE_MIN=98 npm run coverage` pass locally.
+6. `npm run live` passes (local only: one real search and one listing page). If it saves a shape, check it has nothing personal and commit it.
+7. Push to `main`. Installs auto-update from the raw file URL.
 
 ## Before going public
 

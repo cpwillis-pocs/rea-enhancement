@@ -8,8 +8,8 @@ The userscript is a single IIFE with `@grant none` and no dependencies. A `typeo
 
 | Half | Contents | Tested by |
 |---|---|---|
-| **Pure** (above the guard) | Parsing REA's page data, text heuristics, filters and sorts, medians, route planning, exports (CSV/TSV/ICS/print), share links, and the storage stores (`rowStore`, `marksStore`, `snapshotStore`, `presetStore`, `healthStore`) with an injectable `storage` and clock. Exported with `module.exports`. | `test/*.test.js` (node:test) |
-| **UI** (below the `// ----- ui` marker) | The drawer (`panelHtml()` is its markup; `build()` wires it, with `wireKeys()`, `wireList()`, `wireResize()` and `wirePeek()` split out), REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
+| **Pure** (above the guard) | Parsing REA's page data, the views drawn in place of the list (`planHtml`, `mapHtml`, `marketHtml`, `compareHtml`), text heuristics, filters and sorts, medians, route planning, exports (CSV/TSV/ICS/print), share links, and the storage stores (`rowStore`, `marksStore`, `snapshotStore`, `presetStore`, `healthStore`) with an injectable `storage` and clock. Exported with `module.exports`. | `test/*.test.js` (node:test) |
+| **UI** (below the `// ----- ui` marker) | The drawer (`panelHtml()` is its markup; `build()` wires it, with `wireKeys()`, `wireList()`, `wireResize()`, `wirePeek()` and `wireShortlistBar()` split out; lint keeps `build()` under 480 lines), REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
 
 New logic goes in the pure half wherever possible, with a unit test.
 
@@ -32,7 +32,7 @@ All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces 
 |---|---|---|---|
 | `v1` | localStorage | Settings (`DEFAULT_CFG` keys, sanitised by type). `building` is never saved. | none |
 | `marks/v1` | localStorage | Per-listing marks (see below), plus hidden agencies (`ag`) and hidden suburbs (`sb`) | 5000 listings; unmarked ones are dropped 90 days after they were last seen |
-| `snapshots/v1` | localStorage | Remembered searches: slim rows, ids and baseline for "new since last visit", gone rows, `pin`, `lite`, `trend`; stored packed (`f: 2`, column names in `rk`, rows as arrays, REA's URL prefixes dropped), read back as objects, older unpacked entries still read (one point per visit: count and median rent per bed count, at most 12) | 3 searches (pinned kept first), 300 characters of text per field, about 400K characters per search (`SNAP_ENTRY_BUDGET`: past it the rows furthest down lose their text, then gone rows theirs, then rows their features and headlines, then gone rows go; the entry is marked `lite`. Packed rows need about 400 characters each even then, so above roughly 1000 listings an entry stays over budget) |
+| `snapshots/v1` | localStorage | Remembered searches: slim rows, ids and baseline for "new since last visit", gone rows, `pin`, `lite`, `trend`; stored packed (`f: 3`, column names in `rk`, rows as arrays, REA's URL prefixes dropped, amenities as `"pets,!gas"`, coordinates to 5 decimals; `f: 2` from 2.28 still reads), read back as objects, older unpacked entries still read (one point per visit: count and median rent per bed count, at most 12) | 3 searches (pinned kept first), 300 characters of text per field, about 400K characters per search (`SNAP_ENTRY_BUDGET`: past it the rows furthest down lose their text, then gone rows theirs, then rows their features and headlines, then gone rows go; the entry is marked `lite`. Packed rows need about 360 characters each even then, so above roughly 1100 listings an entry stays over budget) |
 | `presets/v1` | localStorage | Named filter presets, and the search each is bound to | none |
 | `health/v1` | localStorage | Moving average of how often each field is filled, for drift warnings | none |
 | `rows/<search>` | sessionStorage | This tab's results cache, versioned by `ROWS_VERSION` | 2 searches, 10 minutes |
@@ -40,6 +40,7 @@ All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces 
 | `place` | sessionStorage | Per search (and one for the Shortlist tab): the listing you were on, how many were shown, and the filters it applies to | 10 entries |
 | `lbar-min`, `wide`, `width`, `seen-version`, `remind-at` | localStorage | Listing bar minimised, expanded drawer, drawer width, last what's-new version, saved-search reminder time | none |
 | `paused` | localStorage | When fetching may resume after a bot check, for every tab (`storage` events update the others); removed once past | one timestamp |
+| `mirror` (IndexedDB database `rea-avail-filter/mirror`, store `kv`, key `copy`) | IndexedDB | A safety copy of what a backup holds (marks you chose, presets, settings), written 2 s after a change, never overwritten with an empty shortlist; offered back when marks are found empty; Cancel or Delete all my data deletes it | one copy |
 | `backup-at`, `backup-nudge-at` | localStorage | When you last downloaded a backup, and when the "no backup" reminder last showed | none |
 
 A failed write of something you chose (marks, settings, presets) goes to `writeState`, and the UI shows a "storage full" banner until a later write succeeds.
@@ -100,7 +101,7 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 
 ## Tests at a glance
 
-- **Unit:** `test/*.test.js` (197 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
+- **Unit:** `test/*.test.js` (203 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
 - **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (70 blocks, numbered 1–56 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Shapes:** `test/shapes.test.js` rebuilds a listing from each `test/shapes/*.json` (`reaFilter.shape()` output) and checks it still parses.

@@ -22,6 +22,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     await page.clock.install({ time: new Date('2026-09-23T10:00:00+10:00') }); // fixture dates stay meaningful
     await page.route('**/*', serve());
     if (seed) await page.addInitScript((v) => localStorage.setItem('rea-avail-filter/marks/v1', v), JSON.stringify(seed()));
+    await page.addInitScript(() => localStorage.setItem('rea-avail-filter/seen-version', '99.0.0')); // no welcome or what's-new note in the pictures
     await page.goto(url);
     await page.addScriptTag({ content: SCRIPT });
     await page.waitForSelector(ready);

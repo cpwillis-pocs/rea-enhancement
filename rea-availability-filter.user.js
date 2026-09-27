@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.28.0
+// @version      2.29.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -5306,10 +5306,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.28.0', items: [
-    'Rate shortlisted places 1–5 after an inspection (Shift+1–5), and see your next stop on a listing page.',
-    'Restore now shows what it will change first, and can be undone.',
-    'The map keeps far-away places at its edge; about 1000 listings per search are now remembered.',
+  const WHATS_NEW = { version: '2.29.0', items: [
+    "A safety copy of your shortlist and settings: if this site's storage is wiped, the drawer offers it back.",
+    'Next stop on a listing page stays current and skips declined or taken places; bigger buttons on phones.',
+    "If REA changes its page format, the drawer now says so (with Copy report) instead of pausing as if blocked.",
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',

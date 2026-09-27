@@ -14,8 +14,9 @@ Everything is in your browser, under keys starting `rea-avail-filter/`. The full
 | Remembered searches (slim rows for "new since last visit") | localStorage | The 3 most recent, pinned kept first |
 | Results cache, place in the list | sessionStorage | This tab only; cleared when it closes |
 | Bot-check pause, last backup time | localStorage | The pause removes itself after 10 minutes |
+| A safety copy of your choices, presets and settings | IndexedDB (`rea-avail-filter/mirror`), also on realestate.com.au | Until you Cancel its restore offer or Delete all my data; REA's scripts can read it, like the rest |
 
-**Settings → Delete all my data** removes every key. **Backup** downloads your choices and settings (places, checklist, enquiry template, lease end, income, weights, theme) as a JSON file on your machine; nothing is uploaded.
+**Settings → Delete all my data** removes every key and the safety copy. **Backup** downloads your choices and settings (places, checklist, enquiry template, lease end, income, weights, theme) as a JSON file on your machine; nothing is uploaded.
 
 ## What REA's own page can see
 

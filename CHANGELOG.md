@@ -2,6 +2,27 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.29.0
+
+- **Safety copy**: your shortlist, notes, statuses, presets and settings are also kept in this browser's IndexedDB. If REA's page or a cleanup wipes the storage the script shares with it, the drawer says so and offers them back (with the restore preview and Undo); Cancel discards the copy. Delete all my data deletes it too.
+- **A format change isn't mistaken for a bot check**: page data written with spaces still reads, and a full-size REA page without it shows "REA may have changed its format" with Copy report, instead of pausing fetching in every tab.
+- **Next stop stays current**: it skips removed, hidden, declined and taken listings, says "leave now" once that time has passed, and updates every minute while you're on the listing page.
+- **Bigger touch targets**: every control is at least 24px, and 44px on touch screens (the listing bar, checklist and rating most of all). The accessibility check now covers WCAG 2.2 and a phone.
+- **Presets and Saved searches follow other tabs.**
+- **The script's own errors** in keys, card badges, the listing bar and other-tab updates are logged for `reaFilter.selfcheck()`, and three in a minute show a warning with Copy report.
+- `reaFilter.shape()` works on a listing page (as `kind: "listing"`); `npm run live` checks one listing page too and keeps a shape of each kind; `npm run release` warns when there's no recent real shape.
+- Fixed:
+  - Links and images in the shortlist, Compare and printouts must be REA's, whatever a backup says.
+  - Big remembered searches drop their no-longer-listed rows before going over the size budget.
+  - On AZERTY and similar keyboards, the 1–5 status keys work again (they were read as ratings).
+  - Unrated listings export blank, not 0.
+  - Calendar: a session REA cancels and then reinstates is live again when the newer file is imported; a day's export carries only that day's cancellations.
+  - A restore's Undo goes away once another tab changes things, so it can't undo that tab too.
+  - A pasted packed search imports with its listings; a bad redirect address counts as "no longer listed".
+  - Clicking the launcher in the moment after a reload now opens on the listing you were on.
+- Faster: a star, rating or checklist click rebuilds only that listing (about half the time with 1000 shown); Shortlist rows are reused while unchanged; remembered searches reuse their stored form for sizes and saving, and store amenities and coordinates more compactly.
+- Internals: the day planner, map, market and compare views are in the pure half with unit tests; the Shortlist bar's wiring moved out of `build()` (632 → 474 lines, with a lint budget); one save helper for settings and presets.
+
 ## 2.28.0
 
 - **Your rating** (1–5) for shortlisted listings, after an inspection: on the Shortlist tab (Shift+1–5), on the listing-page bar, in Compare, and in CSV and print.
