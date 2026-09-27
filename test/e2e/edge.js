@@ -1677,6 +1677,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 49. Rent trend: each visit adds a point to the remembered search; Saved searches and the
+  // market view say how the median and the count moved.
+  await block('49', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route: serve([], { pages: 3, perPage: 12 }) });
+    await run(page);
+    await page.evaluate(() => { // an earlier visit, five weeks ago
+      const k = 'rea-avail-filter/snapshots/v1', d = JSON.parse(localStorage.getItem(k));
+      for (const e of Object.values(d.s)) e.trend = [{ t: e.at - 35 * 864e5, n: 20, m: { 2: 950 } }, ...e.trend];
+      localStorage.setItem(k, JSON.stringify(d));
+    });
+    await page.click('.rf-market-btn');
+    assert.match(await page.textContent('.rf-market .rf-trend'), /^Trend: 2-bed median \$950 → \$\d+ over 5 weeks · 20 → 36 listings$/);
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-launch');
+    await page.click('#rf-launch'); await page.click('.rf-saved summary');
+    assert.match(await page.textContent('.rf-saved .rf-trend'), /2-bed median \$950 → /);
+    console.log('rent trend: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

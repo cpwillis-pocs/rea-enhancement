@@ -82,6 +82,36 @@
   // their text (amenities are stored computed, so their tags and filters still work).
   const SNAP_ENTRY_BUDGET = 400000;
   const LITE_HEADLINE = 60;
+  // Rent trend per remembered search: one point per visit {t, n, m: {beds: median weekly rent}}.
+  const TREND_MAX = 12;
+  const trendPoint = (rows, t) => {
+    const by = new Map();
+    for (const r of rows) {
+      if (!Number.isFinite(r.priceNum) || r.beds === '' || r.surrounding) continue;
+      const b = Math.min(5, Math.max(0, +r.beds || 0));
+      if (!by.has(b)) by.set(b, []);
+      by.get(b).push(r.priceNum);
+    }
+    const m = {};
+    for (const [b, a] of by) if (a.length >= MEDIAN_MIN) m[b] = quantile(a.sort((x, y) => x - y), 0.5);
+    return { t, n: rows.length, m };
+  };
+  const cleanTrend = (a) => (Array.isArray(a) ? a : []).filter((p) => isObj(p) && typeof p.t === 'number' && typeof p.n === 'number')
+    .map((p) => ({ t: p.t, n: p.n, m: Object.fromEntries(Object.entries(isObj(p.m) ? p.m : {}).filter(([b, v]) => /^[0-5]$/.test(b) && Number.isFinite(v))) }))
+    .slice(-TREND_MAX);
+  // "2-bed median $720 → $690 over 5 weeks · 42 → 55 listings": 2-bed if it has a median at both
+  // ends, else 1, 3, studio, 4, 5+. Needs two visits.
+  const trendText = (trend) => {
+    const a = cleanTrend(trend);
+    if (a.length < 2) return '';
+    const first = a[0], last = a[a.length - 1];
+    const days = Math.round((last.t - first.t) / DAY_MS);
+    const span = days >= 14 ? `${Math.round(days / 7)} weeks` : plural(Math.max(1, days), 'day');
+    const beds = ['2', '1', '3', '0', '4', '5'].find((b) => b in first.m && b in last.m); // the commonest rental sizes first
+    const bedLabel = (b) => (+b === 0 ? 'Studio' : +b === 5 ? '5+ bed' : `${b}-bed`);
+    const rent = beds != null ? `${bedLabel(beds)} median ${money(first.m[beds])} → ${money(last.m[beds])} over ${span}` : `over ${span}`;
+    return `${rent} · ${first.n} → ${last.n} listings`;
+  };
   const IMPORT_ROWS_MAX = 1000; // rows accepted per search from a backup
   const SEARCH_KEY_MAX = 2000; // longest search URL accepted from a backup
   const YEARLESS_ROLL_MS = 60 * DAY_MS; // "3 Jan" more than this far in the past means next year
@@ -794,7 +824,7 @@
     // `rows` is built on first read: save()'s callers only need the diff, and rebuilding every
     // row it just slimmed was a third of the end-of-search work.
     const view = (e) => Object.defineProperty({
-      at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated, lite: !!e.lite,
+      at: e.at, baseAt: e.baseAt ?? null, truncated: !!e.truncated, lite: !!e.lite, trend: cleanTrend(e.trend),
       gone: (e.gone || []).map(fatRow).filter((r) => r.url).map((r) => Object.assign(r, { gone: true })),
       newIds: newSince(e.ids, e.baseIds),
     }, 'rows', { enumerable: true, configurable: true, get() {
@@ -826,7 +856,11 @@
             for (const r of prev.rows || []) if (!cur.has(String(r.id)) && base.has(String(r.id)) && !seen.has(String(r.id))) gone.push(r);
           }
         }
-        const entry = d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX), ...(prev?.pin ? { pin: 1 } : {}) };
+        // A new visit adds a trend point; a refresh within the visit replaces the last one.
+        const trend = cleanTrend(prev?.trend);
+        if (trend.length && !(prev && t - prev.at > SNAP_VISIT_GAP_MS)) trend.pop();
+        trend.push(trendPoint(rows, t));
+        const entry = d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX), trend: trend.slice(-TREND_MAX), ...(prev?.pin ? { pin: 1 } : {}) };
         if (fitBudget(entry)) entry.lite = 1;
         const { evicted } = persist(d);
         // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
@@ -864,7 +898,7 @@
             at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
             ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
             gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
-            ...(e.pin ? { pin: 1 } : {}),
+            ...(e.pin ? { pin: 1 } : {}), trend: cleanTrend(e.trend),
           };
           if (fitBudget(d.s[k])) d.s[k].lite = 1;
           n++;
@@ -2514,7 +2548,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -4040,7 +4074,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const found = r?.error ? ' · <span class="rf-warn-t">couldn\'t be read</span>' : r ? ` · <strong>${r.added} new</strong>${r.gone ? `, ${r.gone} gone` : ''}` : '';
       return `<li><a href="${esc(safeUrl(k))}">${esc(searchLabel(k))}</a>${k === here ? ' <span class="rf-tag">this search</span>' : ''}
         <button type="button" class="rf-chip rf-pin" data-saved-pin="${esc(k)}" aria-pressed="${!!e.pin}" title="${e.pin ? 'Pinned: kept when you open other searches' : `Keep this one when more than ${SNAP_MAX} searches are opened`}">${e.pin ? 'Pinned' : 'Pin'}</button>
-        <div class="rf-meta">${(e.ids || e.rows || []).length} listings · checked ${esc(ago(Date.now() - e.at))}${found}</div></li>`;
+        <div class="rf-meta">${(e.ids || e.rows || []).length} listings · checked ${esc(ago(Date.now() - e.at))}${found}</div>${trendText(e.trend) ? `<div class="rf-meta rf-trend">${esc(trendText(e.trend))}</div>` : ''}</li>`;
     }).join('');
   }
 
@@ -4302,7 +4336,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows)); else paintList(rows);
+    if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : ''); else paintList(rows);
     toListTop();
   }
 
@@ -4328,12 +4362,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       }).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
   }
 
-  function marketHtml(m) {
+  function marketHtml(m, trend = '') {
     const $ = (v) => (v == null ? '–' : money(v));
     const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
     const top = Math.max(1, ...m.byWeek.map((w) => w.n));
     const weekLabel = (w) => w.label || shortDate(w.from);
     return `<div class="rf-market"><div class="rf-plan-head">${plural(m.n, 'listing')} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
+      ${trend ? `<div class="rf-meta rf-trend" title="This whole search, one point per visit (up to ${TREND_MAX})">Trend: ${esc(trend)}</div>` : ''}
       <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
         <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>

@@ -163,3 +163,18 @@ test('snapshotStore: a search over the size budget drops text from the rows furt
   const small = core.snapshotStore(mem(), () => 1e12).save(KEY, rows.slice(0, 10), false);
   assert.equal(small.lite, false, 'a small search is untouched');
 });
+
+test('rent trend: one point per visit (a refresh replaces it), at most 12, readable summary', () => {
+  let t = 1e12;
+  const st = core.snapshotStore(mem(), () => t);
+  const rows = (rent, n) => Array.from({ length: n }, (_, i) => ({ ...row(String(146520000 + i)), priceNum: rent, beds: 2 }));
+  st.save(KEY, rows(720, 6), false);
+  t += 60 * 1000; st.save(KEY, rows(710, 6), false); // same visit
+  assert.equal(st.get(KEY).trend.length, 1, 'a refresh replaces the point');
+  assert.equal(core.trendText(st.get(KEY).trend), '', 'one visit is no trend');
+  t += 35 * 24 * H; st.save(KEY, rows(690, 8), false);
+  assert.equal(core.trendText(st.get(KEY).trend), '2-bed median $710 → $690 over 5 weeks · 6 → 8 listings');
+  for (let i = 0; i < 15; i++) { t += 24 * H; st.save(KEY, rows(700, 6), false); }
+  assert.equal(st.get(KEY).trend.length, 12, 'capped');
+  assert.deepEqual(core.trendPoint(rows(500, 3), 1).m, {}, 'fewer than 5 priced listings: no median');
+});
