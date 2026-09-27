@@ -1992,6 +1992,38 @@
     });
   };
 
+  // Map view without map tiles: listings placed by their coordinates on a flat projection (fine
+  // at suburb scale), places and the distance point as pins, a scale bar and suburb names.
+  const MAP_W = 400, MAP_H = 300, MAP_PAD = 18, MAP_LABELS = 8;
+  const NICE_KM = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
+  const mapLayout = (rows, pins = [], w = MAP_W, h = MAP_H) => {
+    const has = (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng);
+    const pts = rows.filter(has), ps = pins.filter(has);
+    if (!pts.length) return null;
+    const lats = [...pts, ...ps].map((p) => p.lat), lngs = [...pts, ...ps].map((p) => p.lng);
+    const minLa = Math.min(...lats), maxLa = Math.max(...lats), minLn = Math.min(...lngs), maxLn = Math.max(...lngs);
+    const kx = Math.cos(((minLa + maxLa) / 2) * Math.PI / 180);
+    const spanX = Math.max((maxLn - minLn) * kx, 0.002), spanY = Math.max(maxLa - minLa, 0.002);
+    const s = Math.min((w - 2 * MAP_PAD) / spanX, (h - 2 * MAP_PAD) / spanY); // pixels per degree of latitude
+    const ox = (w - (maxLn - minLn) * kx * s) / 2, oy = (h - (maxLa - minLa) * s) / 2;
+    const round = (v) => Math.round(v * 10) / 10;
+    const xy = (p) => ({ x: round(ox + (p.lng - minLn) * kx * s), y: round(oy + (maxLa - p.lat) * s) });
+    const seen = new Map();
+    const dots = pts.map((r) => { // listings at the same spot (a block of units) spiral out so each can be clicked
+      const at = xy(r), k = `${Math.round(at.x / 4)},${Math.round(at.y / 4)}`, n = seen.get(k) || 0;
+      seen.set(k, n + 1);
+      if (n) { const a = n * 2.4, d = 5 * Math.sqrt(n); at.x = round(at.x + Math.cos(a) * d); at.y = round(at.y + Math.sin(a) * d); }
+      return { r, ...at };
+    });
+    const kmPerPx = 111.32 / s, want = (kmPerPx * w) / 4;
+    const km = NICE_KM.reduce((best, k) => (Math.abs(Math.log(k / want)) < Math.abs(Math.log(best / want)) ? k : best));
+    const bySub = new Map();
+    for (const d of dots) { const k = d.r.suburb; if (!k) continue; const g = bySub.get(k) || { name: k, x: 0, y: 0, n: 0 }; g.x += d.x; g.y += d.y; g.n++; bySub.set(k, g); }
+    const labels = [...bySub.values()].sort((a, b) => b.n - a.n).slice(0, MAP_LABELS).map((g) => ({ name: g.name, x: round(g.x / g.n), y: round(g.y / g.n), n: g.n }));
+    return { w, h, dots, pins: ps.map((p) => ({ label: p.label, ...xy(p) })), scale: { km, px: round(km / kmPerPx) }, labels, skipped: rows.length - pts.length };
+  };
+  const mapTone = (r) => (r.vsMedian == null ? 'na' : r.vsMedian <= -5 ? 'lo' : r.vsMedian >= 5 ? 'hi' : 'mid');
+
   // Market view: rent spread per bed count and when listings become available, over the
   // listings currently shown. Quantiles interpolate; groups under MEDIAN_MIN show counts only.
   const MARKET_WEEKS = 8;
@@ -2548,7 +2580,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -2822,6 +2854,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-saved-list .rf-pin{margin-left:6px;font-size:11px;padding:1px 8px}
   .rf-saved-list .rf-pin[aria-pressed=true]{background:var(--rf-accent);color:#fff;border-color:var(--rf-accent)}
   .rf-market{padding:8px 12px;font-size:12px;min-width:0}
+  .rf-map svg{width:100%;height:auto;max-height:70vh;background:var(--rf-hover);border:1px solid var(--rf-line);border-radius:8px;margin:6px 0}
+  .rf-dot{stroke:var(--rf-bg);stroke-width:1;cursor:pointer} .rf-dot:hover,.rf-dot:focus{stroke:var(--rf-fg);stroke-width:2;outline:none}
+  .rf-dot-star{stroke:var(--rf-fg);stroke-width:1.5}
+  .rf-dot-lo{fill:var(--rf-accent);color:var(--rf-accent)} .rf-dot-mid{fill:#6b7cb3;color:#6b7cb3} .rf-dot-hi{fill:var(--rf-up);color:var(--rf-up)} .rf-dot-na{fill:var(--rf-soft);color:var(--rf-soft)}
+  .rf-map-sub{font-size:10px;fill:var(--rf-muted);paint-order:stroke;stroke:var(--rf-hover);stroke-width:3px} .rf-map-pin rect{fill:var(--rf-fg)} .rf-map-pin text,.rf-map-scale text{font-size:10px;fill:var(--rf-fg)}
+  .rf-map-scale line{stroke:var(--rf-fg);stroke-width:2}
   .rf-market-t{overflow-x:auto;max-width:100%}
   .rf-market table{border-collapse:collapse;width:100%;margin:6px 0 12px}
   .rf-market caption{text-align:left;font-weight:600;padding:4px 0}
@@ -3122,6 +3160,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <option value="">Bulk…</option><option value="star" data-label="Shortlist all {n} shown">Shortlist all shown</option><option value="hide" data-label="Hide all {n} shown">Hide all shown</option><option value="reviewed" data-label="Mark all {n} shown reviewed">Mark all shown reviewed</option>
         </select>
         <button class="rf-btn sec rf-market-btn" aria-pressed="false" disabled title="Rent spread per bed count and when the listings shown become available">Market</button>
+        <button class="rf-btn sec rf-map-btn" aria-pressed="false" disabled title="The listings shown on a simple map, coloured by rent vs the median (v)">Map</button>
       </div>
       <div class="rf-actions rf-exports">
         <span class="rf-label">Export</span>
@@ -3134,7 +3173,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     <div class="rf-help" id="rf-help" hidden>
       <strong>Keyboard</strong>
       <dl><dt>j / ↓, k / ↑</dt><dd>next / previous listing</dd><dt>s</dt><dd>shortlist</dd><dt>h</dt><dd>hide</dd>
-      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
+      <dt>n</dt><dd>note</dd><dt>c</dt><dd>copy summary</dd><dt>m</dt><dd>market view on/off</dd><dt>v</dt><dd>map on/off</dd><dt>x</dt><dd>tick for Compare (shortlist)</dd><dt>1–5</dt><dd>application status (shortlisted)</dd><dt>u</dt><dd>undo</dd><dt>r</dt><dd>mark reviewed and move on (j also marks the one you leave)</dd><dt>g / G, Home / End</dt><dd>first / last listing</dd><dt>PgUp / PgDn</dt><dd>5 up / down</dd><dt>t</dt><dd>Results / Shortlist</dd><dt>o / Enter</dt><dd>open listing</dd><dt>p / Space</dt><dd>large photo (j / k flip through)</dd><dt>/</dt><dd>keyword filter (shortlist: search)</dd>
       <dt>e</dt><dd>expand / shrink the drawer</dd><dt>f</dt><dd>back to the filters</dd><dt>d</dt><dd>compact list on/off</dd><dt>?</dt><dd>this help</dd><dt>Esc</dt><dd>close</dd><dt>Alt+Shift+F</dt><dd>open / close from anywhere on REA</dd></dl>
     </div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
@@ -3298,6 +3337,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         return;
       }
       if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
+      if (e.key === 'v' && ui.view !== 'shortlist' && !ui.map.disabled) { e.preventDefault(); ui.map.click(); ui.map.focus(); return; }
       if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
       if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
       if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
@@ -3319,7 +3359,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   function wireList(panel, { write, onChange }) {
   ui.list.addEventListener('click', (e) => {
     if (e.target.closest('.rf-more-btn')) return renderMore();
-    const week = e.target.closest('[data-week]'); // market view and the inspection planner live in the list too
+    const pin = e.target.closest('[data-map-id]');
+    if (pin) return ui.mapPick?.(pin.dataset.mapId);
+    const week = e.target.closest('[data-week]'); // market view, map and the inspection planner live in the list too
     if (week) return ui.pickWeek?.(week);
     const plan = e.target.closest('[data-plan-ics]');
     if (plan) return ui.planIcs?.(plan);
@@ -3455,6 +3497,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       preset: panel.querySelector('.rf-preset'),
       slBulk: panel.querySelector('.rf-sl-bulk'),
       market: panel.querySelector('.rf-market-btn'),
+      map: panel.querySelector('.rf-map-btn'),
       list: panel.querySelector('.rf-list'),
     };
 
@@ -3797,10 +3840,24 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (v === 'unstar') return `Removed ${marks.setMany(rows, 's', false)} from the shortlist.`;
       return '';
     });
-    ui.market.addEventListener('click', () => {
-      ui.marketOn = !ui.marketOn;
-      ui.market.setAttribute('aria-pressed', String(ui.marketOn));
+    // Market and Map replace the list; at most one at a time.
+    const setView2 = (market, map) => {
+      ui.marketOn = market; ui.mapOn = map;
+      ui.market.setAttribute('aria-pressed', String(market)); ui.map.setAttribute('aria-pressed', String(map));
+    };
+    ui.market.addEventListener('click', () => { setView2(!ui.marketOn, false); showResults(); });
+    ui.map.addEventListener('click', () => { setView2(false, !ui.mapOn); showResults(); });
+    // A dot: back to the list, on that listing (rendering more of the list if it is further down).
+    ui.mapPick = (id) => {
+      setView2(false, false);
       showResults();
+      for (let n = 0; !itemEl(id) && n < 40 && ui.list.querySelector('.rf-more-btn'); n++) renderMore();
+      const el = itemEl(id);
+      if (el) { el.focus(); el.scrollIntoView({ block: 'center' }); }
+    };
+    ui.list.addEventListener('keydown', (e) => {
+      const dot = (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('[data-map-id]');
+      if (dot) { e.preventDefault(); e.stopPropagation(); ui.mapPick(dot.dataset.mapId); }
     });
     ui.pickWeek = (b) => {
       if (!ui.rows) return;
@@ -3810,8 +3867,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       // Narrow within your own dates (a "within" window becomes its end date), never widen them.
       const tos = [range.to, cfg.to, windowEnd(cfg.withinDays)].filter(Boolean).sort();
       const next = { ...cfg, from: [range.from, cfg.from].filter(Boolean).sort().pop() || '', to: tos[0] || '', withinDays: '' };
-      ui.marketOn = false;
-      ui.market.setAttribute('aria-pressed', 'false');
+      setView2(false, false);
       applyCfg(next);
       showResults(); // also when the dates didn't change (same week again)
       (ui.list.querySelector('.rf-item') || ui.market).focus();
@@ -4264,7 +4320,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.status.append(' ', b); // space: screen readers read "hidden. Undo", not "hidden.Undo"
   }
 
-  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; };
+  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; ui.map.disabled = disabled; };
 
   // Data-format warnings sit in their own banner, so the status line keeps "N of M match".
   const warnings = {};
@@ -4336,7 +4392,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : ''); else paintList(rows);
+    if (ui.mapOn) ui.list.innerHTML = mapHtml(rows);
+    else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : ''); else paintList(rows);
     toListTop();
   }
 
@@ -4360,6 +4417,22 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
       </li>`;
       }).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
+  }
+
+  function mapHtml(rows) {
+    const pins = [...parsePlaces(cfg.places), ...(parseAnchor(cfg.anchor) ? [{ label: 'From', ...parseAnchor(cfg.anchor) }] : [])];
+    const m = mapLayout(rows, pins);
+    if (!m) return '<div class="rf-market"><div class="rf-plan-head">None of these listings has a location, so there is nothing to map.</div></div>';
+    const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="0" role="button"
+      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
+    return `<div class="rf-market rf-map"><div class="rf-plan-head">${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
+      <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
+        ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
+        ${m.dots.filter((d) => !d.r.starred).map(dot).join('')}${m.dots.filter((d) => d.r.starred).map(dot).join('')}
+        ${m.pins.map((p) => `<g class="rf-map-pin"><rect x="${p.x - 4}" y="${p.y - 4}" width="8" height="8"/><text x="${p.x + 7}" y="${p.y + 4}">${esc(p.label)}</text></g>`).join('')}
+        <g class="rf-map-scale"><line x1="10" y1="${m.h - 10}" x2="${10 + m.scale.px}" y2="${m.h - 10}"/><text x="10" y="${m.h - 14}">${m.scale.km < 1 ? `${m.scale.km * 1000} m` : `${m.scale.km} km`}</text></g>
+      </svg>
+      <div class="rf-meta rf-map-key"><span class="rf-dot-lo">●</span> below the median · <span class="rf-dot-mid">●</span> near it · <span class="rf-dot-hi">●</span> above · <span class="rf-dot-na">●</span> no median · larger: shortlisted · ■ your places. Straight lines, no streets.</div></div>`;
   }
 
   function marketHtml(m, trend = '') {

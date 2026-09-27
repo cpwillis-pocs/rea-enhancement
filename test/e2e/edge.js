@@ -1697,6 +1697,29 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 50. Map view (v): one dot per listing with a location, places as pins; a dot goes back to
+  // the list on that listing.
+  await block('50', async () => {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/v1')) localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ places: 'Work: -33.87, 151.21' })); });
+    const page = await open(ctx);
+    await run(page);
+    const n = await count(page);
+    await page.focus('.rf-item'); await page.keyboard.press('v');
+    await page.waitForSelector('.rf-map svg');
+    assert.equal(await page.getAttribute('.rf-map-btn', 'aria-pressed'), 'true');
+    assert.equal(await page.$$eval('.rf-map [data-map-id]', (d) => d.length), n, 'every listing shown has a location in the fixtures');
+    assert.match(await page.textContent('.rf-map-pin'), /Work/);
+    const id = await page.$eval('.rf-map [data-map-id]:last-of-type', (d) => d.dataset.mapId);
+    await page.focus(`.rf-map [data-map-id="${id}"]`); await page.keyboard.press('Enter');
+    await page.waitForFunction((i) => document.activeElement?.dataset?.id === i, id);
+    assert.equal(await page.getAttribute('.rf-map-btn', 'aria-pressed'), 'false', 'back to the list');
+    await page.click('.rf-market-btn'); await page.click('.rf-map-btn');
+    assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'false', 'map and market are one at a time');
+    console.log('map view: ok');
+    await done(page); await ctx.close();
+  });
+
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });

@@ -70,6 +70,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     seed: () => ({ c: Date.now(), m: { 146500101: { f: Date.now() - 6 * 864e5, l: Date.now(), s: 1, as: 'inspected', n: 'Great light, ask about parking', pp: 1050, pps: '$1,050 per week', p: 999, pt: Date.now() - 864e5 } } }),
     act: async () => {} });
   await shot('market', { act: async (page) => { await search(page); await page.click('.rf-market-btn'); await page.waitForSelector('.rf-market table'); } });
+  await shot('map', { act: async (page) => { await search(page); await page.click('.rf-map-btn'); await page.waitForSelector('.rf-map svg'); await page.$eval('.rf-map', (el) => el.scrollIntoView({ block: 'start' })); } });
   await shot('filters', { act: async (page) => {
     await search(page);
     await page.click('#rf-more summary');

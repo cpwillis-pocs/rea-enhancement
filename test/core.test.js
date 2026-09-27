@@ -921,3 +921,21 @@ test('removedBy: the one-pass counts match re-filtering without each chip, over 
     }
   }
 });
+
+test('mapLayout: fits listings and places in the box, spreads out same-spot listings, picks a round scale', () => {
+  const rows = [
+    { id: '1', lat: -33.89, lng: 151.27, suburb: 'Bondi' }, { id: '2', lat: -33.89, lng: 151.27, suburb: 'Bondi' },
+    { id: '3', lat: -33.92, lng: 151.25, suburb: 'Clovelly' }, { id: '4', lat: null, lng: null },
+  ];
+  const m = core.mapLayout(rows, [{ label: 'Work', lat: -33.87, lng: 151.21 }], 400, 300);
+  assert.equal(m.dots.length, 3);
+  assert.equal(m.skipped, 1, 'no location, not drawn');
+  for (const p of [...m.dots, ...m.pins]) assert.ok(p.x >= 0 && p.x <= 400 && p.y >= 0 && p.y <= 300, `${p.x},${p.y} inside`);
+  const [a, b] = m.dots;
+  assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 4, 'same spot, still two clickable dots');
+  assert.ok(m.pins[0].x < a.x, 'Work (further west) is left of Bondi');
+  assert.ok(m.dots[2].y > a.y, 'Clovelly (further south) is lower');
+  assert.ok([0.1, 0.2, 0.5, 1, 2, 5, 10].includes(m.scale.km) && m.scale.px > 20 && m.scale.px < 250);
+  assert.deepEqual(m.labels.map((l) => [l.name, l.n]), [['Bondi', 2], ['Clovelly', 1]]);
+  assert.equal(core.mapLayout([{ id: '9' }]), null, 'nothing to map');
+});
