@@ -1916,8 +1916,12 @@
       settings: [...new Set(Object.keys(c).filter((k) => c[k] !== cur[k]).map((k) => SETTING_NAMES[k] || k))],
     };
   };
+  // Types, plus values a hand-edited file could get wrong: a sort that exists, real calendar dates.
+  const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd']);
+  const isYmd = (v) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'); return !!d && !isNaN(d) && d.toISOString().startsWith(v); };
   const sanitizeCfg = (c) => (c && typeof c === 'object'
-    ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))).map((k) => [k, c[k]]))
+    ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))
+      && (!CFG_DATES.has(k) || c[k] === '' || isYmd(c[k]))).map((k) => [k, c[k]]))
     : {});
 
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
@@ -4723,15 +4727,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const t = Object.assign(document.createElement('div'), { id: 'rf-toast' });
     t.setAttribute('role', 'status');
     t.innerHTML = `<span>Listing hidden.</span><button type="button" data-t="undo">Undo</button><span>Why?</span>${HIDE_REASONS.map((r) => `<button type="button" data-t="why" data-r="${esc(r)}">${esc(r)}</button>`).join('')}`;
+    // Paused while the pointer or keyboard focus is on it (WCAG 2.2.1).
     let timer = setTimeout(() => t.remove(), TOAST_MS);
-    t.addEventListener('mouseenter', () => clearTimeout(timer));
-    t.addEventListener('mouseleave', () => { timer = setTimeout(() => t.remove(), TOAST_MS / 2); });
+    const hold = () => clearTimeout(timer);
+    const resume = () => { clearTimeout(timer); if (!t.matches(':hover') && !t.contains(document.activeElement)) timer = setTimeout(() => t.remove(), TOAST_MS / 2); };
+    t.addEventListener('mouseenter', hold);
+    t.addEventListener('focusin', hold);
+    t.addEventListener('mouseleave', resume);
+    t.addEventListener('focusout', () => setTimeout(resume, 0));
     t.addEventListener('click', (e) => {
       const b = e.target.closest('[data-t]');
       if (!b) return;
       if (b.dataset.t === 'undo') undo();
       else { marks.setHideReason(id, b.dataset.r); if (cache) marks.decorate(cache); }
+      const had = t.contains(document.activeElement);
+      clearTimeout(timer);
       t.remove();
+      if (had && !ui.launch.hidden) ui.launch.focus(); // not lost to <body>
     });
     document.body.appendChild(t);
   }
@@ -5367,7 +5379,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
     if (!id) { bar?.remove(); return; }
     if (onlyIfMoved && bar?.dataset.id === id) return; // same listing (eg a gallery ?query): keep focus
-    const focusKey = bar?.contains(document.activeElement) ? document.activeElement.dataset.l : null;
+    const focusSel = bar?.contains(document.activeElement) ? lbarFocusSel(document.activeElement) : null;
     if (!bar) {
       bar = Object.assign(document.createElement('div'), { id: 'rf-lbar' });
       bar.setAttribute('role', 'region');
@@ -5392,7 +5404,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <button type="button" data-l="h" aria-pressed="${r.hidden && !r.resurfaced}">${hideWord(r)}</button>
       <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">–</button>
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}${r.starred ? lbarDetails(r, bar._details) : ''}`;
-    if (focusKey) bar.querySelector(`[data-l="${focusKey}"]`)?.focus();
+    if (!r.starred || small) lbarTick(false); // no next stop shown: stop the minute redraws
+    if (focusSel) bar.querySelector(focusSel)?.focus();
     bar.querySelector('.rf-lbar-more')?.addEventListener('toggle', (e) => { bar._details = e.currentTarget.open; });
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
     if (r.partial && bar._fetching !== id && !pause.until()) {
@@ -5413,6 +5426,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // checking, folded away until opened (the bar stays the size it is).
   // While there is a next stop, redraw the bar each minute (and on coming back to the tab), so
   // "leave by" and the next listing stay current while you stand in an inspection.
+  // Put focus back on the same control after a redraw: checklist items and stars share data-l.
+  const lbarFocusSel = (el) => (el.dataset.ck ? `[data-ck="${CSS.escape(el.dataset.ck)}"]`
+    : el.dataset.v ? `[data-l="${CSS.escape(el.dataset.l)}"][data-v="${CSS.escape(el.dataset.v)}"]`
+      : el.tagName === 'SUMMARY' ? '.rf-lbar-more > summary' : el.dataset.l ? `[data-l="${CSS.escape(el.dataset.l)}"]` : null);
   let lbarTimer = 0;
   const lbarTick = (on) => {
     clearInterval(lbarTimer);

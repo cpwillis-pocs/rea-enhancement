@@ -244,6 +244,8 @@ test('parseExchange: cache without rentSearch throws a clear error', () => {
 test('sanitizeCfg: keeps only known keys of the right type', () => {
   assert.deepEqual(core.sanitizeCfg({ keyword: null, from: '2026-10-01', annotate: 'yes', bogus: 1 }), { from: '2026-10-01' });
   assert.deepEqual(core.sanitizeCfg('abc'), {});
+  assert.deepEqual(core.sanitizeCfg({ from: 'soon', to: '2026-13-45', inspectOn: '2026-02-30', leaseEnd: '2026-10-01' }), { leaseEnd: '2026-10-01' }, 'bad dates dropped');
+  assert.doesNotThrow(() => core.activeFilters({ ...core.DEFAULT_CFG, ...core.sanitizeCfg({ from: 'soon' }) }));
   assert.deepEqual(core.sanitizeCfg(null), {});
   assert.doesNotThrow(() => core.applyFilters([], { ...core.DEFAULT_CFG, ...core.sanitizeCfg({ keyword: null }) }));
 });

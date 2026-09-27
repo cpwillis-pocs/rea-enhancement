@@ -75,7 +75,7 @@ The install and update links serve the raw file from `main`, so they only work w
 |---|---|---|
 | `// @version` (header) | Any change to the script | Tampermonkey only auto-updates to a higher version. CI's version-bump job checks it on PRs, and lint checks CHANGELOG.md has a section for it. |
 | `WHATS_NEW.version` | A release users should hear about | Shows the one-time "Updated to…" note. Lint keeps it no higher than `@version` and with a CHANGELOG section. |
-| `ROWS_VERSION` (12) | `toRow()` output changes shape | Invalidates old tab caches |
+| `ROWS_VERSION` (13) | `toRow()` output changes shape | Invalidates old tab caches |
 | `FEAT_V` | `AMENITIES` or `WATCHOUTS` detection changes | Old feature signatures aren't compared, so no false "details changed". Only append to those lists: signatures are bit positions. |
 
 `test/versions.test.js` catches a forgotten `ROWS_VERSION` or `FEAT_V` bump; after bumping, refresh its record with `UPDATE_VERSIONS=1 node --test test/versions.test.js`. `npm run release x.y.z` bumps `@version` and prints the rest.

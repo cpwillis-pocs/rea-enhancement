@@ -1286,9 +1286,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const cid = await p.$eval(`${card} [data-card-act=h]`, (b) => b.dataset.id);
     await p.click(`${card} [data-card-act=h]`);
     await p.waitForSelector('#rf-toast');
-    await p.click('#rf-toast [data-r=price]');
+    await p.mouse.move(0, 0);
+    await p.focus('#rf-toast [data-r=price]');
+    await p.clock.fastForward(15000);
+    assert.ok(await p.$('#rf-toast'), 'keyboard focus holds the note open');
+    await p.keyboard.press('Enter');
     assert.equal((await marks(p))[cid].hr, 'price', 'reason from the note');
     assert.equal(await p.$('#rf-toast'), null);
+    assert.equal(await p.evaluate(() => document.activeElement.id), 'rf-launch', 'focus goes to the launcher, not <body>');
     console.log('drawer page scroll, sticky status, filters jump, tab place, card toast: ok');
     await done(p); await big.close();
   });
@@ -1827,6 +1832,11 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForSelector('#rf-lbar .rf-lbar-next');
     assert.match(await page.textContent('#rf-lbar .rf-lbar-next'), /^Next: 11:15\s?am 5 Beach Rd · 1 km · leave by 11:05\s?am$/i);
     assert.match(await page.getAttribute('#rf-lbar .rf-lbar-next a', 'href'), /146500222$/);
+    await page.click('#rf-lbar .rf-lbar-more summary');
+    const ck = await page.$eval('#rf-lbar [data-l=ck]:nth-child(3)', (b) => b.dataset.ck);
+    await page.focus(`#rf-lbar [data-ck="${ck}"]`);
+    await page.clock.fastForward(61000); // the minute redraw keeps focus on the same item
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.ck), ck);
     await page.clock.fastForward(80 * 60000); // past 11:15: the bar moves on by itself (a declined one is skipped)
     await page.waitForFunction(() => /9 Roscoe St/.test(document.querySelector('#rf-lbar .rf-lbar-next')?.textContent || ''));
     assert.match(await page.textContent('#rf-lbar .rf-lbar-next'), /^Next: 12:30\s?pm 9 Roscoe St/i);

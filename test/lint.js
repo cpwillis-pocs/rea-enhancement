@@ -65,6 +65,10 @@ if (fs.existsSync(archPath) && fs.existsSync(edgePath)) {
   const said = +(fs.readFileSync(archPath, 'utf8').match(/\((\d+) blocks, numbered/) || [])[1];
   if (said !== blocks) err(`docs/ARCHITECTURE.md says ${said} e2e blocks, test/e2e/edge.js has ${blocks}`);
 }
+if (fs.existsSync(archPath)) {
+  const docRv = fs.readFileSync(archPath, 'utf8').match(/`ROWS_VERSION` \((\d+)\)/)?.[1], rv = src.match(/\bROWS_VERSION = (\d+)/)?.[1];
+  if (docRv && rv && docRv !== rv) err(`docs/ARCHITECTURE.md says ROWS_VERSION ${docRv}, the script has ${rv}`);
+}
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
 
