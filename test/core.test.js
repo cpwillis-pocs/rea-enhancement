@@ -1130,6 +1130,10 @@ test('SETTINGS: one spec draws each setting, gives its default and bounds what a
   assert.match(html, /id="rf-remindSaved">[^<]*<\/label><i id="storage">/, 'fixed markup after its entry');
   assert.equal((html.match(/<fieldset class="rf-weights">/g) || []).length, 1, 'weights grouped once');
   assert.match(html, /id="rf-noticeDays"[^>]*aria-describedby="rf-noticeDays-help"><\/label><small class="rf-set-help" id="rf-noticeDays-help">/, 'help is text on the page, tied to its field and outside its label');
+  for (const x of core.SETTINGS) {
+    assert.ok(!x.title && !x.inputTitle, `${x.key}: explain it with help (text on the page), not a hover-only title`);
+    if (x.help) assert.match(html, new RegExp(`id="rf-${x.key}"[^>]*aria-describedby="rf-${x.key}-help"`), `${x.key}: help drawn and tied to its field`);
+  }
   assert.deepEqual(core.sanitizeCfg({ theme: 'blue', icsAlarm: '45', wRent: '9', noticeDays: '500', income: '-3', checklist: 'x'.repeat(401) }), {}, 'out-of-range values dropped');
   assert.deepEqual(core.sanitizeCfg({ theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' }),
     { theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' });
@@ -1158,6 +1162,9 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   assert.match(ics, /UID:146500001-ab@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/);
   assert.match(ics, /UID:146500002-fu@rea-enhancement\r\n(?:(?!END:VEVENT)[\s\S])*?TRIGGER:-PT15H/, 'live reminder alerts at 9am the day before');
   assert.doesNotMatch(ics.split('UID:146500001-fu')[1].split('END:VEVENT')[0], /VALARM/, 'no alarm on a cancelled one');
+  const dead = core.toIcs([{ id: '146500003', address: '3 C St', appStatus: 'declined', inspections: [{ at: +now + 864e5, label: 'x' }] }], +now);
+  assert.match(dead, /STATUS:CANCELLED\r\nSUMMARY:Cancelled: inspection 3 C St/, "a declined listing's open homes go out cancelled");
+  assert.doesNotMatch(dead, /SUMMARY:Inspection:/);
   const given = core.toIcs([], +now, { followUps: true, leaseEnd: '2026-10-31', noticeDays: 21, noticeGiven: '2026-09-27' });
   assert.match(given, /UID:notice@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/, 'notice given: reminder withdrawn');
   assert.equal(core.noticeBy('2026-10-31', 21), '2026-10-10');

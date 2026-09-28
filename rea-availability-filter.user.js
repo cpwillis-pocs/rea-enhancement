@@ -1967,12 +1967,12 @@
   const SETTINGS = [
     { key: 'annotate', kind: 'check', def: true, label: "Show badges and buttons on REA's result cards", name: 'card badges' },
     { key: 'dimCards', kind: 'check', def: true, label: "Fade REA cards that don't match filters", name: 'card fading' },
-    { key: 'compact', kind: 'check', def: false, label: 'Compact list', title: 'Small photos and the key facts only, so about twice as many listings fit on screen (d)', name: 'compact list' },
+    { key: 'compact', kind: 'check', def: false, label: 'Compact list', help: 'Small photos and the key facts only, so about twice as many listings fit on screen (d).', name: 'compact list' },
     { key: 'theme', kind: 'select', def: '', label: 'Theme', options: [['', 'System'], ['light', 'Light'], ['dark', 'Dark']], name: 'theme' },
     { key: 'remember', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
     { key: 'remindSaved', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
     ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'Best match: how much each counts', name: 'weights' })),
-    { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', title: 'Some calendar apps ignore reminders in imported files', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
+    { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
     { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
       help: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing (sort: Least overlap)." },
     { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
@@ -2001,8 +2001,8 @@
       const ph = x.placeholder ? ` placeholder="${val(x.placeholder)}"` : '', id = `rf-${x.key}`;
       // Explanations are text on the page (tied to the field for screen readers), not a hover-only title.
       const db = x.help ? ` aria-describedby="${id}-help"` : '', help = x.help ? `<small class="rf-set-help" id="${id}-help">${val(x.help)}</small>` : '';
-      if (x.kind === 'check') return `<label class="rf-check"${t}><input type="checkbox" id="${id}">${esc(x.label)}</label>`;
-      if (x.kind === 'select') return `<label${t}>${esc(x.label)}<select id="${id}">${x.options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>`;
+      if (x.kind === 'check') return `<label class="rf-check"${t}><input type="checkbox" id="${id}"${db}>${esc(x.label)}</label>${help}`;
+      if (x.kind === 'select') return `<label${t}>${esc(x.label)}<select id="${id}"${db}>${x.options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>${help}`;
       if (x.kind === 'textarea') return `<label${t}>${esc(x.label)}<textarea id="${id}" rows="${x.rows}" maxlength="${x.maxLength}"${ph}${it}${db}></textarea></label>${help}`;
       const input = x.kind === 'date' ? 'type="date"' : x.kind === 'int' ? `type="number" min="${x.min}"${x.max < 99999999 ? ` max="${x.max}"` : ''} step="${x.step || 1}" inputmode="numeric"` : `type="text" maxlength="${x.maxLength}"`;
       return `<label${t}>${esc(x.label)}<input ${input} id="${id}"${ph}${it}${db}></label>${help}`;
@@ -2704,6 +2704,13 @@
         const uid = `${r.id}-${i.at}@rea-enhancement`;
         if (seen.has(uid)) continue;
         seen.add(uid);
+        // A dead end (declined, taken, hidden, gone): its sessions go out cancelled, like a
+        // session REA cancelled, so re-importing takes them out of the calendar.
+        if (deadEnd(r)) {
+          events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`, `DURATION:PT${INSPECT_MINUTES}M`,
+            `SEQUENCE:${seq}`, 'STATUS:CANCELLED', `SUMMARY:${icsText(`Cancelled: inspection ${r.address || 'rental'}`)}`, `LOCATION:${icsText(r.address)}`, 'END:VEVENT']);
+          continue;
+        }
         events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`,
           `DURATION:PT${INSPECT_MINUTES}M`, `SEQUENCE:${seq}`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
           `LOCATION:${icsText(r.address)}`, geo(r), r.url ? `URL:${r.url}` : '',
@@ -5268,6 +5275,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // #region list
   function render(rows) {
     ui.rows = rows; // first: renderMore()/refreshMarks() read it even when the list is empty
+    if (ui.view !== 'shortlist') ui.agencyRec = agencyRecord(marks.shortlist()); // your record per agency, on Results too
     labelBulk(ui.bulk, rows.length);
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
@@ -5376,7 +5384,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <div class="rf-addr">${esc(r.address)}</div>
           ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', sqmLabel(r), r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
-          ${metaLine([r.agency, sl && r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
+          ${metaLine([r.agency, r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
           ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : '', applyByLabel(r.applyBy)].filter(Boolean), ' rf-sec')}
           ${tagsHtml(wt, ' rf-watch rf-sec', 'Mentioned in the listing text: worth asking the agent')}
           ${kq ? `<div class="rf-meta rf-sec rf-kwq">matched: ${esc(kq)}</div>` : ''}
@@ -5887,8 +5895,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   document.addEventListener('visibilitychange', () => { if (!document.hidden && lbarTimer && document.getElementById('rf-lbar')) renderListingBar(); });
   function lbarDetails(r, open) {
     setDistances(r, cfg, parseAnchor(cfg.anchor), parsePlaces(cfg.places));
+    const fit = cfg.leaseEnd ? leaseFit(r, cfg.leaseEnd) : null, cash = Number.isFinite(r.upfront) && fit?.cost ? r.upfront + fit.cost : null;
+    const rec = r.agency ? recordText(agencyRecord(marks.shortlist()).get(agencyKey(r.agency))) : '';
     const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
-      sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',
+      cash != null ? `cash to move ${money(cash)}` : '', applyByLabel(r.applyBy), rec ? `${r.agency}: ${rec}` : '', sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',
       ...watchTags(r), placesLabel(r) || kmLabel(r)].filter(Boolean);
     const checks = checklistItems(cfg.checklist).map((k) => {
       const v = r.checks?.[k];
@@ -5900,7 +5910,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const leave = nx?.leaveBy == null ? '' : nx.leaveBy <= Date.now() ? ' · leave now' : ` · leave by ${esc(clockAt(nx.leaveBy))}`;
     const next = nx ? `<div class="rf-lbar-info rf-lbar-next">Next: <a href="${esc(safeUrl(nx.r.url))}">${esc(clockAt(nx.at))} ${esc(String(nx.r.address || '').split(',')[0])}</a>${nx.km != null ? ` · ${nx.km} km` : ''}${leave}</div>` : '';
     lbarTick(!!nx);
-    return `${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
+    // Applications close soon and you haven't applied: say so above the fold, with a one-tap fix.
+    const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
+    return `${next}${due}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks">${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
   }
@@ -5942,6 +5954,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (k === 'min') lbarMin.set(!lbarMin.get());
     else if (k === 's' || k === 'h') marks.toggle(id, k, r);
     else if (k === 'as') marks.setStatus(id, el.value);
+    else if (k === 'ap') { marks.setStatus(id, 'applied'); renderListingBar(); return bar.querySelector('[data-l=as]')?.focus(); }
     else if (k === 'rt') {
       marks.setRating(id, +el.dataset.v);
       renderListingBar();

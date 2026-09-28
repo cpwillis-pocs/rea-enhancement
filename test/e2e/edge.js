@@ -2240,6 +2240,40 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 64. On the listing page: a close deadline says so above the fold with Mark applied, and the
+  // details carry cash to move and your record with the agency.
+  await block('64', async () => {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => {
+      if (!localStorage.getItem('rea-avail-filter/v1')) localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ leaseEnd: '2026-10-20' }));
+      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
+      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+        146500101: { f: 1, l: 1, s: 1, st: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026' } },
+        146500102: { f: 1, l: 1, s: 1, st: 1, as: 'declined', ast: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', ag: 'Bondi Realty' } },
+      } }));
+    });
+    const base = serve();
+    const route = (r) => {
+      if (!/146500101$/.test(new URL(r.request().url()).pathname)) return base(r);
+      const l = { ...shapeKit.listing({ id: '146500101' }), description: 'Sunny unit. Applications close Fri 25 Sep.', listingCompany: { name: 'Bondi Realty' },
+        _links: { canonical: { href: `${ORIGIN}/property-unit-nsw-bondi-146500101` } } };
+      const ex = { 'resi-property_details-web': { urqlClientCache: JSON.stringify({ q1: { data: JSON.stringify({ details: { listing: l } }) } }) } };
+      return r.fulfill({ status: 200, contentType: 'text/html', body: `<html><body><script>window.ArgonautExchange=${JSON.stringify(ex)};</script></body></html>` });
+    };
+    const page = await open(ctx, `${ORIGIN}/property-unit-nsw-bondi-146500101`, { route });
+    await page.waitForSelector('#rf-lbar .rf-lbar-due');
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-due'), /Apply by Fri,? 25 Sept?: Mark applied/);
+    await page.click('#rf-lbar .rf-lbar-more summary');
+    const info = await page.textContent('#rf-lbar .rf-lbar-more .rf-lbar-info');
+    assert.match(info, /cash to move \$[\d,]+/, 'cash to move with the lease overlap');
+    assert.match(info, /Bondi Realty: you: 1 applied, 1 declined/, 'your record with this agency');
+    await page.click('#rf-lbar [data-l=ap]');
+    assert.equal((await marks(page))['146500101'].as, 'applied');
+    assert.equal(await page.$('#rf-lbar .rf-lbar-due'), null, 'applied: the nudge goes');
+    console.log('listing-page deadline, cash and record: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);
