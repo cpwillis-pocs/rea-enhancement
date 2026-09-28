@@ -2377,6 +2377,24 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 69. On a phone, once there are results the controls fold into one bar, so the list starts at
+  // the top; a tap opens them again, with the filter count and sort named on the bar.
+  await block('69', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); // not isMobile: the fixture pages have no viewport meta
+    const page = await open(ctx);
+    await run(page);
+    await page.waitForSelector('.rf-controls.rf-folded');
+    assert.match(await page.textContent('.rf-unfold'), /^▸ Filters · Sort: Available date$/);
+    assert.equal(await page.isVisible('#rf-from'), false, 'folded');
+    const top = await page.$eval('.rf-item', (el) => el.getBoundingClientRect().top);
+    assert.ok(top < 844 / 2, `first listing high on the screen (${Math.round(top)}px)`);
+    await page.tap('.rf-unfold');
+    assert.equal(await page.isVisible('#rf-from'), true, 'a tap opens the filters');
+    assert.equal(await page.getAttribute('.rf-unfold', 'aria-expanded'), 'true');
+    console.log('phone controls fold: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

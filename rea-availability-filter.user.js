@@ -3564,6 +3564,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-more .rf-sect:first-of-type{border-top:0;padding-top:0}
   .rf-ck-more{margin:0 9px 6px 124px} .rf-ck-more>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)}
   .rf-ck-more .rf-checks{margin-left:0}
+  .rf-unfold{width:100%;text-align:left;margin-bottom:6px}
+  .rf-controls.rf-folded>:not(.rf-unfold){display:none!important}
+  .rf-controls.rf-folded{padding-bottom:6px}
   .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
@@ -3822,6 +3825,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <input type="file" accept="application/json,.json" hidden>
     </div>
     <div class="rf-controls">
+      <button type="button" class="rf-btn sec rf-unfold" aria-expanded="false" hidden></button>
       <div class="rf-dates">
         <label>Available from<input type="date" id="rf-from"></label>
         <label>Available to<input type="date" id="rf-to"></label>
@@ -4709,6 +4713,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         else if (!on && el.dataset.rfInert) { el.inert = false; delete el.dataset.rfInert; }
       }
     };
+    wireFold(panel, narrow);
     const setOpen = (open) => {
       if (open && ui.backupNudge) { ui.backupNudge(); ui.backupNudge = null; }
       if (!open) ui.closePeek?.();
@@ -5029,6 +5034,21 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.ready = true; // last: init steps only run against a fully wired drawer
   }
 
+  // Phones: once there are results, the controls fold into one bar ("Filters · 2 active · Sort:
+  // Price ▾"); a tap opens them again. Wider screens never fold.
+  function wireFold(panel, narrow) {
+  const foldBtn = panel.querySelector('.rf-unfold'), controls = panel.querySelector('.rf-controls');
+  ui.fold = (on) => {
+    const can = narrow.matches && !!cache;
+    controls.classList.toggle('rf-folded', can && on);
+    foldBtn.hidden = !can;
+    foldBtn.setAttribute('aria-expanded', String(!(can && on)));
+    const n = activeFilters(cfg).length, sort = panel.querySelector('#rf-sort');
+    foldBtn.textContent = `${can && on ? '▸' : '▾'} Filters${n ? ` · ${n} active` : ''} · Sort: ${sort.selectedOptions[0]?.textContent || ''}`;
+  };
+  foldBtn.addEventListener('click', () => ui.fold(!controls.classList.contains('rf-folded')));
+  narrow.addEventListener?.('change', () => ui.fold(controls.classList.contains('rf-folded')));
+  }
   // Export buttons (Results bar and Shortlist menu): what's on screen, as CSV, TSV, a copy or a calendar.
   function wireExports() {
     for (const b of ui.exports) {
@@ -5403,6 +5423,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (err) { render([]); return setStatus(err, true); }
     const rows = applyFilters(pool(), cfg);
     render(rows);
+    ui.fold?.(ui.panel.querySelector('.rf-controls').classList.contains('rf-folded')); // keep its count and sort current
     renderActive();
     if (!rows.length) suggestDrops();
     const st = diffStats(cache);
@@ -5702,6 +5723,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     cacheKey = key;
     ui.refresh.hidden = false;
     showResults(note);
+    ui.fold?.(true); // on a phone, the results start at the top instead of under the controls
   }
 
   // Apply a snapshot diff: flag rows new since the baseline, and hold the gone rows.
