@@ -57,7 +57,7 @@
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
   const ROWS_VERSION = 14; // bump when toRow() shape changes
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
-  const ROW_RUNTIME = ['_worst', '_worstFor', 'rating', 'fit', 'moveExtra', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
+  const ROW_RUNTIME = ['_worst', '_worstFor', 'rating', 'fit', 'moveExtra', 'rentNow', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
     'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope', 'buildingN', 'buildingAddr', 'alsoListed'];
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -2037,6 +2037,8 @@
       help: 'Once you have given notice: the reminders stop.' },
     { key: 'moveCosts', section: 'Your move', kind: 'int', def: '', min: 0, max: 100000, step: 50, label: 'Other moving costs, $ (optional)', placeholder: 'eg 1500', name: 'moving costs',
       help: 'Removalists, cleaning, connections: added to Cash to move, its sort and its filter.' },
+    { key: 'rentNow', section: 'Your move', kind: 'int', def: '', min: 0, max: 20000, step: 10, label: 'My current rent, $ a week (optional)', placeholder: 'eg 650', name: 'current rent',
+      help: 'Shows how much more or less a week each listing costs than now, in the list, Compare and the spreadsheet export.' },
     { key: 'income', section: 'Your move', kind: 'int', def: '', min: 0, max: 99999999, step: 1000, label: 'Household income, $ a year before tax (optional)', placeholder: 'eg 120000', name: 'income',
       help: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
     { key: 'icsAlarm', section: 'Reminders & templates', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
@@ -2565,7 +2567,7 @@
     cfg = { ...DEFAULT_CFG, ...cfg };
     const kept = filterRows(rows, cfg, now);
     const leaseEnd = leaseEndOf(cfg, now);
-    for (const r of kept) { r.fit = leaseFit(r, leaseEnd, now); r.moveExtra = num(cfg.moveCosts) || 0; }
+    for (const r of kept) { r.fit = leaseFit(r, leaseEnd, now); r.moveExtra = num(cfg.moveCosts) || 0; r.rentNow = num(cfg.rentNow) || 0; }
     return withScores(kept, cfg).sort(sorter(cfg.sort, cfg.sortDesc));
   }
 
@@ -2695,6 +2697,9 @@
     return ymdLocal(new Date(from.getFullYear(), from.getMonth(), from.getDate() + n));
   };
   // `moveExtra`: your own other moving costs (Settings), set beside `fit` when rows are filtered.
+  // `rentNow`: the weekly rent you pay now (Settings), set beside `moveExtra`. Positive: dearer.
+  const vsNow = (r) => (r.rentNow > 0 && Number.isFinite(r.priceNum) ? r.priceNum - r.rentNow : null);
+  const vsNowLabel = (r) => { const d = vsNow(r); return d == null ? '' : d === 0 ? 'same as now' : `${d > 0 ? '+' : '−'}$${Math.abs(d)}/wk vs now`; };
   const cashToMove = (r) => (Number.isFinite(r.upfront) ? r.upfront + (r.fit?.cost || 0) + (r.moveExtra || 0) : null);
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
@@ -2706,7 +2711,7 @@
   // #region exports
   const EXPORT_COLS = [
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
-    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['applyBy', 'apply_by'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
+    ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['vsNow', 'vs_current_rent'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['applyBy', 'apply_by'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
     ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
@@ -2714,7 +2719,7 @@
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : k === 'rating' ? r.rating || '' : k === 'cashToMove' ? cashToMove(r) ?? '' : r[k];
+      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : k === 'rating' ? r.rating || '' : k === 'cashToMove' ? cashToMove(r) ?? '' : k === 'vsNow' ? vsNow(r) ?? '' : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -3265,6 +3270,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Beds · baths · cars', (r) => [r.beds, r.baths, r.cars].map((v) => (v === '' ? '?' : v)).join(' · '), (r) => -(+r.beds || 0), 'min'],
     ['Distance', (r) => kmLabel(r).replace(' away', ''), (r) => r.km ?? Infinity, 'min'],
     ['Places', (r) => placesLabel(r), (r) => worstKm(r) ?? Infinity, 'min'],
+    ['Vs my rent', (r) => vsNowLabel(r).replace(' vs now', ''), (r) => vsNow(r) ?? Infinity, 'min'],
     ['Of income', (r) => (incomePct(r, cfg.income) != null ? `${incomePct(r, cfg.income)}%` : ''), (r) => incomePct(r, cfg.income) ?? Infinity, 'min'],
     ['My rating', (r) => (r.rating ? `${'★'.repeat(r.rating)} ${r.rating}/5` : ''), (r) => -(r.rating || 0), 'min'],
     ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
@@ -3301,7 +3307,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
     };
     const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
-    const body = compareRows(cfg).filter(([label, show]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!leaseEndOf(cfg)) && (label !== 'Cash to move' || !!leaseEndOf(cfg) || num(cfg.moveCosts) > 0)
+    const body = compareRows(cfg).filter(([label, show]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Vs my rent' || num(cfg.rentNow) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!leaseEndOf(cfg)) && (label !== 'Cash to move' || !!leaseEndOf(cfg) || num(cfg.moveCosts) > 0)
       && (['My rating', 'Status', 'Note'].includes(label) || rows.some((r) => show(r)))).map(([label, show, score]) => { // a row blank for all says nothing
       const b = score ? best(score) : null;
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
@@ -3313,7 +3319,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -5152,8 +5158,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const shortlistRows = (all = marks.shortlist()) => {
     const f = ui.slFilter.value, q = ui.slQuery.value;
     const rows = all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : r.appStatus === f)) && textMatch(r, q));
-    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places), end = leaseEndOf(cfg), extra = num(cfg.moveCosts) || 0;
-    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, end); r.moveExtra = extra; }
+    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places), end = leaseEndOf(cfg), extra = num(cfg.moveCosts) || 0, rentNow = num(cfg.rentNow) || 0;
+    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, end); r.moveExtra = extra; r.rentNow = rentNow; }
     return rows;
   };
   const shortlistNarrowed = () => !!(ui.slFilter.value || ui.slQuery.value.trim());
@@ -5610,11 +5616,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     numberItems(ui.rows.length);
   }
 
-  // Money facts in one line: move-in (bond flag), lease overlap/gap, share of income, vs median.
+  // Money facts in one line: move-in (bond flag), lease overlap/gap, vs your rent now, share of income, vs median.
   function moneyLine(r, inc, med) {
     const parts = [
       Number.isFinite(r.upfront) ? `Move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` <span class="rf-warn" title="Bond above ${BOND_CAP_WEEKS} weeks' rent; check your state's cap">bond ${r.bondWeeks} wks</span>` : ''}` : '',
       r.fit ? `<span title="Against your current lease end (Settings)"${r.fit.gap ? ' class="rf-warn"' : ''}>${esc(fitLabel(r.fit))}</span>` : '',
+      vsNow(r) != null ? `<span${vsNow(r) > 0 ? ' class="rf-warn-t"' : ''}>${esc(vsNowLabel(r))}</span>` : '',
       inc != null ? `<span${inc > RENT_STRESS_PCT ? ' class="rf-warn-t"' : ''}>${inc}% of income</span>` : '',
       med ? `<span class="rf-med ${r.vsMedian < 0 ? 'down' : r.vsMedian > 0 ? 'up' : ''}">${esc(med)}</span>` : '',
     ].filter(Boolean);

@@ -17,7 +17,7 @@ Everything is in your browser, under keys starting `rea-avail-filter/`. The full
 | What the last Shortlist calendar export sent (event IDs and start times only, no addresses), so the next export can take out what dropped off | localStorage | Replaced on each Shortlist calendar export; at most 300 events |
 | A safety copy of your choices, presets and settings | IndexedDB (`rea-avail-filter/mirror`), also on realestate.com.au | Until you Cancel its restore offer or Delete all my data; REA's scripts can read it, like the rest |
 
-**Settings → Delete all my data** removes every key and the safety copy. **Backup** downloads your choices and settings (places, checklist, enquiry template, lease end, income, weights, theme) as a JSON file on your machine; nothing is uploaded.
+**Settings → Delete all my data** removes every key and the safety copy. **Backup** downloads your choices and settings (places, checklist, enquiry template, lease end, income, current rent, weights, theme) as a JSON file on your machine; nothing is uploaded.
 
 ## What REA's own page can see
 

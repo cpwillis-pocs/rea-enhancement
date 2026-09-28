@@ -666,6 +666,20 @@ test('cash to move: move-in plus the overlap; sort puts unknowns last; CSV and C
   assert.match(core.compareHtml(extra.slice(0, 2), { ...cfg, leaseEnd: '', moveCosts: '1000' }), /Cash to move/, 'shown with moving costs alone');
 });
 
+test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
+  const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
+  const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };
+  const out = core.applyFilters(rows, cfg);
+  const by = (id) => out.find((r) => r.id === id);
+  assert.deepEqual(['a', 'b', 'c', 'd'].map((id) => core.vsNowLabel(by(id))), ['+$50/wk vs now', '−$50/wk vs now', 'same as now', '']);
+  const [head, line] = core.toCsv([by('b')]).split('\r\n');
+  assert.equal(line.split(',')[head.split(',').indexOf('vs_current_rent')], '-50');
+  assert.match(core.compareHtml([by('a'), by('b')], cfg), /Vs my rent<\/th><td>\+\$50\/wk<\/td><td class="rf-best">−\$50\/wk/);
+  const off = core.applyFilters(rows, core.DEFAULT_CFG);
+  assert.equal(core.vsNow(off[0]), null);
+  assert.doesNotMatch(core.compareHtml(off.slice(0, 2), core.DEFAULT_CFG), /Vs my rent/);
+});
+
 test('my inspection times: parsed, checked in the listing zone, filtered, and explained when unreadable', () => {
   const w = (t) => core.parseFreeTimes(t)?.map((x) => [[...x.days].sort().join(''), x.from, x.to]);
   assert.deepEqual(w('Sat 9-13, Sun, weekdays 17:30-'), [['6', 540, 780], ['0', 0, 1440], ['12345', 1050, 1440]]);
