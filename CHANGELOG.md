@@ -2,6 +2,43 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.32.0
+
+- **Calendar reminders tidy themselves up**: once you apply, hear back, or a listing is taken or gone, re-importing the whole-list calendar takes its old Follow up and Applications close events out, the same way cancelled inspections already work. With a calendar reminder set, the all-day reminders alert at 9am the day before.
+- **Notice to vacate, in the drawer too**: within two weeks of the last day to give notice, the Shortlist says "Give notice by …" with an I've given notice button. There is also a Notice given on setting, and either one takes the calendar reminder out.
+- **Day planner**: declined, taken, hidden and removed listings are left out (and counted). With your own inspection times set, a session outside them is marked and never put on the suggested route.
+- **Max cash to move** filter: move-in plus the rent paid twice while your lease overlaps.
+- **"Due by 5pm Friday"** is read as a deadline, counted from the listed date (never from today, which would move it every week).
+- **Market view by agency** shows your own applications to each agency and a Hide button, with Undo.
+- **Why these tags?** in a listing's ⋯ menu shows where each tag was read from, for keyboard, touch and screen-reader users (the hover tooltips are still there).
+- **Settings explain themselves** in text under each field instead of hover-only tooltips.
+- Fixed:
+  - A deadline that has passed ("Applications close 1 Sep") showed as "Apply by today" every day. A date in the next clause ("…, lease starts 20 October") was also taken as the deadline.
+  - Taken, gone, hidden or declined listings still got "apply by" nudges and calendar reminders.
+  - The by-agency "median days listed" was always blank.
+  - Clicking away from the preset-name field sent focus back to the Presets menu, where typing one letter could pick "Delete: …". The note field on the listing page did the same with its button.
+  - Moving to another listing while typing a note on the listing page could freeze its bar in some browsers.
+  - Safety copy:
+    - It could be overwritten by restoring a backup file while its own offer was waiting, by a failed read, or by Undo of its restore.
+    - Emptying the shortlist on purpose was later offered back as "gone".
+    - Hide reasons weren't copied.
+    - Its offer now also appears after moving in-app from a listing page to a search.
+  - A bulk action's Undo goes away once another tab changes things, so it can't undo that tab's work.
+  - A deadline the agent removes from the listing is cleared from your shortlist.
+  - Heads-ups:
+    - "Busy road" no longer fires on cafes or buses "on the main street".
+    - The listing's own "development" isn't "construction nearby".
+  - My inspection times accept "6pm-12am".
+  - A number setting typed out of range (eg a 150-day notice) is limited to what's allowed, instead of being lost on the next load.
+- Faster:
+  - A hide no longer redraws every listing below it (about half the time with 300 shown).
+  - Inspection-time and time-zone lookups are reused across a filter pass (about a quarter of the time with date, type and inspection filters on 1000 listings).
+  - "Nearest to all places" sorts about 3× faster.
+  - Reading listings skips costly heads-up and apply-portal patterns when their key word isn't there (about 12–17% of `toRow`).
+- Tests:
+  - E2E now also runs on data built from `test/shapes/*.json`, REA's real structure, so a shape change is caught in the UI as well as in unit tests (and CI runs e2e for it).
+  - A consistency test checks that every filter has a chip, a removal and a row test.
+
 ## 2.31.0
 
 - **Noise heads-ups**: busy road, above shops or a bar, next to a rail line, under a flight path, construction nearby. Only when the text says it of the home ("on a busy road", "above a popular bar"), not of what's near it ("close to Parramatta Rd shops", "walk to the station"). Each can be hidden under More filters like the other heads-ups.

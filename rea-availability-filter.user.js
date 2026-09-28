@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.31.0
+// @version      2.32.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -3313,7 +3313,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     letter-spacing:.04em;color:var(--rf-muted)}
   .rf-controls input:not([type=checkbox]),.rf-controls select{padding:7px 8px;border:1px solid var(--rf-input);border-radius:6px;
     font:inherit;font-size:13px;text-transform:none;letter-spacing:0;color:var(--rf-fg);background:var(--rf-bg);min-width:0;width:100%}
-  .rf-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
+  .rf-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;align-items:end} /* a label on two lines keeps the inputs level */
   .rf-more{display:grid;gap:10px}
   .rf-more summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)}
   .rf-more>label,.rf-more>.rf-grid3{margin-top:8px}
@@ -5763,10 +5763,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.31.0', items: [
-    'Heads-ups for a busy road, bar or shops below, rail line, flight path or construction nearby.',
-    'Market view shows each agency\'s rent drops, relists and days listed; set your notice period for a calendar reminder.',
-    'Preset names are typed in the drawer, not a pop-up.',
+  const WHATS_NEW = { version: '2.32.0', items: [
+    'Calendar reminders you no longer need come out on re-import, and alert the day before; a notice-to-vacate nudge on the Shortlist.',
+    'The day planner skips declined or taken places and respects your own inspection times; a Max cash to move filter.',
+    'Why these tags? in the ⋯ menu, and Settings explain each field in plain text.',
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',
