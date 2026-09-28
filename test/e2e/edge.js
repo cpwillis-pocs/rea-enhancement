@@ -10,6 +10,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { ORIGIN, serve, reaPage } = require('./fixtures');
+const shapeKit = require('../helpers'); // listingFromShape, results, page: e2e from real REA shapes
 const cov = require('./coverage');
 
 const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filter.user.js'), 'utf8').replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;');
@@ -2195,6 +2196,42 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.inputValue('#rf-cashMax'), '');
     assert.equal(await count(page), total);
     console.log('max cash to move: ok');
+    await done(page); await ctx.close();
+  });
+
+  // 63. From real shapes: every test/shapes/*.json (reaFilter.shape() of REA's own data) is served,
+  // search shapes as a results page and listing shapes as a property page, and the drawer and the
+  // listing bar read them. A structure change REA ships breaks here in the UI, not only in units.
+  await block('63', async () => {
+    const dir = path.join(__dirname, '../shapes');
+    const shapes = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+    const withId = (l, id) => ({ ...l, id, _links: { ...l._links, canonical: { href: `${ORIGIN}/property-apartment-nsw-bondi-${id}` } } });
+    const search = shapes.filter((x) => x.kind !== 'listing').flatMap((x, i) => [0, 1, 2].map((k) => withId(shapeKit.listingFromShape(x.listing), String(146700000 + i * 10 + k))));
+    const prop = shapes.find((x) => x.kind === 'listing');
+    assert.ok(search.length && prop, 'a search and a listing shape to serve');
+    const route = (r) => {
+      const u = new URL(r.request().url());
+      if (u.origin !== ORIGIN) return r.fulfill({ status: 204, body: '' });
+      if (/^\/rent\//.test(u.pathname)) return r.fulfill({ status: 200, contentType: 'text/html', body: shapeKit.page(shapeKit.results({ exact: search })) });
+      const id = u.pathname.match(/-(\d+)$/)?.[1];
+      const data = { details: { listing: withId(shapeKit.listingFromShape(prop.listing), id) } };
+      const ex = { 'resi-property_details-web': { urqlClientCache: JSON.stringify({ q1: { data: JSON.stringify(data) } }) } };
+      return r.fulfill({ status: 200, contentType: 'text/html', body: `<html><body><script>window.ArgonautExchange=${JSON.stringify(ex)};</script></body></html>` });
+    };
+    const ctx = await browser.newContext();
+    const page = await open(ctx, SEARCH, { route });
+    await run(page);
+    assert.equal(await count(page), search.length, 'every shaped listing listed');
+    const first = await page.textContent('.rf-item');
+    assert.match(first, /\$\d[\d,]* per week/, 'rent read');
+    assert.match(await page.getAttribute('.rf-item .rf-card', 'href'), /^https:\/\/www\.realestate\.com\.au\/property-/, 'link kept');
+    await page.goto(`${ORIGIN}/property-apartment-nsw-bondi-146799999`); await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-lbar');
+    await page.click('#rf-lbar [data-l=s]');
+    const e = (await marks(page))['146799999'];
+    assert.equal(e?.s, 1, 'shortlisted from a listing page built from its shape');
+    assert.match(e.d.p, /\$\d/, 'its rent read from the listing shape');
+    console.log(`real shapes in the UI (${shapes.length}): ok`);
     await done(page); await ctx.close();
   });
 

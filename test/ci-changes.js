@@ -2,11 +2,11 @@
 // Which CI jobs a PR needs, from the files it changes (read from stdin, one per line). Prints
 // GitHub Actions outputs: unit=true|false, e2e=true|false, nodes=<JSON list of Node versions>.
 //   docs only (Markdown, docs/, LICENSE, issue/PR templates)  -> neither job
-//   only unit tests / shapes / versions record               -> unit (all Nodes), no e2e
+//   only unit tests / versions record                        -> unit (all Nodes), no e2e
 //   only e2e tests                                            -> e2e, unit on Node 20 only
-//   anything else (the script, package.json, CI, helpers, lint) -> everything
+//   anything else (the script, shapes, package.json, CI, helpers, lint) -> everything (e2e block 63 serves the shapes)
 const DOCS = /(\.md$|^docs\/|^LICENSE$|^\.github\/ISSUE_TEMPLATE\/|^\.github\/pull_request_template\.md$)/;
-const UNIT_ONLY = /^test\/([^/]+\.test\.js|shapes\/.+|versions\.json)$/;
+const UNIT_ONLY = /^test\/([^/]+\.test\.js|versions\.json)$/;
 const E2E_ONLY = /^test\/e2e\/(?!fixtures\.js$)/; // fixtures are shared with unit tests
 const ALL_NODES = [20, 22, 24];
 

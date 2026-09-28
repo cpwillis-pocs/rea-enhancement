@@ -1160,6 +1160,9 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   assert.doesNotMatch(ics.split('UID:146500001-fu')[1].split('END:VEVENT')[0], /VALARM/, 'no alarm on a cancelled one');
   const given = core.toIcs([], +now, { followUps: true, leaseEnd: '2026-10-31', noticeDays: 21, noticeGiven: '2026-09-27' });
   assert.match(given, /UID:notice@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/, 'notice given: reminder withdrawn');
+  assert.equal(core.noticeBy('2026-10-31', 21), '2026-10-10');
+  assert.equal(core.noticeBy('', 21), '', 'no lease end, no notice date');
+  assert.ok(core.deadEnd({ taken: 'leased' }) && !core.deadEnd({ hidden: true, resurfaced: true }));
   const cfg = { ...core.DEFAULT_CFG, leaseEnd: '2026-10-31', noticeDays: '21' };
   assert.deepEqual(core.noticeDue(cfg, now), { by: '2026-10-10', days: 12 });
   assert.equal(core.noticeDue({ ...cfg, noticeGiven: '2026-09-27' }, now), null);
