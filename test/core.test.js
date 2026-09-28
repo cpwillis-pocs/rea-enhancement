@@ -702,9 +702,9 @@ test('applications close: read from the text, nudged near the deadline, exported
 test('market: agency patterns count drops, relists, taken and days listed; only with two agencies of 2+', () => {
   const now = new Date(2026, 8, 23), d = (n) => +now - n * 864e5;
   const rows = [
-    { id: '1', url: 'a', agency: 'Ray White', priceNum: 600, prevPrice: '$650 per week', listed: d(10) },
-    { id: '2', url: 'b', agency: 'Ray White', priceNum: 700, prevPrice: '$650 per week', listed: d(20), taken: 'deposit' },
-    { id: '3', url: 'c', agency: 'LJ Hooker', priceNum: 500, relisted: { price: '$520' }, firstSeen: d(3) },
+    { id: '1', url: 'a', agency: 'Ray White', priceNum: 600, prevPrice: '$650 per week', listed: new Date(d(10)) }, // Dates, as toRow and decorate give
+    { id: '2', url: 'b', agency: 'Ray White', priceNum: 700, prevPrice: '$650 per week', listed: new Date(d(20)), taken: 'deposit' },
+    { id: '3', url: 'c', agency: 'LJ Hooker', priceNum: 500, relisted: { price: '$520' }, firstSeen: new Date(d(3)) },
     { id: '4', url: 'd', agency: 'lj hooker', priceNum: 500 },
     { id: '5', url: 'e', agency: 'Solo Realty', priceNum: 450 },
   ];
@@ -1126,4 +1126,42 @@ test('SETTINGS: one spec draws each setting, gives its default and bounds what a
   assert.deepEqual(core.sanitizeCfg({ theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' }),
     { theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' });
   assert.ok(!('remember' in core.backupCfg({ ...core.DEFAULT_CFG, remember: false })), 'a backup never carries Remember');
+});
+
+test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminders, notice given, planner', () => {
+  const now = new Date(2026, 8, 28, 12);
+  for (const t of ['Applications close Mon 1 Sep', 'Applications closed 20/9', 'Applications close Fri 3 Oct 2025',
+    'Applications close 48 hours after the open home, available 15 October', 'applications close 5pm Friday, lease starts 20 October']) assert.equal(core.applyByOf(t, now), '', t);
+  assert.equal(core.applyByOf('Applications close Fri 3 Oct at 5pm.', now), '2026-10-03');
+  const soon = { applyBy: '2026-09-30' };
+  for (const dead of [{ gone: true }, { taken: 'leased' }, { hidden: true }, { appStatus: 'declined' }]) assert.equal(core.needsAction({ ...soon, ...dead }, +now), '', JSON.stringify(dead));
+  assert.equal(core.needsAction({ ...soon, hidden: true, resurfaced: true }, +now), 'applyby', 'a resurfaced one is on show');
+  // Reminders you no longer need go out cancelled under the same UID; live ones alert the day before.
+  const appAt = new Date(2026, 8, 26).getTime();
+  const ics = core.toIcs([
+    { id: '146500001', address: '1 A St', appStatus: 'approved', appAt, applyBy: '2026-10-02', inspections: [] },
+    { id: '146500002', address: '2 B St', appStatus: 'applied', appAt, inspections: [] },
+  ], +now, { followUps: true, alarm: 60 });
+  assert.match(ics, /UID:146500001-fu@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED\r\nSUMMARY:Cancelled: Follow up: 1 A St/);
+  assert.match(ics, /UID:146500001-ab@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/);
+  assert.match(ics, /UID:146500002-fu@rea-enhancement\r\n(?:(?!END:VEVENT)[\s\S])*?TRIGGER:-PT15H/, 'live reminder alerts at 9am the day before');
+  assert.doesNotMatch(ics.split('UID:146500001-fu')[1].split('END:VEVENT')[0], /VALARM/, 'no alarm on a cancelled one');
+  const given = core.toIcs([], +now, { followUps: true, leaseEnd: '2026-10-31', noticeDays: 21, noticeGiven: '2026-09-27' });
+  assert.match(given, /UID:notice@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/, 'notice given: reminder withdrawn');
+  const cfg = { ...core.DEFAULT_CFG, leaseEnd: '2026-10-31', noticeDays: '21' };
+  assert.deepEqual(core.noticeDue(cfg, now), { by: '2026-10-10', days: 12 });
+  assert.equal(core.noticeDue({ ...cfg, noticeGiven: '2026-09-27' }, now), null);
+  assert.equal(core.noticeDue({ ...cfg, leaseEnd: '2026-12-31' }, now), null, 'not yet');
+  // Planner: dead ends left out and counted; sessions outside your times marked, never routed.
+  const at = (h) => Date.UTC(2026, 8, 29, h - 10); // Sydney is UTC+10 in September
+  const rows = [
+    { id: 'a', url: 'a', address: '1 A St, Bondi NSW 2026', inspections: [{ at: at(10) }] },
+    { id: 'b', url: 'b', address: '2 B St, Bondi NSW 2026', appStatus: 'declined', inspections: [{ at: at(11) }] },
+    { id: 'c', url: 'c', address: '3 C St, Bondi NSW 2026', inspections: [{ at: at(18) }] },
+  ];
+  const day = core.planDay(rows, '2026-09-29', { free: core.parseFreeTimes('daily 9-13') });
+  assert.deepEqual(day.map((x) => [x.r.id, x.outside]), [['a', false], ['c', true]]);
+  assert.equal(day.skipped, 1);
+  assert.deepEqual([...core.bestRoute(day).picked].map((x) => x.r.id), ['a']);
+  assert.match(core.planHtml(day, '2026-09-29'), /outside your times[\s\S]*1 session left out: declined, taken, hidden or no longer listed/);
 });

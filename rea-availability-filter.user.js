@@ -266,7 +266,10 @@
   const FOLLOW_UP_DAYS = 5;
   // After an inspection you were down for: "Inspected?"; inspected a while ago but not applied: "Apply?".
   const ACTION_WINDOW_DAYS = 7, APPLY_NUDGE_DAYS = 2;
+  // Taken down, hidden, declined or already taken: nothing left to nudge, route or remind.
+  const deadEnd = (r) => !!(r.gone || (r.hidden && !r.resurfaced) || r.appStatus === 'declined' || r.taken);
   const needsAction = (r, now = Date.now()) => {
+    if (deadEnd(r)) return '';
     if (r.lastInspect && now - r.lastInspect < ACTION_WINDOW_DAYS * DAY_MS && (!r.appStatus || r.appStatus === 'to inspect') &&
       !(r.inspectAnswered >= r.lastInspect) && !(r.appAt >= r.lastInspect)) return 'inspected';
     if (r.appStatus === 'inspected' && r.appAt && now - r.appAt > APPLY_NUDGE_DAYS * DAY_MS) return 'apply';
@@ -276,7 +279,7 @@
     }
     return '';
   }; // an application with no answer after this long gets a "follow up?" nudge
-  const needsFollowUp = (r, now = Date.now()) => r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
+  const needsFollowUp = (r, now = Date.now()) => !r.gone && r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
   // Your track record per agency across the shortlist: { applied, approved, declined } by agency name.
   const agencyRecord = (rows) => {
     const out = new Map();
@@ -1073,10 +1076,11 @@
     else if (d - today > YEARLESS_BACK_MS) d = new Date(--year, month, day); // "20 Dec" read on 5 Jan: last month
     return d.getDate() !== day ? null : clamp(d); // 31 Feb, 29 Feb in a non-leap year
   };
-  const parseAvail = (display, now = new Date()) => {
+  // `keepPast`: a date already gone stays as it is (a deadline), instead of meaning "now".
+  const parseAvail = (display, now = new Date(), { keepPast = false } = {}) => {
     if (!display) return null;
     const today = startOfDay(now);
-    const clamp = (d) => (d < today ? today : d);
+    const clamp = (d) => (d < today && !keepPast ? today : d);
     if (/\b(?:now|immediately|immediate|vacant)\b/i.test(display)) return today;
     const iso = display.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
     if (iso) {
@@ -1598,7 +1602,8 @@
     for (let m; (m = APPLY_BY_G.exec(src));) {
       const tail = src.slice(m.index + m[0].length, m.index + m[0].length + 48).replace(/^[\s:,-]*(?:(?:by|on|is|at|before|this|the|of)\s+)*/i, '');
       if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun)/i.test(tail)) continue;
-      const d = parseAvail(`Available ${tail.split(/[.;\n]/)[0]}`, now);
+      const d = parseAvail(`Available ${tail.split(/[.;,\n]|\s[-–]\s/)[0]}`, now, { keepPast: true }); // this clause only: not "…, lease starts 20 October"
+      if (d && d < startOfDay(now)) return ''; // closed already: nothing to nudge
       if (d) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
     return '';
@@ -1956,6 +1961,8 @@
     { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', inputTitle: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap", name: 'lease end' },
     { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
       title: "How many days before your lease ends you must tell your landlord or agent you're leaving. It depends on your state and lease: check your state's tenancy rules or your lease. The calendar export then adds a reminder." },
+    { key: 'noticeGiven', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
+      title: 'Once you have given notice: the calendar export then takes its Give notice reminder out, and the drawer stops nudging.' },
     { key: 'checklist', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
     { key: 'enquiry', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
       inputTitle: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
@@ -2025,7 +2032,7 @@
     };
   };
   // Types, plus values a hand-edited file could get wrong: a sort that exists, real calendar dates.
-  const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd']);
+  const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd', 'noticeGiven']);
   const isYmd = (v) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'); return !!d && !isNaN(d) && d.toISOString().startsWith(v); };
   const sanitizeCfg = (c) => (c && typeof c === 'object'
     ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))
@@ -2398,8 +2405,8 @@
       if (Number.isFinite(was) && Number.isFinite(r.priceNum) && r.priceNum < was) g.dropped++;
       if (r.relisted) g.relisted++;
       if (r.taken) g.taken++;
-      const since = r.listed ?? r.firstSeen;
-      if (typeof since === 'number' && since <= +now) g.days.push(Math.floor((+now - since) / DAY_MS));
+      const since = +(r.listed ?? r.firstSeen ?? NaN); // Dates on real rows, numbers from a summary
+      if (Number.isFinite(since) && since <= +now) g.days.push(Math.floor((+now - since) / DAY_MS));
       groups.set(k, g);
     }
     const out = [...groups.values()].filter((g) => g.n >= AGENCY_MIN);
@@ -2636,7 +2643,23 @@
   // `alarm`: minutes before each inspection for a reminder (0 = none; some calendars ignore
   // reminders in imported files).
   const geo = (r) => (Number.isFinite(r.lat) && Number.isFinite(r.lng) ? `GEO:${r.lat.toFixed(6)};${r.lng.toFixed(6)}` : '');
-  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, followUps = false } = {}) => {
+  // The last day to give notice: your lease end less the notice period you set ('' without both).
+  const noticeBy = (leaseEnd, days) => {
+    const n = Math.round(+days);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd || '') || !(n >= 1 && n <= 120)) return '';
+    const [y, mo, d] = leaseEnd.split('-').map(Number);
+    return ymdLocal(new Date(y, mo - 1, d - n));
+  };
+  // Within NOTICE_NUDGE_DAYS of the last day to give notice (and not given): { by, days } for the
+  // Shortlist's nudge, days < 0 once that day has passed while the lease still runs.
+  const NOTICE_NUDGE_DAYS = 14;
+  const noticeDue = (cfg, now = new Date()) => {
+    const by = noticeBy(cfg.leaseEnd, cfg.noticeDays), today = ymdLocal(now);
+    if (!by || cfg.noticeGiven || cfg.leaseEnd < today) return null;
+    const days = Math.round((new Date(`${by}T00:00:00`) - startOfDay(now)) / DAY_MS);
+    return days <= NOTICE_NUDGE_DAYS ? { by, days } : null;
+  };
+  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, noticeGiven = '', followUps = false } = {}) => {
     // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
     // and then reinstated is live again when the newer file is imported.
     const seq = Math.floor(now / 60000);
@@ -2670,30 +2693,35 @@
     // All-day reminders: chase an application with no answer (on the day the drawer starts
     // nudging, or today once that's passed), and your own lease end. Fixed UIDs, so a later
     // export moves them rather than adding a second one.
-    const allDay = (uid, ymd, summary, extra = []) => events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`,
-      `DTSTART;VALUE=DATE:${ymd.replace(/-/g, '')}`, `SEQUENCE:${seq}`, 'TRANSP:TRANSPARENT', `SUMMARY:${icsText(summary)}`, ...extra, 'END:VEVENT'].filter(Boolean));
+    // A reminder no longer needed (you applied, heard back, or the listing is gone or taken) goes
+    // out again cancelled under its UID, like a cancelled inspection, so re-importing removes it.
+    // With a calendar reminder set, live ones alert at 9am the day before.
+    const allDay = (uid, ymd, summary, extra = [], { cancel = false } = {}) => events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`,
+      `DTSTART;VALUE=DATE:${ymd.replace(/-/g, '')}`, `SEQUENCE:${seq}`, 'TRANSP:TRANSPARENT', cancel ? 'STATUS:CANCELLED' : '', `SUMMARY:${icsText(cancel ? `Cancelled: ${summary}` : summary)}`, ...extra,
+      ...(alarm > 0 && !cancel ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(summary)}`, 'TRIGGER:-PT15H', 'END:VALARM'] : []), 'END:VEVENT'].filter(Boolean));
     const today = ymdLocal(new Date(now));
     for (const r of followUps ? rows : []) {
-      if (r.appStatus !== 'applied' || typeof r.appAt !== 'number' || seen.has(`${r.id}-fu`)) continue;
+      if (typeof r.appAt !== 'number' || !['applied', 'approved', 'declined'].includes(r.appStatus) || seen.has(`${r.id}-fu`)) continue;
       seen.add(`${r.id}-fu`);
-      const due = ymdLocal(new Date(r.appAt + FOLLOW_UP_DAYS * DAY_MS));
+      const due = ymdLocal(new Date(r.appAt + FOLLOW_UP_DAYS * DAY_MS)), cancel = r.appStatus !== 'applied' || deadEnd(r);
+      if (cancel && due < today) continue; // long past: nothing in the calendar worth taking out
       allDay(`${r.id}-fu@rea-enhancement`, due < today ? today : due, `Follow up: ${r.address || 'rental application'}`,
-        [r.url ? `URL:${r.url}` : '', `DESCRIPTION:${icsText([`Applied ${ymdLocal(new Date(r.appAt))}`, r.agency, r.applyVia && `via ${r.applyVia}`].filter(Boolean).join(' | '))}`]);
+        [r.url ? `URL:${r.url}` : '', `DESCRIPTION:${icsText([`Applied ${ymdLocal(new Date(r.appAt))}`, r.agency, r.applyVia && `via ${r.applyVia}`].filter(Boolean).join(' | '))}`], { cancel });
     }
     for (const r of followUps ? rows : []) {
-      if (!r.applyBy || r.applyBy < today || ['applied', 'approved', 'declined'].includes(r.appStatus) || seen.has(`${r.id}-ab`)) continue;
+      if (!r.applyBy || r.applyBy < today || seen.has(`${r.id}-ab`)) continue;
       seen.add(`${r.id}-ab`);
-      allDay(`${r.id}-ab@rea-enhancement`, r.applyBy, `Applications close: ${r.address || 'rental'}`, [r.url ? `URL:${r.url}` : '']);
+      allDay(`${r.id}-ab@rea-enhancement`, r.applyBy, `Applications close: ${r.address || 'rental'}`, [r.url ? `URL:${r.url}` : ''],
+        { cancel: ['applied', 'approved', 'declined'].includes(r.appStatus) || deadEnd(r) });
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) {
       allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends');
       // Your own notice period (it varies by state and lease, so it's yours to enter): the last
       // day to give notice, or today if that's already passed.
-      const n = Math.round(+noticeDays);
-      if (n >= 1 && n <= 120) {
-        const [y, mo, d] = leaseEnd.split('-').map(Number), by = ymdLocal(new Date(y, mo - 1, d - n));
+      const by = noticeBy(leaseEnd, noticeDays);
+      if (by) {
         allDay('notice@rea-enhancement', by < today ? today : by, `Give notice to vacate (lease ends ${leaseEnd})`,
-          [`DESCRIPTION:${icsText(`${n} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`]);
+          [`DESCRIPTION:${icsText(`${Math.round(+noticeDays)} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`], { cancel: !!noticeGiven });
       }
     }
     if (!events.length) return '';
@@ -2734,7 +2762,7 @@
     let best = null;
     for (const r of rows) {
       // Not this one, and not a dead end: taken down, hidden, declined or already taken.
-      if (r.id === here.id || r.gone || r.hidden || r.appStatus === 'declined' || r.taken) continue;
+      if (r.id === here.id || deadEnd(r)) continue;
       for (const i of r.inspections || []) {
         if (typeof i.at !== 'number' || i.at <= now || ymdIn(i.at, tzOf(r)) !== day) continue;
         if (!best || i.at < best.at) best = { r, at: i.at, label: i.label };
@@ -2765,12 +2793,18 @@
     }
     return [...days].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, n]) => ({ day, n }));
   };
-  const planDay = (rows, day) => {
+  // Dead ends (declined, taken, gone, hidden) are left out and counted in `skipped`; with your
+  // own inspection times (`free`), a session outside them is marked and never routed.
+  const planDay = (rows, day, { free = null } = {}) => {
     const slots = [];
+    let skipped = 0;
     for (const r of rows) for (const i of r.inspections || []) {
       const tz = tzOf(r);
-      if (typeof i.at === 'number' && ymdIn(i.at, tz) === day) slots.push({ r, tz, at: i.at, end: i.at + INSPECT_MINUTES * 60e3, label: i.label });
+      if (typeof i.at !== 'number' || ymdIn(i.at, tz) !== day) continue;
+      if (deadEnd(r)) { skipped++; continue; }
+      slots.push({ r, tz, at: i.at, end: i.at + INSPECT_MINUTES * 60e3, label: i.label, outside: !!free && !inspectFits(i.at, tz, 'mine', free) });
     }
+    slots.skipped = skipped;
     slots.sort((a, b) => a.at - b.at);
     for (let k = 1; k < slots.length; k++) {
       const prev = slots[k - 1], cur = slots[k];
@@ -2792,7 +2826,8 @@
     const km = a.r.lat != null && b.r.lat != null ? haversineKm(a.r, b.r) : 0;
     return b.at >= a.end + Math.max(PLAN_MIN_GAP, km * PLAN_MIN_PER_KM) * 60e3 ? km : -1;
   };
-  const bestRoute = (slots) => {
+  const bestRoute = (all) => {
+    const slots = all.filter((x) => !x.outside);
     const ids = [...new Set(slots.map((x) => x.r.id))];
     const bit = new Map(ids.map((id, i) => [id, i]));
     const weight = (x) => (x.r.appStatus === 'to inspect' ? 2 : 1);
@@ -2993,13 +3028,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
       ${route.listings > 1 ? `<div class="rf-plan-route"><span>Suggested route: <strong>${route.visits} of ${plural(route.listings, 'listing')}</strong>${partial ? ' (the rest clash or are too far to reach in time)' : ''}</span>${partial || route.picked.size < slots.length ? ' <button class="rf-btn sec" data-plan-ics="route">Calendar for the route</button>' : ''}</div>` : ''}
       <ol>${slots.map((x) => {
-        const tag = route.listings < 2 ? '' : route.picked.has(x) ? '<span class="rf-tag rf-new">route</span>'
+        const tag = x.outside ? '<span class="rf-tag">outside your times</span>' : route.listings < 2 ? '' : route.picked.has(x) ? '<span class="rf-tag rf-new">route</span>'
           : inRoute.has(x.r.id) ? '<span class="rf-tag">other time</span>' : '<span class="rf-tag">skip</span>';
         return `<li class="${[x.flag ? `rf-${x.flag}` : '', route.listings > 1 && !route.picked.has(x) ? 'rf-off-route' : ''].filter(Boolean).join(' ')}"><span class="rf-plan-t">${t(x.at, x.tz)}</span>
         <a href="${esc(x.r.url)}" target="_blank" rel="noopener">${esc(x.r.address)}</a> <span class="rf-type">${esc(x.r.price)}</span>${tag}
         ${x.gapMin != null ? `<div class="rf-meta">${x.same ? 'Another time for the same listing' : x.flag === 'clash' ? 'Overlaps the previous inspection' : `${x.gapMin} min after the previous${x.km != null ? `, ${x.km} km away` : ''}${x.flag === 'tight' ? ' — tight' : ''}`}</div>` : ''}
       </li>`;
-      }).join('')}</ol><div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
+      }).join('')}</ol>${slots.skipped ? `<div class="rf-meta">${plural(slots.skipped, 'session')} left out: declined, taken, hidden or no longer listed.</div>` : ''}<div class="rf-meta">Assumes ${INSPECT_MINUTES} min per inspection and straight-line distance (about ${60 / PLAN_MIN_PER_KM} km/h, at least ${PLAN_MIN_GAP} min between); "to inspect" listings are favoured. A guide, not a timetable.</div></div>`;
   }
 
   function mapHtml(rows, cfg) {
@@ -3101,7 +3136,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, noticeBy, noticeDue, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3135,7 +3170,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // `reminders`: the whole-list export also carries follow-ups and your lease end (not one
   // listing's or one day's file).
   function downloadIcs(rows, { reminders = false } = {}) {
-    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, noticeDays: num(cfg.noticeDays) || 0, followUps: true } : {}) });
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, noticeDays: num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true } : {}) });
     if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
   }
@@ -3943,10 +3978,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   ui.planIcs = (btn) => {
     if (!ui.planDay) return;
     const day = ui.planDay;
-    let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
+    let rows = shortlistRows().filter((r) => !deadEnd(r)).map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
       inspectCancelledAt: typeof r.inspectCancelledAt === 'number' && ymdIn(r.inspectCancelledAt, tzOf(r)) === day ? r.inspectCancelledAt : null })); // this day's cancellations only
     if (btn.dataset.planIcs === 'route') { // just the suggested sessions
-      const picked = [...bestRoute(planDay(rows, day)).picked];
+      const picked = [...bestRoute(planDay(rows, day, { free: parseFreeTimes(cfg.inspectFree) })).picked];
       rows = rows.map((r) => ({ ...r, inspections: r.inspections.filter((i) => picked.some((x) => x.r.id === r.id && x.at === i.at)) })).filter((r) => r.inspections.length);
     }
     downloadIcs(rows);
@@ -4912,7 +4947,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (ui.planDay && !days.some((d) => d.day === ui.planDay)) ui.planDay = null;
     ui.plan.value = ui.planDay || '';
     ui.plan.hidden = !days.length;
-    const slots = ui.planDay ? planDay(rows, ui.planDay) : null;
+    const slots = ui.planDay ? planDay(rows, ui.planDay, { free: parseFreeTimes(cfg.inspectFree) }) : null;
     const picked = ui.cmpSel?.size ? rows.filter((r) => ui.cmpSel.has(r.id)) : [];
     // A selection hidden by the status filter falls back to the first listings shown.
     const cmp = ui.compare && !slots ? (picked.length ? picked : rows).slice(0, COMPARE_MAX) : null;
@@ -4925,6 +4960,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     else ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
       : slots ? planHtml(slots, ui.planDay) : compareHtml(cmp, cfg, { total: ui.rows.length, picked: ui.cmpPicked });
     setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
+    const due = noticeDue(cfg);
+    if (due) { // your own lease: tell the landlord in time
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: "I've given notice" });
+      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); }, { once: true });
+      ui.status.append(` ${due.days < 0 ? `Your notice date (${shortDate(due.by)}) has passed.` : `Give notice by ${shortDate(due.by)}${due.days ? ` (${plural(due.days, 'day')})` : ' (today)'} for your lease ending ${shortDate(cfg.leaseEnd)}.`} `, b);
+    }
   }
 
   const updateCounts = () => {
