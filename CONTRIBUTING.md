@@ -11,7 +11,7 @@ npm run lint    # syntax + project invariants (header, changelog, privacy, stora
 npm run check   # lint + unit tests, exactly what CI runs first
 npm run e2e:setup   # once: the Playwright and axe-core versions CI pins (lint keeps them in step) + Chromium
 npm run e2e     # Chromium: main flow (smoke.js), edge paths (edge.js), accessibility (a11y.js)
-npm run a11y    # just the accessibility check: axe-core over each drawer view and the listing bar, light and dark
+npm run a11y    # just the accessibility check: axe-core over each drawer view and the listing bar, light and dark; forced colours, reduced motion, 640x450 and 320px reflow
 npm run coverage   # unit coverage of the pure half, then V8 coverage of the UI half across both e2e files -> coverage-e2e.txt
 npm run ci      # check + e2e, the whole gate locally
 ```

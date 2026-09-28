@@ -1,6 +1,6 @@
 'use strict';
 // Accessibility check: axe-core over the drawer in each of its views, in light and dark, plus the
-// listing-page bar. Fails on serious or critical findings in the script's own UI (REA's page
+// listing-page bar, then forced colours, reduced motion and small windows. Fails on serious or critical findings in the script's own UI (REA's page
 // around it is not ours to fix). axe-core is a test-only install, never shipped:
 //   npm run e2e:setup   (installs it at the version pinned in package.json)
 //   node test/e2e/a11y.js
@@ -97,7 +97,49 @@ const check = async (page, include, label, out) => {
     if (name === 'phone listing bar' && small.length) found.push(`${name}: touch targets under 44px: ${small.slice(0, 5).join('; ')}`);
     await ctx.close();
   }
+  // Other ways people browse: Windows high contrast, reduced motion, a short landscape window and
+  // a 320px phone (WCAG 1.4.10 reflow: no sideways scrolling in the drawer).
+  const EXTRA = [
+    ['forced colours', { forcedColors: 'active' }, true],
+    ['reduced motion', { reducedMotion: 'reduce' }, false],
+    ['640x450', { viewport: { width: 640, height: 450 } }, false],
+    ['320 wide', { viewport: { width: 320, height: 640 }, hasTouch: true }, false],
+  ];
+  for (const [name, opts, axe] of EXTRA) {
+    harness.section(name);
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, ...opts });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: FIXED });
+    await page.route('**/*', serve([], { extras: true }));
+    await page.goto(SEARCH);
+    await page.addScriptTag({ content: SCRIPT });
+    await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    await page.click('#rf-launch'); await page.click('#rf-run');
+    await page.waitForFunction(() => /listings match/.test(document.querySelector('.rf-status').textContent));
+    for (const [view, go] of [['results', async () => {}], ['filters open', async (p) => { if (await p.isVisible('.rf-unfold')) await p.click('.rf-unfold'); await p.click('#rf-more summary'); }]]) {
+      await go(page);
+      if (axe) await check(page, '#rf-panel', `${name} ${view}`, found);
+      const wide = await page.evaluate(() => {
+        const panel = document.querySelector('#rf-panel'), over = [];
+        const edge = panel.getBoundingClientRect().right + 1;
+        if (panel.scrollWidth > panel.clientWidth + 1) over.push(`drawer scrolls sideways (${panel.scrollWidth} > ${panel.clientWidth})`);
+        for (const el of panel.querySelectorAll('*')) {
+          const r = el.getBoundingClientRect();
+          if (el.offsetParent && r.width && r.right > edge && !el.closest('.rf-compare, .rf-market, .rf-map')) over.push(`${el.className || el.tagName} ends at ${Math.round(r.right)} > ${Math.round(edge)}`);
+        }
+        return over.slice(0, 3);
+      });
+      for (const w of wide) found.push(`${name} ${view}: ${w}`);
+      if (opts.reducedMotion) {
+        const moving = await page.evaluate(() => [...document.querySelectorAll('#rf-panel, #rf-panel *, #rf-launch, [data-rf-id]')]
+          .filter((el) => { const cs = getComputedStyle(el); return parseFloat(cs.transitionDuration) > 0 || (cs.animationName !== 'none' && parseFloat(cs.animationDuration) > 0); })
+          .slice(0, 3).map((el) => el.className || el.tagName));
+        for (const m of moving) found.push(`${name} ${view}: still animates: ${m}`);
+      }
+    }
+    await ctx.close();
+  }
   await browser.close();
   if (found.length) { console.error(`a11y: ${found.length} serious/critical finding(s):\n  ${found.join('\n  ')}`); process.exit(1); }
-  console.log(`a11y: ok (${VIEWS.length + 1} views, light and dark, plus phone)`);
+  console.log(`a11y: ok (${VIEWS.length + 1} views, light and dark, plus phone, forced colours, reduced motion, short and 320px windows)`);
 })().catch((e) => { console.error(e); process.exit(1); });
