@@ -2712,7 +2712,8 @@
     const days = Math.round((new Date(`${by}T00:00:00`) - startOfDay(now)) / DAY_MS);
     return days <= NOTICE_NUDGE_DAYS ? { by, days } : null;
   };
-  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, noticeGiven = '', followUps = false } = {}) => {
+  const ICS_SENT_MAX = 300; // events remembered from the last shortlist export (uid and start only)
+  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, noticeGiven = '', followUps = false, prev = null, sent = null } = {}) => {
     // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
     // and then reinstated is live again when the newer file is imported.
     const seq = Math.floor(now / 60000);
@@ -2784,6 +2785,21 @@
           [`DESCRIPTION:${icsText(`${Math.round(+noticeDays)} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`], { cancel: noticeGivenFor(leaseEnd, noticeGiven), alarm: by >= today });
       }
     }
+    // `prev`: what the last shortlist export sent ([{ u: uid, s: DTSTART line }]). Anything upcoming
+    // that isn't in this one (unshortlisted, a deadline the agent removed, a lease end cleared)
+    // goes out cancelled; `sent` gets this export's live events for next time.
+    const uidOf = (e) => e.find((l) => l.startsWith('UID:')).slice(4), startOf = (e) => e.find((l) => l.startsWith('DTSTART'));
+    const live = events.filter((e) => !e.includes('STATUS:CANCELLED'));
+    if (Array.isArray(prev)) {
+      const here = new Set(events.map(uidOf)), todayIcs = ymdLocal(new Date(now)).replace(/-/g, '');
+      for (const p of prev) {
+        if (!p || typeof p.u !== 'string' || !/^DTSTART(?:;VALUE=DATE)?:\d{8}/.test(p.s || '') || here.has(p.u) || !/@rea-enhancement$/.test(p.u)) continue;
+        if (p.s.replace(/^[^:]*:/, '').slice(0, 8) < todayIcs) continue; // past: leave it be
+        here.add(p.u);
+        events.push(['BEGIN:VEVENT', `UID:${p.u}`, `DTSTAMP:${icsTime(now)}`, p.s, `SEQUENCE:${seq}`, 'STATUS:CANCELLED', 'SUMMARY:Cancelled: no longer on your shortlist', 'END:VEVENT']);
+      }
+    }
+    if (Array.isArray(sent)) sent.push(...live.map((e) => ({ u: uidOf(e), s: startOf(e) })).slice(0, ICS_SENT_MAX));
     if (!events.length) return '';
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
       .map(icsFold).join('\r\n') + '\r\n';
@@ -3244,10 +3260,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // `reminders`: the whole-list export also carries follow-ups and your lease end (not one
   // listing's or one day's file).
-  function downloadIcs(rows, { reminders = false } = {}) {
-    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, noticeDays: num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true } : {}) });
+  // `track`: the Shortlist's whole export remembers what it sent (uid and start, no addresses), so
+  // the next one cancels what dropped out. Results exports aren't tracked: they're a different set.
+  const ICS_SENT_KEY = `${TOOL_PREFIX}ics/v1`;
+  const icsSent = () => keyStore(storageOr('localStorage'), ICS_SENT_KEY); // lazy: storageOr is defined further down
+  function downloadIcs(rows, { reminders = false, track = false } = {}) {
+    const sent = [];
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, noticeDays: num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true } : {}),
+      ...(track ? { prev: icsSent().getJson() || [], sent } : {}) });
     if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
+    if (track) icsSent().setJson(sent);
   }
 
   function download(name, text, type) {
@@ -4903,7 +4926,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
-        else if (b.dataset.export === 'ics') downloadIcs(rows, { reminders: true });
+        else if (b.dataset.export === 'ics') downloadIcs(rows, { reminders: true, track: ui.view === 'shortlist' });
         else {
           const ok = await copyText(toTsv(rows));
           setStatus(ok ? `Copied ${rows.length} rows.` : 'Clipboard blocked - use TSV download instead.', !ok);

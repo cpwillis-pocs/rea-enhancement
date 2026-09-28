@@ -1220,3 +1220,18 @@ test('filters: each has a chip, a removal and a row test', () => {
     if (!SET_LEVEL.has(k)) assert.ok(core.rowTests(cfg, now).some(([tag]) => tag === (TAG[k] || k)), `${k}: a row test runs`);
   }
 });
+
+test('toIcs prev/sent: what dropped out of the shortlist since the last export goes out cancelled', () => {
+  const now = new Date(2026, 8, 28, 12).getTime();
+  const r = (id, h) => ({ id, address: `${id} St`, inspections: [{ at: now + h * 3600e3, label: 'x' }] });
+  const sent = [];
+  core.toIcs([r('146500001', 24), r('146500002', 48)], now, { sent, followUps: true, leaseEnd: '2026-12-31' });
+  assert.equal(sent.length, 3, 'two sessions and the lease end remembered');
+  assert.ok(sent.every((x) => /@rea-enhancement$/.test(x.u) && /^DTSTART/.test(x.s)) && !JSON.stringify(sent).includes(' St'), 'uid and start only, no addresses');
+  const next = [];
+  const ics = core.toIcs([r('146500001', 24)], now + 60000, { prev: sent, sent: next, followUps: true });
+  assert.match(ics, new RegExp(`UID:146500002-${now + 48 * 3600e3}@rea-enhancement\\r\\n[\\s\\S]*?STATUS:CANCELLED`), 'unshortlisted: its session cancelled');
+  assert.match(ics, /UID:lease-end@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/, 'lease end cleared: cancelled');
+  assert.equal(next.length, 1);
+  assert.equal(core.toIcs([], now + 60000, { prev: [{ u: 'x@elsewhere', s: 'DTSTART:20261001T000000Z' }, { u: 'old@rea-enhancement', s: 'DTSTART:20250101T000000Z' }] }), '', 'foreign or past entries left alone');
+});

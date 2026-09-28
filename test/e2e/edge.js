@@ -2307,6 +2307,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await other.close(); await done(page); await ctx.close();
   });
 
+  // 67. The Shortlist calendar remembers what it sent: unshortlist a listing and the next export
+  // sends its open homes cancelled.
+  await block('67', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const ids = await page.$$eval('.rf-item', (els) => els.filter((e) => /Inspect /.test(e.textContent)).slice(0, 2).map((e) => e.dataset.id));
+    for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.click('[data-view=shortlist]');
+    const exportIcs = async () => { const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]); return fs.readFileSync(await dl.path(), 'utf8'); };
+    await exportIcs();
+    assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/ics/v1'))).length >= 2, 'sent events remembered');
+    await page.hover(`.rf-item[data-id="${ids[1]}"]`); await page.click(`.rf-item[data-id="${ids[1]}"] >> [data-act=s]`);
+    const second = await exportIcs();
+    assert.match(second, new RegExp(`UID:${ids[1]}-\\d+@rea-enhancement\\r\\n[\\s\\S]*?STATUS:CANCELLED`), 'the unshortlisted listing is cancelled');
+    assert.doesNotMatch(second, new RegExp(`UID:${ids[0]}-\\d+@rea-enhancement\\r\\n(?:(?!END:VEVENT)[\\s\\S])*STATUS:CANCELLED`), 'the other stays live');
+    console.log('calendar remembers what it sent: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

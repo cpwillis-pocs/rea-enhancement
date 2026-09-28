@@ -68,6 +68,7 @@ All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces 
 | `paused` | localStorage | When fetching may resume after a bot check, for every tab (`storage` events update the others); removed once past | one timestamp |
 | `mirror` (IndexedDB database `rea-avail-filter/mirror`, store `kv`, key `copy`) | IndexedDB | A safety copy of what a backup holds (marks you chose, presets, settings), written 2 s after a change, never overwritten with an empty shortlist; offered back when marks are found empty; Cancel or Delete all my data deletes it | one copy |
 | `backup-at`, `backup-nudge-at` | localStorage | When you last downloaded a backup, and when the "no backup" reminder last showed | none |
+| `ics/v1` | localStorage | The last Shortlist calendar export's events (`{ u: uid, s: DTSTART line }`), so the next export sends what dropped off as cancelled | 300 events |
 
 A failed write of something you chose (marks, settings, presets) goes to `writeState`, and the UI shows a "storage full" banner until a later write succeeds.
 
@@ -128,7 +129,7 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 ## Tests at a glance
 
 - **Unit:** `test/*.test.js` (216 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
-- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (80 blocks, numbered 1–66 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
+- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (81 blocks, numbered 1–67 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Shapes:** `test/shapes.test.js` rebuilds a listing from each `test/shapes/*.json` (`reaFilter.shape()` output) and checks it still parses.
 - **Live:** `npm run live` (`test/live.js`) runs one real search locally and saves a fresh shape. Never in CI; lint enforces that.
