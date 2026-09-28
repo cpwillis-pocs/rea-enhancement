@@ -646,13 +646,15 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('23', async () => {
     const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
     const a = await open(ctxA);
-    a.on('dialog', (d) => d.accept());
     await run(a);
     for (const n of [1, 2]) { await a.hover(`.rf-item:nth-child(${n})`); await a.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
     await a.hover('.rf-item:nth-child(1)'); await a.click('.rf-item:nth-child(1) >> [data-act=n]');
     await a.fill('.rf-note-edit', 'great light'); await a.keyboard.press('Enter');
     await a.click('[data-view=shortlist]');
     await a.click('.rf-menu summary'); await a.click('[data-sl=share]');
+    await a.waitForSelector('.rf-ask');
+    assert.equal(await a.evaluate(() => document.activeElement.dataset.ask), 'yes', 'the question takes focus');
+    await a.keyboard.press('Enter');
     await waitStatus(a, /Share link copied \(2 listings, with notes\)/);
     const link = await a.evaluate(() => navigator.clipboard.readText());
     await done(a); await ctxA.close();
@@ -878,7 +880,6 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('24f', async () => {
     const ctx = await browser.newContext();
     const page = await open(ctx);
-    page.on('dialog', (d) => d.accept());
     await page.evaluate(() => localStorage.setItem('reaOwnKey', 'keep me'));
     await run(page);
     await page.hover('.rf-item:nth-child(1)'); await page.click('.rf-item:nth-child(1) >> [data-act=s]');
@@ -886,7 +887,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForFunction(() => document.querySelector('.rf-storage-n').textContent);
     assert.match(await page.textContent('.rf-storage-n'), /Stored in this browser only: \d+ KB \(1 shortlisted, 0 hidden, 1 remembered search\)/);
     assert.match(await page.textContent('.rf-storage-n'), /Remembered: Bondi NSW 2026 \d+ KB\./, 'per-search size');
-    await Promise.all([page.waitForEvent('load'), page.click('[data-forget]')]);
+    await page.click('[data-forget]');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.ask), 'no', 'deleting everything starts on Cancel');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$('.rf-ask'), null, 'Esc cancels');
+    assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-forget')), true, 'focus back on the button');
+    await page.click('[data-forget]');
+    await Promise.all([page.waitForEvent('load'), page.click('.rf-ask [data-ask=yes]')]);
     const keys = await page.evaluate(() => Object.keys(localStorage).concat(Object.keys(sessionStorage)));
     assert.deepEqual(keys.filter((k) => k.startsWith('rea-avail-filter/')), [], 'tool data gone');
     assert.ok(keys.includes('reaOwnKey'), "REA's own data kept");

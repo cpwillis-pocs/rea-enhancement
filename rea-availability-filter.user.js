@@ -3533,6 +3533,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
   .rf-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .rf-whytags{margin:0 9px 8px 124px}.rf-whytags ul{margin:0;padding-left:18px}.rf-whytags li{margin:2px 0}
+  .rf-ask{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0;padding:8px 10px;border:1px solid var(--rf-line);border-radius:8px;background:var(--rf-sec)}
+  .rf-ask>span{flex:1 1 100%}
   .rf-set-help{display:block;margin:-4px 0 6px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
@@ -4067,6 +4069,24 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
   // #endregion
   // #region shortlist bar
+  // A question asked in the drawer (not a browser dialog, which is clumsy on touch and screen
+  // readers): the message and two buttons after `before`'s place; Enter / the first button says
+  // yes, Esc or the second says no, and focus returns where it was. `safe`: focus starts on no.
+  function askInline(anchor, message, yes, no, { safe = false } = {}) {
+    document.querySelector('.rf-ask')?.querySelector('[data-ask=no]')?.click();
+    const back = document.activeElement;
+    const box = Object.assign(document.createElement('div'), { className: 'rf-ask' });
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', message);
+    box.innerHTML = `<span>${esc(message)}</span> <button type="button" class="rf-btn${safe ? ' sec' : ''}" data-ask="yes">${esc(yes)}</button> <button type="button" class="rf-btn${safe ? '' : ' sec'}" data-ask="no">${esc(no)}</button>`;
+    anchor.before(box);
+    return new Promise((resolve) => {
+      const done = (v) => { box.remove(); if (back?.isConnected) back.focus(); resolve(v); };
+      box.addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) done(b.dataset.ask === 'yes'); });
+      box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } });
+      box.querySelector(`[data-ask=${safe ? 'no' : 'yes'}]`).focus();
+    });
+  }
   // Shortlist bar: Backup, Restore (preview, then undo), Share, Re-check, Print and the More menu,
   // plus the incoming-share offer. Needs the drawer pieces build() made.
   function wireShortlistBar(panel) {
@@ -4084,7 +4104,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   ui.slBar.querySelector('[data-sl=share]').addEventListener('click', async () => {
     const rows = shortlistRows();
     if (!rows.length) return setStatus('Nothing on the shortlist to share.', true);
-    const notes = rows.some((r) => r.note) && window.confirm('Include your notes in the share link?');
+    const notes = rows.some((r) => r.note) && await askInline(ui.status, 'Include your notes in the share link?', 'Include notes', 'Without notes');
     const url = shareUrl(rows, { notes });
     const ok = await copyText(url);
     setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? ', with notes' : ''}). Anyone with this script can open it.`
@@ -4141,8 +4161,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   };
   ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
   panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
-  panel.querySelector('[data-forget]').addEventListener('click', () => {
-    if (!window.confirm('Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.')) return;
+  panel.querySelector('[data-forget]').addEventListener('click', async (e) => {
+    if (!await askInline(e.currentTarget.parentElement, 'Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.',
+      'Delete everything', 'Cancel', { safe: true })) return;
     for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
     clearTimeout(mirrorTimer); mirrorTimer = 0; mirrorHeld = true;
     try { indexedDB.deleteDatabase(MIRROR_DB); } catch { /* blocked */ }
