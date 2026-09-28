@@ -4164,6 +4164,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   panel.querySelector('[data-forget]').addEventListener('click', async (e) => {
     if (!await askInline(e.currentTarget.parentElement, 'Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.',
       'Delete everything', 'Cancel', { safe: true })) return;
+    ui.forgetting = true; clearTimeout(placeTimer); // nothing is written back before the reload
     for (const st of [storageOr('localStorage'), storageOr('sessionStorage')]) for (const k of toolKeys(st)) { try { st.removeItem(k); } catch { /* blocked */ } }
     clearTimeout(mirrorTimer); mirrorTimer = 0; mirrorHeld = true;
     try { indexedDB.deleteDatabase(MIRROR_DB); } catch { /* blocked */ }
@@ -4979,7 +4980,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         if (!rows) return;
         if (b.dataset.export === 'csv') downloadCsv(rows);
         else if (b.dataset.export === 'tsv') downloadTsv(rows);
-        else if (b.dataset.export === 'ics') downloadIcs(rows, { reminders: true, track: ui.view === 'shortlist' });
+        else if (b.dataset.export === 'ics') downloadIcs(rows, { reminders: true, track: ui.view === 'shortlist' && !shortlistNarrowed() }); // a narrowed list isn't "what's on the shortlist"
         else {
           const ok = await copyText(toTsv(rows));
           setStatus(ok ? `Copied ${rows.length} rows.` : 'Clipboard blocked - use TSV download instead.', !ok);
@@ -5018,10 +5019,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.syncSticky?.();
   }
 
+  // What the Shortlist shows (its status filter and search box applied), with distances, lease fit
+  // and moving costs worked out: exports and print get them too, not only the list (the rows are
+  // fresh objects once a minute).
   const shortlistRows = (all = marks.shortlist()) => {
     const f = ui.slFilter.value, q = ui.slQuery.value;
-    return all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : r.appStatus === f)) && textMatch(r, q));
+    const rows = all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : r.appStatus === f)) && textMatch(r, q));
+    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places), end = leaseEndOf(cfg), extra = num(cfg.moveCosts) || 0;
+    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, end); r.moveExtra = extra; }
+    return rows;
   };
+  const shortlistNarrowed = () => !!(ui.slFilter.value || ui.slQuery.value.trim());
 
   // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
   const RECHECK_MAX = 30;
@@ -5131,9 +5139,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const all = marks.shortlist();
     const rows = shortlistRows(all);
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
-    // Distance for the shortlist too (applyFilters isn't run over it).
-    const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
-    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, leaseEndOf(cfg)); r.moveExtra = num(cfg.moveCosts) || 0; }
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
@@ -5198,6 +5203,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (done) return;
       done = true;
       if (save) marks.setNote(id, ta.value);
+      ta.remove(); // the keyed paint keeps an unchanged item's node, so the editor goes here
+      if (item._rf) item._rf = { ...item._rf, html: '' }; // and the item is drawn again (its note line)
       refreshMarks();
     };
     ta.addEventListener('keydown', (e) => {
@@ -5321,7 +5328,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   };
 
   function showResults(note = '') {
-    if (ui.view === 'shortlist') return; // results update in the background; shown on tab switch
+    if (ui.view === 'shortlist') return renderShortlist(); // its fit, cash and nudges follow the settings too
     const err = cfgError(cfg);
     if (err) { render([]); return setStatus(err, true); }
     const rows = applyFilters(pool(), cfg);
@@ -5672,7 +5679,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     clearTimeout(placeTimer);
     placeTimer = setTimeout(() => {
       const slot = placeSlot();
-      if (!slot || ui.panel.hidden || (ui.view === 'shortlist' && (ui.planDay || ui.compare))) return;
+      if (!slot || ui.forgetting || ui.panel.hidden || (ui.view === 'shortlist' && (ui.planDay || ui.compare))) return;
       const items = listItems();
       const cur = document.activeElement?.closest?.('.rf-item');
       const edge = ui.panel.classList.contains('rf-full') ? ui.list.getBoundingClientRect().top : ui.status.getBoundingClientRect().bottom;

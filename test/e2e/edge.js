@@ -26,6 +26,15 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
 
 (async () => {
   const browser = harness.watch(await pw.chromium.launch());
+  // A request no page route answers (a page opened without one, a reload race) gets an empty reply
+  // here rather than going out to the real site: it would hang on the network and flake the block.
+  // Page routes are consulted before this context-wide one.
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (opts) => {
+    const c = await newContext(opts);
+    await c.route('**/*', (r) => (process.env.E2E_STRAY && console.log(`stray: ${r.request().url()}`), r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stray</title>' }))); // 200, not 204: a 204 cancels a popup's navigation
+    return c;
+  };
   const errors = []; // { id, msg }: page errors, tagged with the block that opened the page
   const blockOf = new AsyncLocalStorage(); // which block is running, even with E2E_JOBS > 1
   // `before` runs after the page loads and before the script is added (eg to consume REA's global).
@@ -490,7 +499,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.keyboard.press('n');
     assert.ok(await page.$('.rf-note-edit'), 'n opens the note editor');
     await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.rf-note-edit')); // the item redraws once the editor closes
     await page.focus('.rf-list'); await page.keyboard.press('j');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('rf-item'));
     const [pop] = await Promise.all([ctx.waitForEvent('page'), page.keyboard.press('o')]);
     await pop.close();
     await page.keyboard.press('?');
