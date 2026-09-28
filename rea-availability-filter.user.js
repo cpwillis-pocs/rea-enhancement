@@ -3151,6 +3151,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // #region views
   // Node test harness: expose pure functions, skip all DOM work.
   // Views drawn in place of the list (day planner, map, market, compare): pure, so unit-tested.
+  // Each view drawn in place of the list has its own way back (not only its toggle up top).
+  const viewClose = (view, label) => `<button type="button" class="rf-view-x" data-view-close="${view}" aria-label="${label}" title="${label}">×</button>`;
   function planHtml(slots, day) {
     // Zone name only when the listing's clock differs from yours (Melbourne from Sydney doesn't).
     const clock = (ms, tz) => dtf({ hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) }).format(ms);
@@ -3160,7 +3162,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const route = bestRoute(slots);
     const partial = route.listings > 1 && route.visits < route.listings;
     const inRoute = new Set([...route.picked].map((x) => x.r.id));
-    return `<div class="rf-planner"><div class="rf-plan-head">${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
+    return `<div class="rf-planner"><div class="rf-plan-head">${viewClose('plan', 'Close the day plan')}${esc(shortDate(day))}: ${plural(slots.length, 'inspection')}${clashes ? `, <strong>${clashes} to check</strong>` : ''}
       <button class="rf-btn sec" data-plan-ics>Calendar for this day</button></div>
       ${route.listings > 1 ? `<div class="rf-plan-route"><span>Suggested route: <strong>${route.visits} of ${plural(route.listings, 'listing')}</strong>${partial ? ' (the rest clash or are too far to reach in time)' : ''}</span>${partial || route.picked.size < slots.length ? ' <button class="rf-btn sec" data-plan-ics="route">Calendar for the route</button>' : ''}</div>` : ''}
       <ol>${slots.map((x) => {
@@ -3176,11 +3178,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   function mapHtml(rows, cfg) {
     const pins = [...parsePlaces(cfg.places), ...(parseAnchor(cfg.anchor) ? [{ label: 'From', ...parseAnchor(cfg.anchor) }] : [])];
     const m = mapLayout(rows, pins);
-    if (!m) return '<div class="rf-market"><div class="rf-plan-head">None of these listings has a location, so there is nothing to map.</div></div>';
+    if (!m) return `<div class="rf-market"><div class="rf-plan-head">${viewClose('map', 'Close the map')}None of these listings has a location, so there is nothing to map.</div></div>`;
     const first = m.dots.find((d) => d.r.starred) || m.dots[0]; // one tab stop; arrows move between dots
     const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
       aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}${medianLabel(d.r) ? `, ${medianLabel(d.r)}` : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
-    return `<div class="rf-market rf-map"><div class="rf-plan-head">${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
+    return `<div class="rf-market rf-map"><div class="rf-plan-head">${viewClose('map', 'Close the map')}${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
       <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
         ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
         ${m.dots.filter((d) => !d.r.starred).map(dot).join('')}${m.dots.filter((d) => d.r.starred).map(dot).join('')}
@@ -3197,7 +3199,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
     const top = Math.max(1, ...m.byWeek.map((w) => w.n));
     const weekLabel = (w) => w.label || shortDate(w.from);
-    return `<div class="rf-market"><div class="rf-plan-head">${plural(m.n, 'listing')} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
+    return `<div class="rf-market"><div class="rf-plan-head">${viewClose('market', 'Close the market view')}${plural(m.n, 'listing')} shown${m.median != null ? ` · median ${$(m.median)}/wk` : ''}</div>
       ${trend ? `<div class="rf-meta rf-trend" title="This whole search, one point per visit (up to ${TREND_MAX})">Trend: ${esc(trend)}</div>` : ''}
       <div class="rf-market-t"><table><caption>Weekly rent by bedrooms</caption><thead><tr><th scope="col">Beds</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Middle half</th><th scope="col">Range</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.byBeds.map((g) => `<tr><th scope="row">${g.beds === 0 ? 'Studio' : g.beds === 5 ? '5+' : g.beds}</th><td>${g.n}</td><td>${$(g.median)}</td>
@@ -3393,8 +3395,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-panel :focus-visible,#rf-launch:focus-visible{outline:2px solid var(--rf-accent-fg);outline-offset:2px}
   .rf-btn[aria-disabled=true]{opacity:.6;cursor:progress}
   .rf-n{font-weight:400;color:var(--rf-soft)}
-  .rf-undo{margin-left:8px;border:0;background:none;padding:0;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);
-    text-decoration:underline;cursor:pointer}
+  /* Undo and the hide reasons are buttons, as in the note by the launcher (they were bare links). */
+  .rf-undo{margin-left:8px;border:1px solid var(--rf-line);border-radius:6px;background:var(--rf-bg);padding:2px 8px;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer}
   .rf-clear,.rf-tofilters{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
   .rf-keys,.rf-expand{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
     color:var(--rf-muted);cursor:pointer;padding:0}
@@ -3567,6 +3569,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-unfold{width:100%;text-align:left;margin-bottom:6px}
   .rf-controls.rf-folded>:not(.rf-unfold){display:none!important}
   .rf-controls.rf-folded{padding-bottom:6px}
+  .rf-plan-head{position:relative;padding-right:34px!important} .rf-view-x{position:absolute;top:0;right:0;min-width:28px;min-height:28px;border:0;background:none;color:var(--rf-muted);font-size:18px;cursor:pointer}
+  @media (pointer: coarse){ .rf-view-x{min-width:44px;min-height:44px} .rf-plan-head{padding-right:48px!important} }
+  @media (pointer: coarse){ .rf-map .rf-dot{r:8px} .rf-map .rf-dot-star{r:9px} } /* big enough to tap */
   .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
@@ -4447,6 +4452,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (e.target.closest('.rf-more-btn')) return renderMore();
     const pin = e.target.closest('[data-map-id]');
     if (pin) return ui.mapPick?.(pin.dataset.mapId);
+    const vx = e.target.closest('[data-view-close]');
+    if (vx) { // back to the list
+      const v = vx.dataset.viewClose;
+      if (v === 'plan') { ui.plan.value = ''; ui.plan.dispatchEvent(new Event('change')); return ui.plan.focus(); }
+      const btn = v === 'map' ? ui.map : ui.market;
+      btn.click(); return btn.focus();
+    }
     const hideAg = e.target.closest('[data-market-ag]');
     if (hideAg) { // market view: hide an agency's listings, with Undo
       const name = hideAg.dataset.marketAg, was = marks.hiddenAgencies().some((a) => agencyKey(a) === agencyKey(name)); // shown with Show hidden on
@@ -5328,7 +5340,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     document.getElementById('rf-toast')?.remove();
     const t = Object.assign(document.createElement('div'), { id: 'rf-toast' });
     t.setAttribute('role', 'status');
-    t.innerHTML = `<span>Listing hidden.</span><button type="button" data-t="undo">Undo</button><span>Why?</span>${HIDE_REASONS.map((r) => `<button type="button" data-t="why" data-r="${esc(r)}">${esc(r)}</button>`).join('')}`;
+    t.innerHTML = `<span>Listing hidden.</span><button type="button" data-t="undo">Undo</button><span>Why?</span>${HIDE_REASONS.map((r) => `<button type="button" data-t="why" data-r="${esc(r)}">${esc(reasonLabel(r))}</button>`).join('')}`;
     // Paused while the pointer or keyboard focus is on it (WCAG 2.2.1).
     let timer = setTimeout(() => t.remove(), TOAST_MS);
     const hold = () => clearTimeout(timer);
@@ -5356,7 +5368,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     why.className = 'rf-why';
     why.append(' Why? ');
     for (const reason of HIDE_REASONS) {
-      const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: reason, type: 'button' });
+      const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: reasonLabel(reason), type: 'button' });
       // No re-render: the listing is hidden, and re-rendering would replace this status line.
       b.addEventListener('click', () => { marks.setHideReason(id, reason); mirrorSoon(); if (cache) marks.decorate(cache); why.replaceChildren(` Noted: ${reason}.`); }, { once: true });
       why.append(b, ' ');
@@ -5589,7 +5601,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener" aria-label="${esc(`${name} (opens the listing)`)}">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
-          <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}${r.taken ? `<span class="rf-tag rf-taken" title="Going by the listing text">${esc(TAKEN_LABELS[r.taken])}</span>` : ''}${r.cheaperBy ? `<span class="rf-tag rf-new" title="You hid it at a higher rent">$${r.cheaperBy} cheaper since you hid it</span>` : ''}</div>
+          <div class="rf-avail">${esc(r.available === r.price && !r.avail ? 'Available: ask the agent' : r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}${r.taken ? `<span class="rf-tag rf-taken" title="Going by the listing text">${esc(TAKEN_LABELS[r.taken])}</span>` : ''}${r.cheaperBy ? `<span class="rf-tag rf-new" title="You hid it at a higher rent">$${r.cheaperBy} cheaper since you hid it</span>` : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
           ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', sqmLabel(r), r.bond ? `bond ${bondLabel(r)}` : '', ppbLabel(r)])}
@@ -5632,7 +5644,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
           ${am.some((t) => t[1]) || wt.some((t) => t[1]) ? '<button data-act="whytags" aria-expanded="false">Why these tags?</button>' : ''}
           ${am.some((t) => t[3]) || wt.some((t) => t[3]) ? '<button data-act="case" title="A wrong tag? Copy the phrases each tag was read from, in the unit-test table format, for a bug report or a fix">Report a wrong tag…</button>' : ''}
-          ${r.hidden ? `<span class="rf-meta">Why hidden?</span>${HIDE_REASONS.map((x) => `<button data-act="why" data-r="${x}" aria-pressed="${r.hideReason === x}">${x}</button>`).join('')}` : ''}
+          ${r.hidden ? `<span class="rf-meta">Why hidden?</span>${HIDE_REASONS.map((x) => `<button data-act="why" data-r="${x}" aria-pressed="${r.hideReason === x}">${reasonLabel(x)}</button>`).join('')}` : ''}
           ${r.inspections?.some((i) => typeof i.at === 'number' && i.at > now) ? '<button data-act="ics" title="Download this listing\'s inspection times for your calendar">Add to calendar</button>' : ''}
           ${r.lat != null ? `<button data-act="anchor" title="Measure distances from this listing">Measure from here</button><button data-act="place" title="Add this listing's location to Other places">Add as a place</button>` : ''}
           ${r.suburb && !sl ? `<button data-act="sb" title="${r.suburbHidden ? 'Show' : 'Hide'} every listing in ${esc(r.suburb)}" aria-label="${r.suburbHidden ? 'Unhide' : 'Hide'} suburb ${esc(r.suburb)}">${r.suburbHidden ? 'Unhide suburb' : 'Hide suburb'}</button>` : ''}
@@ -6210,6 +6222,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     `<button type="button" ${attr} data-v="${n}" aria-pressed="${r.rating === n}" aria-label="Rate ${n} of 5" title="Rate ${n} of 5 (Shift+${n})">${n <= (r.rating || 0) ? '★' : '☆'}</button>`).join('')}</span>`;
   // One checklist item: unknown -> ✓ good -> ✗ problem.
   const checkBtn = (k, v, attrs) => `<button type="button" ${attrs} data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
+  const reasonLabel = (x) => x.charAt(0).toUpperCase() + x.slice(1); // shown capitalised; stored as is (backups carry it)
   const hideWord = (r) => (r.resurfaced ? 'Hide again' : r.hidden ? 'Unhide' : 'Hide');
   // Named per listing, so a screen reader's button list isn't 25 identical "Shortlist"s.
   const cardActsHtml = (r) => {

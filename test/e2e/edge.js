@@ -743,6 +743,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.deepEqual(await hidden(), [ag], 'agency hidden from the market view');
     await page.click('.rf-status .rf-undo');
     assert.deepEqual(await hidden(), [], 'and Undo brings it back');
+    await page.click('.rf-market [data-view-close=market]');
+    await page.waitForFunction(() => !document.querySelector('.rf-market'));
+    assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'false', '× closes the market view');
+    await page.click('.rf-market-btn'); await page.waitForSelector('.rf-market table');
     await page.focus('.rf-market-btn'); await page.keyboard.press('m');
     assert.ok(await page.$('.rf-item'), 'm toggles back to the list');
     await page.keyboard.press('m'); await page.waitForSelector('.rf-market table');
