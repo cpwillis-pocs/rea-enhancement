@@ -832,8 +832,9 @@
     keys.forEach((k, i) => { if (i < a.length && a[i] !== ABSENT) o[k] = unpackUrl(k, a[i]); });
     return o;
   });
+  const rowKeys = (e) => [...new Set([...(e.rows || []), ...(e.gone || [])].flatMap((r) => Object.keys(r)))];
   const packEntry = (e) => {
-    const keys = [...new Set([...(e.rows || []), ...(e.gone || [])].flatMap((r) => Object.keys(r)))];
+    const keys = rowKeys(e);
     return { ...e, f: 3, rk: keys, rows: packRows(e.rows || [], keys), gone: packRows(e.gone || [], keys) };
   };
   const unpackEntry = (e) => {
@@ -851,7 +852,17 @@
       try { raw = storage.getItem(SNAP_KEY); } catch { /* blocked */ }
       if (memo && raw != null && raw === memoRaw) return memo;
       memo = parse(raw); memoRaw = raw;
+      if (pending) memo.s[pending.key] = pending.entry; // written meanwhile by another tab: this save still wins
       return memo;
+    };
+    // A save whose trimming and write wait for its `later`: done first by any call that writes or measures.
+    let pending = null;
+    const flush = () => {
+      const p = pending;
+      if (!p) return;
+      const d = load(); // with this entry in it
+      pending = null;
+      p.resolve(p.done(d));
     };
     const parse = (raw) => {
       try {
@@ -891,21 +902,33 @@
     };
     // Trims until the entry fits SNAP_ENTRY_BUDGET, cheapest loss first and furthest down first:
     // row text, gone rows' text, then row features and headlines, then gone rows themselves.
-    // Sizes are tracked from the fields changed, not by re-stringifying rows. Returns whether it trimmed.
+    // Each packed row is stringified once; only the rows it trims are stringified again, and the
+    // stored string is assembled from the pieces (persist reuses it). Sets `lite` if it trimmed.
     const fitBudget = (entry) => {
-      const json = JSON.stringify(packEntry(entry)); // what storage will hold
-      let size = json.length;
-      if (size <= SNAP_ENTRY_BUDGET) { entryJson.set(entry, json); return false; } // persist reuses it
+      const keys = rowKeys(entry);
+      const piece = (r) => JSON.stringify(packRows([r], keys)[0]);
+      const rowJ = entry.rows.map(piece), goneJ = entry.gone.map(piece);
+      const shell = () => JSON.stringify({ ...entry, f: 3, rk: keys, rows: [], gone: [] });
+      const join = () => shell().replace('"rows":[]', () => `"rows":[${rowJ.join(',')}]`).replace('"gone":[]', () => `"gone":[${goneJ.join(',')}]`);
+      const lens = (a) => a.reduce((n, j) => n + j.length + 1, a.length ? -1 : 0);
+      let size = shell().length + lens(rowJ) + lens(goneJ); // what storage will hold
+      if (size <= SNAP_ENTRY_BUDGET) { entryJson.set(entry, join()); return false; }
+      const dirtyRows = new Set(), dirtyGone = new Set();
       const len = (r) => JSON.stringify([r.text, r.headline, r.features]).length;
-      const trim = (list, fn) => {
-        for (let i = list.length - 1; i >= 0 && size > SNAP_ENTRY_BUDGET; i--) { const was = len(list[i]); fn(list[i]); size -= was - len(list[i]); }
+      const trim = (list, dirty, fn) => {
+        for (let i = list.length - 1; i >= 0 && size > SNAP_ENTRY_BUDGET; i--) { const was = len(list[i]); fn(list[i]); size -= was - len(list[i]); dirty.add(i); }
       };
-      trim(entry.rows, (r) => { r.text = ''; r.headline = clip(r.headline, LITE_HEADLINE); r.features = r.features.slice(0, 8); });
-      trim(entry.gone, (g) => { g.text = ''; g.features = []; });
-      trim(entry.rows, (r) => { r.features = []; r.headline = ''; });
+      trim(entry.rows, dirtyRows, (r) => { r.text = ''; r.headline = clip(r.headline, LITE_HEADLINE); r.features = r.features.slice(0, 8); });
+      trim(entry.gone, dirtyGone, (g) => { g.text = ''; g.features = []; });
+      trim(entry.rows, dirtyRows, (r) => { r.features = []; r.headline = ''; });
+      for (const i of dirtyGone) goneJ[i] = piece(entry.gone[i]);
       // Stored sizes are packed sizes: measure a gone row the way it will be stored.
-      const keys = [...new Set([...entry.rows, ...entry.gone].flatMap((r) => Object.keys(r)))];
-      while (entry.gone.length && size > SNAP_ENTRY_BUDGET) size -= JSON.stringify(packRows([entry.gone.pop()], keys)[0]).length + 1;
+      while (entry.gone.length && size > SNAP_ENTRY_BUDGET) { entry.gone.pop(); size -= goneJ.pop().length + 1; }
+      for (const i of dirtyRows) rowJ[i] = piece(entry.rows[i]);
+      entry.lite = 1;
+      // A column only a dropped gone row had: the pieces no longer match, stringify afresh.
+      const now = rowKeys(entry);
+      if (now.length === keys.length) entryJson.set(entry, join());
       return true;
     };
     const newSince = (ids, baseIds) => {
@@ -929,7 +952,8 @@
         const e = load().s[key];
         return e ? view(e) : null;
       },
-      save(key, rows, truncated) {
+      save(key, rows, truncated, later = null) {
+        flush();
         const d = load();
         const prev = d.s[key];
         const t = now();
@@ -953,24 +977,36 @@
         if (trend.length && !(prev && t - prev.at > SNAP_VISIT_GAP_MS)) trend.pop();
         trend.push(trendPoint(rows, t));
         const entry = d.s[key] = { at: t, baseAt, baseIds, ids, truncated: !!truncated, rows: rows.map(slimRow), gone: gone.slice(0, GONE_MAX), trend: trend.slice(-TREND_MAX), ...(prev?.pin ? { pin: 1 } : {}) };
-        if (fitBudget(entry)) entry.lite = 1;
-        const { evicted } = persist(d);
-        // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
-        return Object.assign(view(entry), { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) });
+        // Trimming and writing wait for `later` when given: the diff is all this run needs now.
+        const done = (d2) => {
+          fitBudget(entry);
+          const { evicted } = persist(d2);
+          // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
+          return { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) };
+        };
+        if (!later) { const res = done(d); return Object.assign(view(entry), res); }
+        const out = view(entry);
+        let resolve;
+        out.saved = new Promise((r) => { resolve = r; });
+        pending = { key, entry, done, resolve };
+        later(flush);
+        return out;
       },
       // Pinned searches are the last to be forgotten when a new one is remembered.
       pin(key, on) {
+        flush();
         const d = load();
         if (!d.s[key]) return false;
         if (on) d.s[key].pin = 1; else delete d.s[key].pin;
         entryJson.delete(d.s[key]);
         return persist(d).ok;
       },
-      clear() { memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
-      exportData: () => load().s,
+      clear() { flush(); memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
+      exportData: () => { flush(); return load().s; },
       // Per search: characters stored (as localStorage counts them) and whether it was trimmed.
       // Memoised on the stored string: Settings repaints this on every star or hide.
       sizes() {
+        flush();
         const d = load();
         if (sizesMemo && memoRaw != null && sizesMemo.raw === memoRaw) return sizesMemo.out;
         const out = Object.entries(d.s).map(([key, e]) => ({ key, bytes: 2 * jsonOf(e).length, lite: !!e.lite })).sort((a, b) => b.bytes - a.bytes);
@@ -980,6 +1016,7 @@
       // Untrusted: keys must be REA rent search URLs; rows round-trip through fatRow/slimRow.
       importData(src) {
         if (!src || typeof src !== 'object') return 0;
+        flush();
         const d = load();
         let n = 0;
         const okIds = (a) => (Array.isArray(a) ? a.map(String).filter(isListingId) : null);
@@ -994,7 +1031,7 @@
             gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
             ...(e.pin ? { pin: 1 } : {}), trend: cleanTrend(e.trend),
           };
-          if (fitBudget(d.s[k])) d.s[k].lite = 1;
+          fitBudget(d.s[k]);
           n++;
         }
         persist(d);
@@ -4730,6 +4767,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (open && ui.backupNudge) { ui.backupNudge(); ui.backupNudge = null; }
       if (!open) ui.closePeek?.();
       panel.hidden = !open;
+      if (open && ui.savedStale) renderSaved();
       launch.setAttribute('aria-expanded', String(open));
       panel.setAttribute('aria-modal', String(open && narrow.matches));
       setInert(open && narrow.matches);
@@ -5166,6 +5204,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
   // Remembered searches, newest first, with what the last "Check all" found.
   function renderSaved() {
+    // Drawn once it can be seen: reading remembered searches is ~10 ms each, on every listing page.
+    if (ui.panel.hidden) { ui.savedStale = true; return; }
+    ui.savedStale = false;
     const entries = cfg.remember ? Object.entries(snaps.exportData()).sort(([, a], [, b]) => b.at - a.at) : [];
     ui.saved.hidden = !entries.length;
     const here = currentKey();
@@ -5474,7 +5515,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // Bulk menus say how many listings they will touch.
-  const labelBulk = (sel, n) => { for (const o of sel.options) if (o.value) o.textContent = o.dataset.label.replace('{n}', n); };
+  const labelBulk = (sel, n) => { for (const o of sel.options) if (o.value) { const t = o.dataset.label.replace('{n}', n); if (o.textContent !== t) o.textContent = t; } };
 
   // #endregion
   // #region list
@@ -5721,8 +5762,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   let textClipped = false; // rows came from storage, whose listing text is shortened
-  function adopt(key, rows, trunc, note, snap = null, observe = false) {
-    textClipped = observe ? false : snap?.lite && rows === snap.rows ? 'lite' : true; // before the first render reads it
+  // `clipped`: how short the rows' text is (restore() passes the snapshot's: 'lite' when trimmed to fit).
+  function adopt(key, rows, trunc, note, snap = null, observe = false, clipped = !observe) {
+    textClipped = clipped; // before the first render reads it
     learn(rows, observe, observe); // adopt observes only fresh full crawls
     if (snap) queueMicrotask(renderSaved);
     scheduleAnnotate();
@@ -5766,7 +5808,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const key = searchKey(location.href);
     const snap = snaps.get(key);
     if (!snap?.rows.length) return false;
-    adopt(key, snap.rows, snap.truncated, `Saved ${ago(Date.now() - snap.at)}. Refresh for current listings.`, snap);
+    adopt(key, snap.rows, snap.truncated, `Saved ${ago(Date.now() - snap.at)}. Refresh for current listings.`, snap, false, snap.lite ? 'lite' : true);
     returnToPlace();
     return true;
   }
@@ -5865,8 +5907,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         // Show what was read, but don't let a part stand for the whole: no remembered snapshot
         // (unread listings would count as gone), no tab cache, no health sample, not a full crawl.
         learn(res.rows, true, false);
-        adopt(key, res.rows, res.truncated, '', null, false);
-        textClipped = false; // fresh text, just not every page
+        adopt(key, res.rows, res.truncated, '', null, false, false); // fresh text, just not every page
         showPartial(res.failed);
         logError(`search: page ${res.failed.page}: ${res.failed.message}`);
         return;
@@ -5874,7 +5915,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       if (res.paging) { // a paging guard stopped it: shown, but like a part-read, not a full crawl
         formatWarn(PAGING_MSG[res.paging]);
         learn(res.rows, true, false);
-        adopt(key, res.rows, res.truncated, '', null, false);
+        adopt(key, res.rows, res.truncated, '', null, false, false);
         textClipped = false;
         return;
       }
@@ -5886,9 +5927,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
       setWarn('format', ''); // every page read: an earlier odd page was a one-off
       store.set(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0));
-      const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
-      setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
-        : snap?.evicted.length ? `Stopped remembering ${snap.evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : '');
+      // Written in the next task, so the results paint first; the warning follows the write.
+      const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0)) : null;
+      if (!snap) setWarn('saved', '');
+      snap?.saved.then(({ evicted, refused }) => setWarn('saved', refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
+        : evicted.length ? `Stopped remembering ${evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : ''));
       adopt(key, res.rows, res.truncated, '', snap, true);
       ui.newsSeen?.();
     } catch (err) {
@@ -5906,7 +5949,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
   }
 
-  // ------------------------------------------------------------ annotate
   // #endregion
   // #region fetching and notes
   // Adds a badge to REA's own result cards. Append-only (never reorders or removes

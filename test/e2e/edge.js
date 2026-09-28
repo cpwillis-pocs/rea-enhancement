@@ -18,7 +18,9 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 const FIXED = new Date('2026-09-23T10:00:00+10:00');
 const status = (p) => p.textContent('.rf-status');
 const waitStatus = (p, re, timeout = 15000) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.rf-status').textContent), re.source, { timeout });
-const run = async (p) => { await p.click('#rf-launch'); await p.click('#rf-run'); await waitStatus(p, /listings match/); }; // open the drawer and search
+const run = async (p) => { await p.click('#rf-launch'); await p.click('#rf-run'); await waitStatus(p, /listings match/); await settle(p); }; // open the drawer and search
+// One task later: the remembered search is written after the results paint.
+const settle = (p) => p.evaluate(() => new Promise((r) => setTimeout(r, 0)));
 // Drawer results render synchronously on change; the fixtures (18 rows) stay under one render chunk.
 const count = (p, sel = '.rf-item') => p.$$eval(sel, (e) => e.length);
 const MARKS_KEY = 'rea-avail-filter/marks/v1';

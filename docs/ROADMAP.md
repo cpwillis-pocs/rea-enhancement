@@ -55,7 +55,7 @@ The 2.32.0 audit (its bugs, eleven ideas and the measured slow spots) shipped in
 - `fitBudget`'s first full stringify is thrown away for any search over the budget: 6–12 ms at 500–1000 listings. Estimating the size from a sample of packed rows would avoid it.
 - A full FILTERS spec (a consistency test guards it for now).
 
-Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. Also still open: doing the end-of-search save in a later task. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
+Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
 
 ## Releasing
 

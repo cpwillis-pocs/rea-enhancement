@@ -6,3 +6,5 @@ coverage-e2e.json
 e2e-artifacts/
 junit-*.xml
 e2e-times.txt
+*.orig
+*.rej

@@ -212,3 +212,27 @@ test('size budget counts no-longer-listed rows at their stored (packed) size, an
   assert.equal(other.importData({ [KEY]: packed }), 1);
   assert.equal(other.get(KEY).rows.length, 800, 'rows unpacked, not an empty search');
 });
+
+test('snapshotStore: a deferred save is readable at once and written by whatever needs it first', async () => {
+  const t = 1e12;
+  const storage = mem();
+  const st = core.snapshotStore(storage, () => t);
+  let run = null;
+  const v = st.save(KEY, [row('146500001')], false, (fn) => { run = fn; });
+  assert.equal(v.newIds.size, 0);
+  assert.equal(storage.getItem('rea-avail-filter/snapshots/v1'), null, 'not written yet');
+  assert.ok(st.get(KEY), 'readable while pending');
+  assert.equal(st.sizes().length, 1, 'sizes flushes the pending write');
+  assert.notEqual(storage.getItem('rea-avail-filter/snapshots/v1'), null);
+  assert.deepEqual(await v.saved, { evicted: [], refused: false });
+  run(); // the later task finds nothing left to do
+  const w = st.save(KEY, [row('146500002')], false, (fn) => { run = fn; });
+  assert.equal(st.pin(KEY, true), true, 'pin flushes first, so the pin lands on the new entry');
+  assert.deepEqual(Object.keys(st.exportData()), [KEY]);
+  assert.equal(st.exportData()[KEY].pin, 1);
+  await w.saved;
+  const x = st.save(KEY, [row('146500003')], false, (fn) => { run = fn; });
+  assert.equal(st.importData({ [KEY.replace('bondi', 'manly')]: { at: t, ids: ['146500009'], rows: [] } }), 1);
+  await x.saved;
+  assert.equal(Object.keys(st.exportData()).length, 2, 'import kept the pending save');
+});
