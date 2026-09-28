@@ -682,11 +682,15 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await a.hover('.rf-item:nth-child(1)'); await a.click('.rf-item:nth-child(1) >> [data-act=n]');
     await a.fill('.rf-note-edit', 'great light'); await a.keyboard.press('Enter');
     await a.click('[data-view=shortlist]');
+    const first = await a.getAttribute('.rf-item:nth-child(1)', 'data-id');
+    await a.selectOption(`.rf-item[data-id="${first}"] select[data-app]`, 'applied');
+    await a.click(`.rf-item[data-id="${first}"] .rf-rate [data-v="4"]`);
     await a.click('.rf-menu summary'); await a.click('[data-sl=share]');
     await a.waitForSelector('.rf-ask');
     assert.equal(await a.evaluate(() => document.activeElement.dataset.ask), 'yes', 'the question takes focus');
+    assert.match(await a.textContent('.rf-ask'), /Include your notes and statuses and ratings/);
     await a.keyboard.press('Enter');
-    await waitStatus(a, /Share link copied \(2 listings, with notes\)/);
+    await waitStatus(a, /Share link copied \(2 listings, with your notes and statuses and ratings\)/);
     const link = await a.evaluate(() => navigator.clipboard.readText());
     await done(a); await ctxA.close();
 
@@ -699,7 +703,11 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await b.evaluate(() => location.hash), '', 'fragment stripped');
     await b.click('[data-share=add]');
     assert.equal(await b.$$eval('.rf-item', (e) => e.length), 2);
-    assert.match(await b.textContent('.rf-note'), /Shared: great light/);
+    const shared = (await marks(b))[first];
+    assert.equal(shared.as, 'applied', 'their status fills in yours');
+    assert.equal(shared.rt, undefined, 'their rating is not yours');
+    assert.match(shared.n, /^Shared: (great light · )?rated 4\/5$/, 'their rating goes in the note');
+    assert.ok(Object.values(await marks(b)).some((e) => /^Shared: great light/.test(e.n || '')), 'their note too');
     const d = await open(ctxB, link); // the same link again, declined this time
     await d.waitForSelector('.rf-share-in:not([hidden])');
     await d.click('[data-share=dismiss]');

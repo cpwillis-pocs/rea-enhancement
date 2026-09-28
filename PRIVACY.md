@@ -25,7 +25,7 @@ The script runs inside REA's page (`@grant none`), so REA's scripts share the sa
 
 ## What leaves your browser, and only when you do it
 
-- **Share links** hold the listings you share (id, link, address, price, availability, beds/baths/cars), and your notes only if you answer yes to "Include your notes?". The data is in the `#` fragment, which browsers don't send to REA's servers, but anyone with the link can read it.
+- **Share links** hold the listings you share (id, link, address, price, availability, beds/baths/cars), and your notes, application statuses and ratings only if you answer yes when asked to include them (eg for a partner you're searching with). Opening one fills in a status only where you have none; a rating goes in the listing's note, never over yours. The data is in the `#` fragment, which browsers don't send to REA's servers, but anyone with the link can read it.
 - **Exports** (CSV, TSV, calendar, print, enquiry text) are files or clipboard text you then send on.
 - **Copy report** (in the data-format warnings and Settings) copies the `selfcheck()` and `shape()` output below, together.
 - **Console helpers** for bug reports:

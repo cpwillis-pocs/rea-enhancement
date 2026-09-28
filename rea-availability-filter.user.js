@@ -2955,9 +2955,12 @@
   const SHARE_PARAM = 'rf-share';
   const b64url = (str) => btoa(String.fromCharCode(...new TextEncoder().encode(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const unb64url = (b) => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
+  // `notes`: your notes, application statuses and ratings go too (opt-in: for a partner you're
+  // searching with). Links made before these existed decode the same.
   const encodeShare = (rows, { notes = false } = {}) => b64url(JSON.stringify({ a: 'rea-enhancement', v: 1,
     l: rows.slice(0, SHARE_MAX).map((r) => ({ i: r.id, u: r.url, a: clip(r.address, 120), p: clip(r.price, 60), v: clip(r.available, 40),
-      b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), ...(notes && r.note ? { n: clip(r.note, NOTE_MAX) } : {}) })) }));
+      b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), ...(notes && r.note ? { n: clip(r.note, NOTE_MAX) } : {}),
+      ...(notes && r.appStatus ? { s: r.appStatus } : {}), ...(notes && r.rating ? { r: r.rating } : {}) })) }));
   const decodeShare = (b) => {
     let d;
     try { d = JSON.parse(unb64url(String(b || ''))); } catch { return null; }
@@ -2965,6 +2968,7 @@
     return d.l.slice(0, SHARE_MAX).map((x) => ({
       id: isListingId(x?.i) ? String(x.i) : '', url: safeUrl(x?.u), address: clip(x?.a, 120), price: clip(x?.p, 60),
       available: clip(x?.v, 40), beds: scalar(x?.b), baths: scalar(x?.ba), cars: scalar(x?.c), note: clip(x?.n, NOTE_MAX),
+      status: x?.s && APP_STATUSES.includes(x.s) ? x.s : '', rating: Number.isInteger(x?.r) && x.r >= 1 && x.r <= 5 ? x.r : 0,
     })).filter((r) => r.id && r.url && /^https:\/\/www\.realestate\.com\.au\//.test(r.url));
   };
   const shareUrl = (rows, opts) => `https://www.realestate.com.au/rent/#${SHARE_PARAM}=${encodeShare(rows, opts)}`;
@@ -4264,10 +4268,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   ui.slBar.querySelector('[data-sl=share]').addEventListener('click', async () => {
     const rows = shortlistRows();
     if (!rows.length) return setStatus('Nothing on the shortlist to share.', true);
-    const notes = rows.some((r) => r.note) && await askInline(ui.status, 'Include your notes in the share link?', 'Include notes', 'Without notes');
+    const has = [rows.some((r) => r.note) && 'notes', rows.some((r) => r.appStatus || r.rating) && 'statuses and ratings'].filter(Boolean);
+    const notes = has.length > 0 && await askInline(ui.status, `Include your ${has.join(' and ')} in the share link (eg for a partner)?`, 'Include them', 'Just the listings');
     const url = shareUrl(rows, { notes });
     const ok = await copyText(url);
-    setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? ', with notes' : ''}). Anyone with this script can open it.`
+    setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? `, with your ${has.join(' and ')}` : ''}). Anyone with this script can open it.`
       : 'Clipboard blocked - could not copy the share link.', !ok);
   });
   // Incoming share (#rf-share=...): offer to import, then strip it from the URL.
@@ -4286,7 +4291,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     const rows = ui.pendingShare || [];
     if (b.dataset.share === 'add') {
       const n = marks.setMany(rows, 's', true);
-      for (const r of rows) if (r.note && !marks.note(r.id)) marks.setNote(r.id, `Shared: ${r.note}`);
+      // Their status fills in where you have none (an application you're making together); their
+      // rating is theirs, so it goes in the note beside theirs rather than over yours.
+      const mine = new Map(marks.shortlist().map((x) => [x.id, x]));
+      for (const r of rows) {
+        const theirs = [r.note, r.rating ? `rated ${r.rating}/5` : ''].filter(Boolean).join(' · ');
+        if (theirs && !marks.note(r.id)) marks.setNote(r.id, `Shared: ${theirs}`);
+        if (r.status && !mine.get(r.id)?.appStatus) marks.setStatus(r.id, r.status);
+      }
       refreshMarks();
       setView('shortlist');
       setStatus(`Added ${plural(n, 'shared listing')} to your shortlist.`);

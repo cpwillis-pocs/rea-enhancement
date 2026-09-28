@@ -376,6 +376,14 @@ test('share links: round trip, notes opt-in, unicode, hostile input rejected', (
   assert.equal(core.shareFromHash('#other=1'), null);
   const many = Array.from({ length: 50 }, (_, i) => ({ ...rows[0], id: String(146500100 + i) }));
   assert.equal(core.decodeShare(core.encodeShare(many)).length, 30, 'capped');
+  // Opt-in: statuses and ratings for a partner; bad values dropped; links from before still decode.
+  const withMarks = [{ ...rows[0], appStatus: 'applied', rating: 4 }];
+  assert.deepEqual(['status', 'rating'].map((k) => core.decodeShare(core.encodeShare(withMarks))[0][k]), ['', 0], 'left out by default');
+  assert.deepEqual(['status', 'rating'].map((k) => core.decodeShare(core.encodeShare(withMarks, { notes: true }))[0][k]), ['applied', 4]);
+  const odd = Buffer.from(JSON.stringify({ a: 'rea-enhancement', v: 1, l: [{ i: '146500001', u: rows[0].url, s: 'owned', r: 9 }] })).toString('base64url');
+  assert.deepEqual(['status', 'rating'].map((k) => core.decodeShare(odd)[0][k]), ['', 0]);
+  const old = Buffer.from(JSON.stringify({ a: 'rea-enhancement', v: 1, l: [{ i: '146500001', u: rows[0].url, a: '1 Café St', n: 'hi' }] })).toString('base64url');
+  assert.deepEqual(core.decodeShare(old).map((r) => [r.address, r.note, r.status, r.rating]), [['1 Café St', 'hi', '', 0]]);
 });
 
 test('planDay / inspectDays: order, clash, tight by distance, ok', () => {
