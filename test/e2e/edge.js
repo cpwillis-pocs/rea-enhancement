@@ -2129,6 +2129,15 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const item = '.rf-item[data-id="146500006"]';
     assert.match(await page.textContent(`${item} .rf-watch`), /Above shops\/bar[\s\S]*Busy road|Busy road[\s\S]*Above shops\/bar/);
     assert.doesNotMatch(await page.textContent(`${item}`), /Next to rail line/, '"walk to the station" is not a rail heads-up');
+    // Where each tag came from, reachable without a mouse.
+    await page.click(`${item} .rf-acts-more summary`);
+    await page.click(`${item} [data-act=whytags]`);
+    assert.match(await page.textContent(`${item} .rf-whytags`), /Busy road: From the listing text: ".*busy road/);
+    assert.ok(await page.evaluate(() => document.activeElement.classList.contains('rf-whytags')), 'focus moves to the explanation');
+    await page.click(`${item} .rf-acts-more summary`);
+    assert.equal(await page.getAttribute(`${item} [data-act=whytags]`, 'aria-expanded'), 'true');
+    await page.click(`${item} [data-act=whytags]`);
+    assert.equal(await page.$(`${item} .rf-whytags`), null, 'toggles closed');
     await page.click('#rf-more summary');
     await page.click('[data-nowatch=road]');
     await page.waitForFunction((s) => !document.querySelector(s), item);

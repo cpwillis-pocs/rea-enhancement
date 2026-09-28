@@ -1123,6 +1123,7 @@ test('SETTINGS: one spec draws each setting, gives its default and bounds what a
   }
   assert.match(html, /id="rf-remindSaved">[^<]*<\/label><i id="storage">/, 'fixed markup after its entry');
   assert.equal((html.match(/<fieldset class="rf-weights">/g) || []).length, 1, 'weights grouped once');
+  assert.match(html, /id="rf-noticeDays"[^>]*aria-describedby="rf-noticeDays-help"><\/label><small class="rf-set-help" id="rf-noticeDays-help">/, 'help is text on the page, tied to its field and outside its label');
   assert.deepEqual(core.sanitizeCfg({ theme: 'blue', icsAlarm: '45', wRent: '9', noticeDays: '500', income: '-3', checklist: 'x'.repeat(401) }), {}, 'out-of-range values dropped');
   assert.deepEqual(core.sanitizeCfg({ theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' }),
     { theme: 'dark', icsAlarm: '30', wRent: '0', noticeDays: '21', income: '', checklist: 'Noise' });

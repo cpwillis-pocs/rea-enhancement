@@ -1964,16 +1964,17 @@
     { key: 'remindSaved', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
     ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'Best match: how much each counts', name: 'weights' })),
     { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', title: 'Some calendar apps ignore reminders in imported files', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
-    { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', inputTitle: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing; sort by Least overlap", name: 'lease end' },
+    { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
+      help: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing (sort: Least overlap)." },
     { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
-      title: "How many days before your lease ends you must tell your landlord or agent you're leaving. It depends on your state and lease: check your state's tenancy rules or your lease. The calendar export then adds a reminder." },
+      help: "Days before your lease ends that you must tell your landlord or agent. It depends on your state and your lease, so check them. Needs your lease end above; the Shortlist and the calendar export then remind you." },
     { key: 'noticeGiven', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
-      title: 'Once you have given notice: the calendar export then takes its Give notice reminder out, and the drawer stops nudging.' },
+      help: 'Once you have given notice: the reminders stop.' },
     { key: 'checklist', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
     { key: 'enquiry', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
-      inputTitle: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
+      help: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
     { key: 'income', kind: 'int', def: '', min: 0, max: 99999999, step: 1000, label: 'Household income, $ a year before tax (optional)', placeholder: 'eg 120000', name: 'income',
-      inputTitle: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
+      help: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
   ];
   const SETTING_BY_KEY = new Map(SETTINGS.map((x) => [x.key, x]));
   const settingOk = (k, v) => {
@@ -1989,11 +1990,13 @@
     const one = (x) => {
       const t = x.title ? ` title="${val(x.title)}"` : '', it = x.inputTitle ? ` title="${val(x.inputTitle)}"` : '';
       const ph = x.placeholder ? ` placeholder="${val(x.placeholder)}"` : '', id = `rf-${x.key}`;
+      // Explanations are text on the page (tied to the field for screen readers), not a hover-only title.
+      const db = x.help ? ` aria-describedby="${id}-help"` : '', help = x.help ? `<small class="rf-set-help" id="${id}-help">${val(x.help)}</small>` : '';
       if (x.kind === 'check') return `<label class="rf-check"${t}><input type="checkbox" id="${id}">${esc(x.label)}</label>`;
       if (x.kind === 'select') return `<label${t}>${esc(x.label)}<select id="${id}">${x.options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>`;
-      if (x.kind === 'textarea') return `<label${t}>${esc(x.label)}<textarea id="${id}" rows="${x.rows}" maxlength="${x.maxLength}"${ph}${it}></textarea></label>`;
+      if (x.kind === 'textarea') return `<label${t}>${esc(x.label)}<textarea id="${id}" rows="${x.rows}" maxlength="${x.maxLength}"${ph}${it}${db}></textarea></label>${help}`;
       const input = x.kind === 'date' ? 'type="date"' : x.kind === 'int' ? `type="number" min="${x.min}"${x.max < 99999999 ? ` max="${x.max}"` : ''} step="${x.step || 1}" inputmode="numeric"` : `type="text" maxlength="${x.maxLength}"`;
-      return `<label${t}>${esc(x.label)}<input ${input} id="${id}"${ph}${it}></label>`;
+      return `<label${t}>${esc(x.label)}<input ${input} id="${id}"${ph}${it}${db}></label>${help}`;
     };
     let out = '';
     for (let i = 0; i < SETTINGS.length; i++) {
@@ -3433,6 +3436,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-toast{right:20px;bottom:72px;max-width:min(360px,calc(100vw - 32px))}
   #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
   #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
+  .rf-whytags{margin:0 9px 8px 124px}.rf-whytags ul{margin:0;padding-left:18px}.rf-whytags li{margin:2px 0}
+  .rf-set-help{display:block;margin:-4px 0 6px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
@@ -3539,7 +3544,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
     .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:48vh}
     .rf-actions{flex-wrap:wrap} .rf-actions .rf-bulk{flex:1 1 100%}
-    .rf-acts,.rf-note,.rf-note-edit,.rf-app,.rf-group,.rf-nudge,.rf-checks{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
+    .rf-acts,.rf-note,.rf-note-edit,.rf-app,.rf-group,.rf-nudge,.rf-checks,.rf-whytags{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
     .rf-weights{grid-template-columns:repeat(2,minmax(0,1fr))}
     .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px}
     .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1 1 100%}
@@ -4323,6 +4328,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       refreshMarks([id]);
       itemEl(id, `[data-act=rate][data-v="${b.dataset.v}"]`)?.focus();
       return setStatus(n ? `Rated ${n} of 5.` : 'Rating cleared.');
+    }
+    // Where each tag was read from, as text under the listing: the tags' own tooltips can't be
+    // reached by keyboard, touch or a screen reader.
+    if (b.dataset.act === 'whytags') {
+      const item = b.closest('.rf-item'), open = item.querySelector('.rf-whytags'), r = rowOf(id);
+      b.setAttribute('aria-expanded', String(!open));
+      if (open) { open.remove(); return; }
+      if (!r) return;
+      const { am, wt } = tagItemsOf(r);
+      const box = Object.assign(document.createElement('div'), { className: 'rf-whytags rf-meta', tabIndex: -1 });
+      box.setAttribute('role', 'note');
+      box.setAttribute('aria-label', 'Why these tags');
+      box.innerHTML = `<ul>${[...am, ...wt].filter((t) => t[1]).map((t) => `<li><strong>${esc(t[0])}</strong>: ${esc(t[1])}</li>`).join('')}</ul>`;
+      item.querySelector('.rf-card').after(box);
+      item.querySelector('.rf-acts-more')?.removeAttribute('open');
+      box.focus();
+      return;
     }
     if (b.dataset.act === 'case') {
       const r = rowOf(id);
@@ -5367,6 +5389,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
+          ${am.some((t) => t[1]) || wt.some((t) => t[1]) ? '<button data-act="whytags" aria-expanded="false">Why these tags?</button>' : ''}
           ${am.some((t) => t[3]) || wt.some((t) => t[3]) ? '<button data-act="case" title="A wrong tag? Copy the phrases each tag was read from, in the unit-test table format, for a bug report or a fix">Copy tags as test cases</button>' : ''}
           ${r.hidden ? `<span class="rf-meta">Why hidden?</span>${HIDE_REASONS.map((x) => `<button data-act="why" data-r="${x}" aria-pressed="${r.hideReason === x}">${x}</button>`).join('')}` : ''}
           ${r.inspections?.some((i) => typeof i.at === 'number' && i.at > now) ? '<button data-act="ics" title="Download this listing\'s inspection times for your calendar">Add to calendar</button>' : ''}
