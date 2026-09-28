@@ -3524,7 +3524,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-sortdir{flex:none!important;padding:6px 10px!important;min-width:36px}
   .rf-partial{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;font-size:12px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-partial .rf-btn{flex:none;padding:4px 12px}
-  .rf-warnbar{display:flex;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;color:var(--rf-err);background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
+  .rf-warnbar{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;padding:8px 16px;font-size:12px;color:var(--rf-err);background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-warnbar .rf-warn-msg{flex:1}
   .rf-warn-x{border:0;background:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;min-width:24px;min-height:24px}
   .rf-group,.rf-nudge{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px}
@@ -3554,6 +3554,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-ask{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0;padding:8px 10px;border:1px solid var(--rf-line);border-radius:8px;background:var(--rf-sec)}
   .rf-ask>span{flex:1 1 100%}
   .rf-check+.rf-set-help{padding-left:20px}
+  .rf-warnbar .rf-warn-msg{flex:1 1 60%;min-width:0}
   .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
@@ -3771,6 +3772,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <button role="tab" id="rf-tab-results" data-view="results" aria-selected="true" aria-controls="rf-list">Results</button>
       <button role="tab" id="rf-tab-shortlist" data-view="shortlist" aria-selected="false" aria-controls="rf-list" tabindex="-1">Shortlist <span class="rf-count"></span></button>
     </div>
+    <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-btn sec rf-report" data-report hidden>Copy report</button><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
+    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="later" hidden>Not now</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
+    <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
+      <span class="rf-share-msg"></span>
+      <button class="rf-btn" data-share="add">Add to my shortlist</button>
+      <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
+    </div>
+    <div class="rf-news" hidden role="note"><span class="rf-news-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss what's new">×</button></div>
     <div class="rf-sl-bar" hidden>
       <span class="rf-label">Shortlist, all searches</span>
       <select class="rf-sl-bulk" aria-label="Bulk action on the shortlist shown">
@@ -3911,15 +3920,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <strong>Keyboard</strong>
       <dl>${KEY_HELP.map(([k, what]) => `<dt>${esc(k)}</dt><dd>${esc(what)}</dd>`).join('')}</dl>
     </div>
-    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="later" hidden>Not now</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
-    <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
-      <span class="rf-share-msg"></span>
-      <button class="rf-btn" data-share="add">Add to my shortlist</button>
-      <button class="rf-btn sec" data-share="dismiss">Dismiss</button>
-    </div>
-    <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-btn sec rf-report" data-report hidden>Copy report</button><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
     <div class="rf-peek" hidden role="dialog" aria-label="Photo"><img alt=""><div class="rf-peek-cap"></div></div>
-    <div class="rf-news" hidden role="note"><span class="rf-news-msg"></span><button type="button" class="rf-warn-x" aria-label="Dismiss what's new">×</button></div>
     <div class="rf-status" role="status" aria-live="polite"></div>
     <div class="rf-partial" hidden><span class="rf-partial-msg"></span> <button type="button" class="rf-btn sec" data-resume>Resume</button></div>
     <div class="rf-active" hidden aria-label="Active filters"></div>
@@ -5341,7 +5342,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (keep) { ui.status.replaceChildren(...keep); ui.status.classList.toggle('err', err); }
   };
 
-  const setExport = (disabled) => { for (const b of ui.exports) b.disabled = disabled; ui.bulk.disabled = disabled; ui.market.disabled = disabled; ui.map.disabled = disabled; };
+  // Before there's anything to act on, these aren't shown at all (a row of greyed-out buttons on
+  // first open said little); the Shortlist's own export menu is separate.
+  const setExport = (disabled) => {
+    for (const b of ui.exports) b.disabled = disabled;
+    ui.bulk.disabled = disabled; ui.market.disabled = disabled; ui.map.disabled = disabled;
+    ui.panel.querySelector('.rf-controls .rf-exports').hidden = disabled && ui.view !== 'shortlist';
+    for (const el of [ui.bulk, ui.market, ui.map]) el.hidden = disabled;
+  };
 
   // Data-format warnings sit in their own banner, so the status line keeps "N of M match".
   const warnings = {};
