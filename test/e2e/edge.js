@@ -1977,6 +1977,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     await page.waitForSelector('.rf-restore-in:not([hidden])');
+    assert.equal(await page.textContent('[data-restore=no]'), 'Discard copy', 'says what it does');
+    await page.click('[data-restore=later]');
+    await waitStatus(page, /^The safety copy is kept/);
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    await page.click('#rf-launch');
+    await page.waitForSelector('.rf-restore-in:not([hidden])'); // Not now: offered again
     await page.click('[data-restore=no]');
     await waitStatus(page, /^Safety copy discarded/);
     await page.waitForFunction(() => new Promise((res) => { const r = indexedDB.open('rea-avail-filter/mirror', 1); r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(!g.result); r.result.close(); }; }; }));

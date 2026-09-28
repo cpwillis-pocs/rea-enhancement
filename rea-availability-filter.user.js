@@ -1994,7 +1994,7 @@
     ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'Best match: how much each counts', name: 'weights' })),
     { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
     { key: 'periodic', kind: 'check', def: false, label: 'My lease is periodic (month to month, no end date)', name: 'periodic lease',
-      help: 'Then your lease ends your notice period after you give notice (from today until you do): set the notice below.' },
+      help: "A periodic lease ends one notice period after you give notice. Until you do, it's counted from today, so set your notice period below." },
     { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
       help: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing (sort: Least overlap)." },
     { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
@@ -2660,6 +2660,8 @@
   const cashToMove = (r) => (Number.isFinite(r.upfront) ? r.upfront + (r.fit?.cost || 0) + (r.moveExtra || 0) : null);
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
+  // REA's bond text ("$2200") in the same money format as move-in ("$2,200"), when it's one amount.
+  const bondLabel = (r) => { const n = parsePrice(r.bond); return /^\$?\s*[\d,]+(?:\.\d+)?$/.test(String(r.bond).trim()) && Number.isFinite(n) ? money(n) : r.bond; };
   const ppbLabel = (r) => (+r.beds > 1 && Number.isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
 
   // #endregion
@@ -3215,7 +3217,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Side-by-side comparison: one column per listing, best value per row highlighted.
   const compareRows = (cfg) => [
     ['Rent', (r) => r.price, (r) => r.priceNum, 'min'],
-    ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}` : ''), (r) => r.ppb, 'min'],
+    ['Per bed', (r) => ppbLabel(r) || (Number.isFinite(r.ppb) ? `$${r.ppb}${+r.beds === 0 ? ' (studio)' : ''}` : ''), (r) => r.ppb, 'min'],
     ['Move-in', (r) => (Number.isFinite(r.upfront) ? money(r.upfront) : ''), (r) => r.upfront, 'min'],
     ['Available', (r) => r.available, (r) => (r.avail ? +r.avail : Infinity), 'min'],
     ['Size', (r) => sqmLabel(r).replace(' (from text)', ''), (r) => -(r.sqm || 0), 'min'],
@@ -3337,7 +3339,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // (data-rf-theme on <html>) overrides the system choice either way.
   const RF_ROOTS = ':is(#rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast)';
   const DARK_TOKENS = '--rf-bg:#1c1c20;--rf-fg:#ececf1;--rf-muted:#a0a0ab;--rf-soft:#8e8e99;--rf-line:#2e2e35;--rf-input:#6a6a75;'
-    + '--rf-hover:#26262c;--rf-sec:#2a2a31;--rf-sec-hover:#34343c;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e';
+    + '--rf-hover:#26262c;--rf-sec:#34343c;--rf-sec-hover:#3e3e47;--rf-accent-fg:#3ddc9a;--rf-err:#ff6b6b;--rf-tag:#33333b;--rf-up:#ff9f4a;--rf-star-fg:#f2c14e';
   const css = `
   #rf-panel,#rf-launch,#rf-lbar,#rf-remind,#rf-toast{--rf-bg:#fff;--rf-fg:#111;--rf-muted:#666;--rf-soft:#6e6e78;--rf-line:#e4e4e7;--rf-input:#8f8f98;
     --rf-hover:#f6f6f8;--rf-sec:#f1f1f4;--rf-sec-hover:#e6e6ea;--rf-accent:#087a50;--rf-accent-hover:#06663f;--rf-accent-fg:#087a50;
@@ -3404,10 +3406,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-dates{display:grid;grid-template-columns:1fr 1fr .8fr;gap:10px}
   .rf-controls label{display:grid;gap:4px;font-size:11px;font-weight:600;text-transform:uppercase;
     letter-spacing:.04em;color:var(--rf-muted)}
-  .rf-controls input:not([type=checkbox]),.rf-controls select{padding:7px 8px;border:1px solid var(--rf-input);border-radius:6px;
+  .rf-controls input:not([type=checkbox]),.rf-controls select,.rf-controls textarea{padding:7px 8px;border:1px solid var(--rf-input);border-radius:6px;
     font:inherit;font-size:13px;text-transform:none;letter-spacing:0;color:var(--rf-fg);background:var(--rf-bg);min-width:0;width:100%}
   .rf-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;align-items:end} /* a label on two lines keeps the inputs level */
   .rf-more{display:grid;gap:10px}
+  .rf-more:not([open]){display:block} /* a closed section leaves no gap */
+  .rf-controls textarea{resize:vertical}
+  .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1;min-width:0} .rf-controls .rf-sort select{flex:1;min-width:0}
   .rf-more summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)}
   .rf-more>label,.rf-more>.rf-grid3{margin-top:8px}
   .rf-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -3423,7 +3428,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     font:600 13px system-ui,sans-serif;cursor:pointer}
   .rf-btn:hover{background:var(--rf-accent-hover)}
   .rf-btn[disabled]{opacity:.5;cursor:default}
-  .rf-btn.sec{background:var(--rf-sec);color:var(--rf-fg)}
+  .rf-btn.sec{background:var(--rf-sec);color:var(--rf-fg);box-shadow:inset 0 0 0 1px var(--rf-line)}
   .rf-btn.sec:hover{background:var(--rf-sec-hover)}
   .rf-bulk,.rf-sl-bulk{flex:0 0 auto;font:12px system-ui,sans-serif;padding:7px 6px;border:1px solid var(--rf-input);border-radius:6px;
     background:var(--rf-bg);color:var(--rf-fg);width:auto!important}
@@ -3461,7 +3466,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-acts-more{position:relative}
   .rf-acts-more summary{list-style:none;cursor:pointer;border:1px solid var(--rf-line);border-radius:6px;padding:2px 8px;font:600 12px system-ui,sans-serif;color:var(--rf-muted)}
   .rf-acts-more summary::-webkit-details-marker{display:none}
-  .rf-acts-more>div{position:absolute;right:0;top:calc(100% + 4px);z-index:3;display:grid;gap:4px;padding:6px;background:var(--rf-bg);
+  .rf-acts-more>div{width:max-content;max-width:calc(100vw - 32px);position:absolute;right:0;top:calc(100% + 4px);z-index:3;display:grid;gap:4px;padding:6px;background:var(--rf-bg);
     border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);white-space:nowrap}
   .rf-cmp{display:inline-flex;align-items:center;gap:3px;font:600 11px system-ui,sans-serif;background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;padding:2px 6px}
   .rf-starred .rf-card{box-shadow:inset 3px 0 0 #e6a700}
@@ -3490,7 +3495,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-agencies .rf-label{margin-right:4px}
   .rf-compare{overflow-x:auto;padding:4px}
   #rf-panel.rf-wide:not(.rf-full){width:min(960px,100vw)} /* Compare */
-  .rf-btn.sec[aria-pressed=true]{background:var(--rf-accent);color:#fff}
+  /* A view that's on (Market, Map, Compare): tinted and outlined, not the solid fill of the main action. */
+  .rf-btn.sec[aria-pressed=true]{background:color-mix(in srgb,var(--rf-accent) 12%,var(--rf-bg));color:var(--rf-fg);box-shadow:inset 0 0 0 2px var(--rf-accent)}
   .rf-compare table{border-collapse:collapse;font-size:12px;min-width:100%}
   .rf-compare th,.rf-compare td{border-bottom:1px solid var(--rf-line);padding:6px 8px;text-align:left;vertical-align:top;min-width:110px}
   .rf-compare tbody th{color:var(--rf-muted);font-weight:600;white-space:nowrap;min-width:0;position:sticky;left:0;background:var(--rf-bg)}
@@ -3547,7 +3553,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-whytags{margin:0 9px 8px 124px}.rf-whytags ul{margin:0;padding-left:18px}.rf-whytags li{margin:2px 0}
   .rf-ask{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0;padding:8px 10px;border:1px solid var(--rf-line);border-radius:8px;background:var(--rf-sec)}
   .rf-ask>span{flex:1 1 100%}
-  .rf-set-help{display:block;margin:-4px 0 6px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
+  .rf-check+.rf-set-help{padding-left:20px}
+  .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
@@ -3636,6 +3643,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-badge .rf-card-acts button{display:inline-block!important;pointer-events:auto!important;border-radius:999px!important;padding:4px 9px!important;cursor:pointer!important;
     font:600 11px/1.2 system-ui,-apple-system,sans-serif!important;background:rgba(255,255,255,.95)!important;color:#111!important;box-shadow:0 1px 3px rgba(0,0,0,.3)!important}
   .rf-badge .rf-card-acts button:hover{background:#fff!important}
+  @media (pointer: coarse){ .rf-badge .rf-card-acts button{min-height:44px!important;min-width:44px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important} }
   .rf-badge .rf-card-acts button[aria-pressed=true]{background:#e6a700!important}
   /* Windows High Contrast drops backgrounds: pressed chips and buttons use system colours instead. */
   @media (forced-colors: active){
@@ -3658,8 +3666,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     .rf-acts,.rf-note,.rf-note-edit,.rf-app,.rf-group,.rf-nudge,.rf-checks,.rf-whytags{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
     .rf-weights{grid-template-columns:repeat(2,minmax(0,1fr))}
     .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px}
-    .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1 1 100%}
-    .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} .rf-expand,.rf-resize{display:none} }
+    .rf-controls .rf-sort{flex:1 1 100%} .rf-menu-list{left:0;right:auto}
+    .rf-expand,.rf-resize{display:none} }
+  /* Narrow but with a mouse: 32px. Touch screens keep the 44px set above (this used to win over it). */
+  @media (max-width:480px) and (pointer: fine){ .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} }
   @media (max-height:600px){ .rf-controls{max-height:38vh} } /* short windows / zoomed in: keep room for the list */
   .rf-btn{white-space:nowrap}
   `;
@@ -3810,7 +3820,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
         </div>
         <div class="rf-amen rf-amen-req" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
-          <input type="hidden" id="rf-amenities">
+          <input type="hidden" id="rf-amenities"><span class="rf-label">Features</span>
           ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
         </div>
         <div class="rf-amen rf-nowatch" role="group" aria-label="Hide listings whose text mentions">
@@ -3901,7 +3911,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <strong>Keyboard</strong>
       <dl>${KEY_HELP.map(([k, what]) => `<dt>${esc(k)}</dt><dd>${esc(what)}</dd>`).join('')}</dl>
     </div>
-    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
+    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="later" hidden>Not now</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
       <span class="rf-share-msg"></span>
       <button class="rf-btn" data-share="add">Add to my shortlist</button>
@@ -4033,7 +4043,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     mirrorHeld = true;
     if (!isSearchPage(location.href) || !ui.offerRestore) return; // the offer lives in the drawer: the next search page asks
     ui.offerRestore(rec.data, `${mirrorWeight(here) ? 'Some of your shortlist in this browser has' : 'Your shortlist in this browser has'} gone (its storage was cleared). A safety copy from ${ago(Date.now() - rec.at)} has`);
-    ui.restoreFromMirror = true; // Cancel then drops the copy, so emptying the shortlist on purpose isn't asked about again
+    ui.restoreFromMirror = true; // Discard then drops the copy, so emptying the shortlist on purpose isn't asked about again
+    // Say what the second button does: it throws the copy away for good. Not now just waits.
+    const restoreIn = ui.panel.querySelector('.rf-restore-in');
+    restoreIn.querySelector('[data-restore=no]').textContent = 'Discard copy';
+    restoreIn.querySelector('[data-restore=later]').hidden = false;
   };
   const releaseMirror = () => { mirrorHeld = false; mirrorSoon(); };
   const dropMirror = () => idbDo('readwrite', (st) => st.delete('copy')).catch(() => {});
@@ -4238,12 +4252,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     restoreIn.querySelector('.rf-restore-msg').textContent = `${lead} ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
     restoreIn.hidden = false;
     ui.pendingRestore = data;
+    restoreIn.querySelector('[data-restore=no]').textContent = 'Cancel'; // a file's offer; the safety copy's relabels it
+    restoreIn.querySelector('[data-restore=later]').hidden = true;
     if (!ui.panel.hidden) restoreIn.querySelector('[data-restore=yes]').focus();
   };
   restoreIn.addEventListener('click', (e) => {
     const b = e.target.closest('[data-restore]');
     if (!b) return;
     const data = ui.pendingRestore, fromMirror = ui.restoreFromMirror;
+    if (b.dataset.restore === 'later') { restoreIn.hidden = true; return setStatus('The safety copy is kept: it will be offered again next time.'); } // held, untouched
     restoreIn.hidden = true;
     ui.pendingRestore = null;
     ui.restoreFromMirror = false;
@@ -5384,7 +5401,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.active.innerHTML = chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"${c.key === 'sizeMin' ? ` title="${esc(SQM_NOTE)}"` : ''}
       aria-label="Remove filter ${esc(c.label)}${c.removes > 0 ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes > 0 ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join('');
     ui.activeChips = chips;
-    ui.moreSummary.textContent = `More filters${chips.length ? ` (${chips.length} active)` : ''}`;
+    const inMore = chips.filter((c) => MORE_KEYS.includes(c.key)).length; // not the dates or suburbs above it
+    ui.moreSummary.textContent = `More filters${inMore ? ` (${inMore} active)` : ''}`;
   }
 
   // Bulk menus say how many listings they will touch.
@@ -5515,7 +5533,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <div class="rf-avail">${esc(r.available)}${r.prevAvail ? ` <span class="rf-was ${r.availDir === 'later' ? 'up' : 'down'}" title="Availability date changed">was ${esc(r.prevAvail)}</span>` : ''}${r.featChange ? ` <span class="rf-tag" title="The listing's details changed recently">${esc(r.featChange)}</span>` : ''}${r.gone ? `<span class="rf-tag rf-gone"${r.goneAt ? ` title="Found gone ${esc(ago(now - r.goneAt))}"` : ''}>no longer listed</span>` : isFresh(r) ? '<span class="rf-tag rf-new">new</span>' : ''}${r.relisted ? `<span class="rf-tag" title="Same address was listed before${r.relisted.price ? ` at ${esc(r.relisted.price)}` : ''}${r.relisted.hidden ? '; you had hidden it' : ''}">relisted</span>` : ''}${r.surrounding ? '<span class="rf-tag">nearby</span>' : ''}${r.taken ? `<span class="rf-tag rf-taken" title="Going by the listing text">${esc(TAKEN_LABELS[r.taken])}</span>` : ''}${r.cheaperBy ? `<span class="rf-tag rf-new" title="You hid it at a higher rent">$${r.cheaperBy} cheaper since you hid it</span>` : ''}</div>
           <div class="rf-price">${esc(r.price)}${r.type ? ` <span class="rf-type">${esc(r.type)}</span>` : ''}${r.prevPrice ? ` <span class="rf-was ${priceDir(r)}" title="${esc(historyText(r))}">was ${esc(r.prevPrice)}</span>` : ''}</div>
           <div class="rf-addr">${esc(r.address)}</div>
-          ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', sqmLabel(r), r.bond ? `bond ${r.bond}` : '', ppbLabel(r)])}
+          ${metaLine([r.beds !== '' ? `${r.beds} bed` : '', r.baths !== '' ? `${r.baths} bath` : '', r.cars !== '' ? `${r.cars} car` : '', sqmLabel(r), r.bond ? `bond ${bondLabel(r)}` : '', ppbLabel(r)])}
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${metaLine([r.agency, r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
           ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : '', applyByLabel(r.applyBy)].filter(Boolean), ' rf-sec')}
@@ -5554,7 +5572,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
           ${am.some((t) => t[1]) || wt.some((t) => t[1]) ? '<button data-act="whytags" aria-expanded="false">Why these tags?</button>' : ''}
-          ${am.some((t) => t[3]) || wt.some((t) => t[3]) ? '<button data-act="case" title="A wrong tag? Copy the phrases each tag was read from, in the unit-test table format, for a bug report or a fix">Copy tags as test cases</button>' : ''}
+          ${am.some((t) => t[3]) || wt.some((t) => t[3]) ? '<button data-act="case" title="A wrong tag? Copy the phrases each tag was read from, in the unit-test table format, for a bug report or a fix">Report a wrong tag…</button>' : ''}
           ${r.hidden ? `<span class="rf-meta">Why hidden?</span>${HIDE_REASONS.map((x) => `<button data-act="why" data-r="${x}" aria-pressed="${r.hideReason === x}">${x}</button>`).join('')}` : ''}
           ${r.inspections?.some((i) => typeof i.at === 'number' && i.at > now) ? '<button data-act="ics" title="Download this listing\'s inspection times for your calendar">Add to calendar</button>' : ''}
           ${r.lat != null ? `<button data-act="anchor" title="Measure distances from this listing">Measure from here</button><button data-act="place" title="Add this listing's location to Other places">Add as a place</button>` : ''}
