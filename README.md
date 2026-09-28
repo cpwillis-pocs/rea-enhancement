@@ -37,6 +37,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Map view** (v): the listings shown on a simple map (no map tiles), coloured by rent vs the median, with your places as pins; click a dot to jump to the listing.
 - **Why this tag?** Hover an amenity or heads-up tag for the sentence it was read from; with a keyword filter, each listing says where it matched.
 - **Heads-up tags**: short lease, water charged, fees, "offers above" wording, strata approval, lease-break terms, a required professional clean, rent payment fees, garden/pool upkeep, and noise (a busy road, shops or a bar below, a rail line, a flight path, construction nearby, when said of the home itself), picked out of the listing text; **Hide if mentioned** filters them out.
+- **What to ask**: each heads-up, each feature you filter on that the listing doesn't mention, and an unknown move-in date become questions for the agent, in the listing bar's details, the printout and Compare. Put `{questions}` in your enquiry template to include them.
 - **Household income** (optional): rent as a share of income, flagged over 30%.
 - **Current rent** (optional): each listing shows how much more or less a week it costs than now, with a Compare row and a `vs_current_rent` spreadsheet column.
 - **Active filter chips** show what's filtering and how many listings each removes; click one to drop it.

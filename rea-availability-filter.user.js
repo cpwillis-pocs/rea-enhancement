@@ -1555,6 +1555,7 @@
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
     .filter(([id, st]) => AMENITIES.some((a) => a.id === id) && (st === 'yes' || st === 'no')));
+  const AMEN_BY_ID = new Map(AMENITIES.map((a) => [a.id, a]));
   const amenCfgString = (o) => Object.entries(o).map(([id, st]) => `${id}:${st}`).join(',');
   // Finer detail read from the text for a few amenities, shown in the tag ("Pets on application",
   // "Heating: ducted"). Shortlisted rows from other searches have no text, so they keep the plain tag.
@@ -1574,24 +1575,24 @@
   // Heads-up: terms in the listing text worth asking the agent about. Plain text matches, so a
   // tag means "mentioned", never a verdict ("no application fee" is not flagged).
   const WATCHOUTS = [
-    { id: 'short', label: 'Short lease', re: /\b(?:3|6|three|six)\s*(?:months?|mths?)\b[^.;]{0,20}?\b(?:lease|tenancy|term)\b|\b(?:3|6)\s*(?:-|to|or)\s*12\s*months?|\bshort[- ]term (?:lease|rental|tenancy|stay)|\blease term:?\s*(?:3|6)\s*months?/ },
-    { id: 'water', gate: ['water'], label: 'Water usage charged', re: /\bwater (?:usage|consumption)\b[^;]{0,50}?\b(?:charged|charges apply|payable|paid by (?:the )?tenants?|billed|invoiced|extra|additional|on top|at (?:the )?tenants?'?s? (?:cost|expense))|\btenants? (?:pays?|to pay|responsible for) (?:all |the )?water/ },
-    { id: 'fee', gate: ['fee'], label: 'Fee mentioned', re: /\b(?:application|holding|admin(?:istration)?|reservation) fees?\b/ },
-    { id: 'bid', gate: ['offer', 'bid'], label: 'Invites higher offers', re: /\b(?:offers?|bids?) (?:above|over|in excess of)\b|\bhighest offer|\bbest offer/ },
-    { id: 'strata', gate: ['subject to'], label: 'Subject to strata approval', re: /\bsubject to (?:strata|body corporate|owners? corporation)\b[^.;]{0,25}?\bapproval/ },
-    { id: 'break', gate: ['break'], label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)?[- ]fees?\b|\blease[- ]break (?:fee|cost|clause)|\bbreaking (?:the|your) lease (?:incurs|costs|will)/ },
+    { id: 'short', ask: 'Can the lease be 12 months or longer?', label: 'Short lease', re: /\b(?:3|6|three|six)\s*(?:months?|mths?)\b[^.;]{0,20}?\b(?:lease|tenancy|term)\b|\b(?:3|6)\s*(?:-|to|or)\s*12\s*months?|\bshort[- ]term (?:lease|rental|tenancy|stay)|\blease term:?\s*(?:3|6)\s*months?/ },
+    { id: 'water', ask: 'How is water usage billed, and is the home water efficient?', gate: ['water'], label: 'Water usage charged', re: /\bwater (?:usage|consumption)\b[^;]{0,50}?\b(?:charged|charges apply|payable|paid by (?:the )?tenants?|billed|invoiced|extra|additional|on top|at (?:the )?tenants?'?s? (?:cost|expense))|\btenants? (?:pays?|to pay|responsible for) (?:all |the )?water/ },
+    { id: 'fee', ask: 'Which fees apply, and what are they for?', gate: ['fee'], label: 'Fee mentioned', re: /\b(?:application|holding|admin(?:istration)?|reservation) fees?\b/ },
+    { id: 'bid', ask: 'Is the advertised rent the rent you will accept?', gate: ['offer', 'bid'], label: 'Invites higher offers', re: /\b(?:offers?|bids?) (?:above|over|in excess of)\b|\bhighest offer|\bbest offer/ },
+    { id: 'strata', ask: 'When will strata approval be known?', gate: ['subject to'], label: 'Subject to strata approval', re: /\bsubject to (?:strata|body corporate|owners? corporation)\b[^.;]{0,25}?\bapproval/ },
+    { id: 'break', ask: 'What does breaking the lease cost?', gate: ['break'], label: 'Lease-break terms', re: /\bbreak(?:[- ]lease)?[- ]fees?\b|\blease[- ]break (?:fee|cost|clause)|\bbreaking (?:the|your) lease (?:incurs|costs|will)/ },
     // Appended only: signatures are bitmasks by position (featSig).
-    { id: 'clean', gate: ['clean'], label: 'Professional clean required', re: /\b(?:professional(?:ly)?|carpets?|steam)(?: end[- ]of[- ]lease| bond)? clean(?:ing)?\b[^.;]{0,30}?\b(?:required|must be|on vacating|upon vacating|at (?:the )?end of)|\bmust be (?:professionally|steam) cleaned\b|\bprofessionally cleaned (?:on|upon|when) vacating\b/ },
+    { id: 'clean', ask: 'Is a professional clean required at the end, and is it in the lease?', gate: ['clean'], label: 'Professional clean required', re: /\b(?:professional(?:ly)?|carpets?|steam)(?: end[- ]of[- ]lease| bond)? clean(?:ing)?\b[^.;]{0,30}?\b(?:required|must be|on vacating|upon vacating|at (?:the )?end of)|\bmust be (?:professionally|steam) cleaned\b|\bprofessionally cleaned (?:on|upon|when) vacating\b/ },
     // Charges for paying the rent itself, not application or bond paperwork.
-    { id: 'payfee', gate: ['fee'], label: 'Rent payment fee', re: /(?<!\b(?:application|bond|lodgement|holding|admin)\s(?:and\s)?)\b(?:rent )?(?:payment|processing|transaction|convenience) fees?\b/ },
-    { id: 'garden', gate: ['tenant'], label: 'You maintain garden/pool', re: /\btenants? (?:is |are |will be )?(?:responsible for|to maintain|must maintain|maintains?) (?:the |all )?(?:gardens?|lawns?|yard|pool)\b/ },
+    { id: 'payfee', ask: 'Is there a fee-free way to pay the rent?', gate: ['fee'], label: 'Rent payment fee', re: /(?<!\b(?:application|bond|lodgement|holding|admin)\s(?:and\s)?)\b(?:rent )?(?:payment|processing|transaction|convenience) fees?\b/ },
+    { id: 'garden', ask: 'What garden or pool upkeep is expected of you?', gate: ['tenant'], label: 'You maintain garden/pool', re: /\btenants? (?:is |are |will be )?(?:responsible for|to maintain|must maintain|maintains?) (?:the |all )?(?:gardens?|lawns?|yard|pool)\b/ },
     // Noise: said of the home itself ("on a busy road", "above the shops"), not of what's nearby
     // ("close to Parramatta Rd shops", "walk to the station").
-    { id: 'road', label: 'Busy road', re: /\b(?:(?:is|sits|located|situated|positioned|set|right)\s+on|fronting|facing|faces|overlook(?:s|ing))\s+(?:a\s+|the\s+)?(?:busy|main|major|arterial)\s+(?:road|rd|highway|hwy)\b|\bon (?:a |the )?(?:busy|major|arterial) (?:road|rd|street|highway|hwy)\b|\b(?:main|busy) road frontage\b/ },
-    { id: 'above', gate: ['above'], label: 'Above shops/bar', re: /\b(?:located |situated |set |sits |positioned )?above (?:a |the |an? )?(?:local |busy |popular )?(?:shops?|shopfronts?|retail|commercial|bar|pub|hotel|restaurants?|caf[eé]s?|nightclub|club)\b/ },
-    { id: 'rail', gate: ['rail', 'train'], label: 'Next to rail line', re: /\b(?:backs? (?:on)?to|backing (?:on)?to|adjacent to|next to|beside|alongside|overlook(?:s|ing))\s+(?:the\s+)?(?:railway|rail(?:way)? (?:line|corridor|tracks?)|train (?:line|tracks?))\b/ },
-    { id: 'flight', gate: ['flight'], label: 'Flight path', re: /\b(?:under|on|beneath) (?:the |a )?flight ?path\b/ },
-    { id: 'build', gate: ['construct', 'building work', 'develop', 'demoli'], label: 'Construction nearby', re: /\b(?:construction|building works?|demolition)\s+(?:next door|nearby|adjacent|opposite|across the (?:road|street)|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bdevelopment (?:next door|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bconstruction (?:site|works?) (?:next door|nearby|adjacent)\b/ },
+    { id: 'road', ask: 'How loud is the road inside with the windows shut?', label: 'Busy road', re: /\b(?:(?:is|sits|located|situated|positioned|set|right)\s+on|fronting|facing|faces|overlook(?:s|ing))\s+(?:a\s+|the\s+)?(?:busy|main|major|arterial)\s+(?:road|rd|highway|hwy)\b|\bon (?:a |the )?(?:busy|major|arterial) (?:road|rd|street|highway|hwy)\b|\b(?:main|busy) road frontage\b/ },
+    { id: 'above', ask: 'When is the business below open, and how loud is it?', gate: ['above'], label: 'Above shops/bar', re: /\b(?:located |situated |set |sits |positioned )?above (?:a |the |an? )?(?:local |busy |popular )?(?:shops?|shopfronts?|retail|commercial|bar|pub|hotel|restaurants?|caf[eé]s?|nightclub|club)\b/ },
+    { id: 'rail', ask: 'How often do trains pass, including at night?', gate: ['rail', 'train'], label: 'Next to rail line', re: /\b(?:backs? (?:on)?to|backing (?:on)?to|adjacent to|next to|beside|alongside|overlook(?:s|ing))\s+(?:the\s+)?(?:railway|rail(?:way)? (?:line|corridor|tracks?)|train (?:line|tracks?))\b/ },
+    { id: 'flight', ask: 'How often do planes fly over, and when?', gate: ['flight'], label: 'Flight path', re: /\b(?:under|on|beneath) (?:the |a )?flight ?path\b/ },
+    { id: 'build', ask: 'How long will the construction nearby go on?', gate: ['construct', 'building work', 'develop', 'demoli'], label: 'Construction nearby', re: /\b(?:construction|building works?|demolition)\s+(?:next door|nearby|adjacent|opposite|across the (?:road|street)|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bdevelopment (?:next door|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bconstruction (?:site|works?) (?:next door|nearby|adjacent)\b/ },
   ];
   // A mention right next to a negation ("no application fee", "water usage not charged", "rent
   // bidding is prohibited", "fee: nil") is the good news, not a heads-up. Checked per clause.
@@ -1719,6 +1720,15 @@
   const watchIds = (v) => String(v || '').split(',').filter((id) => WATCH_BY_ID.has(id));
   const watchList = (r) => watchIds(r.watch).map((id) => WATCH_BY_ID.get(id));
   const watchTags = (r) => watchList(r).map((w) => w.label);
+  // What to ask the agent at an inspection: each heads-up, then each amenity you filter on that
+  // the listing doesn't mention, then an unknown availability. Plain questions, no listing text.
+  const AMEN_ASK = { pets: 'Are pets allowed?', furnished: 'Is it furnished?', laundry: 'Is the laundry inside the home?', outdoor: 'Is there a balcony, courtyard or yard?',
+    robes: 'Are there built-in robes?', stepfree: 'Is there step-free access?', watereff: 'Is the home water efficient?', gas: 'Is the cooking gas?', parking: 'Is the parking secure?' };
+  const askList = (r, amenities = '') => [
+    ...watchList(r).map((w) => w.ask),
+    ...Object.keys(parseAmenCfg(amenities)).filter((id) => r.amen?.[id] == null).map((id) => AMEN_ASK[id] || `Does it have ${AMEN_BY_ID.get(id).label.toLowerCase()}?`),
+    ...(!r.avail && !r.gone ? ['When is it available?'] : []),
+  ];
 
   // "Why this tag?": the words around the first match, so a wrong tag can be seen for what it
   // read (and turned into a test case). Text is the row's folded text, so quotes are lowercase.
@@ -2044,7 +2054,7 @@
     { key: 'icsAlarm', section: 'Reminders & templates', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
     { key: 'checklist', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
     { key: 'enquiry', section: 'Reminders & templates', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
-      help: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
+      help: 'Placeholders: {address} {price} {available} {inspection} {link}, and {questions} for what to ask (heads-ups, features you filter on it doesn\'t mention). Keep personal details out: this is stored in your browser on REA\'s site.' },
     { key: 'remember', section: 'Your data', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
     { key: 'remindSaved', section: 'Your data', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
   ];
@@ -3069,16 +3079,17 @@
     return terms.every((t) => hay.includes(t));
   };
 
-  // Enquiry message from a template: {address} {price} {available} {inspection} {link}.
+  // Enquiry message from a template: {address} {price} {available} {inspection} {link} {questions}.
   const ENQUIRY_DEFAULT = 'Hi, I\'m interested in {address} ({price}). Is it still available{available}? {inspection}Thanks.';
-  const enquiryText = (r, template) => String(template || ENQUIRY_DEFAULT)
+  const enquiryText = (r, template, amenities = '') => String(template || ENQUIRY_DEFAULT)
     .replace(/\{address\}/g, r.address || 'this property').replace(/\{price\}/g, r.price || 'price on request')
     .replace(/\{available\}/g, () => {
       const a = String(r.available && r.available !== '-' ? r.available : '').replace(/^available\s*(from\s*)?/i, '').trim();
       return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
     })
     .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? ')
-    .replace(/\{link\}/g, r.url || '').replace(/\s+\n/g, '\n').trim();
+    .replace(/\{link\}/g, r.url || '').replace(/\{questions\}/g, () => askList(r, amenities).join(' '))
+    .replace(/\s+\n/g, '\n').trim();
 
   // One listing as plain text for a message.
   // "Available 12 Oct · 2 bed, 1 bath, ? car · move-in $3,300": shared by Copy and Print.
@@ -3093,7 +3104,7 @@
   ].filter(Boolean).join('\n');
 
   // Printable shortlist: a standalone HTML document (all text escaped), light theme forced.
-  const printHtml = (rows, now = new Date(), checklist = []) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+  const printHtml = (rows, now = new Date(), checklist = [], amenities = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Rental shortlist ${ymdLocal(now)}</title><style>
 body{font:13px/1.45 system-ui,-apple-system,sans-serif;color:#111;background:#fff;margin:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
@@ -3101,14 +3112,14 @@ h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:16px}
 .l img{width:150px;height:110px;object-fit:cover;border-radius:6px;background:#eee}
 .p{font-weight:700;font-size:15px}.a{font-weight:600}.m{color:#444;margin-top:2px}.n{margin-top:6px;padding:6px 8px;background:#f4f4f6;border-radius:4px;white-space:pre-wrap}
 .box{margin-top:8px;height:64px;border:1px dashed #aaa;border-radius:4px;color:#999;font-size:11px;padding:4px}
-.u{color:#666;font-size:11px;word-break:break-all}@media print{body{margin:10mm}}
+.u{color:#666;font-size:11px;word-break:break-all}.q{margin:4px 0 0;padding-left:18px}@media print{body{margin:10mm}}
 </style></head><body><h1>Rental shortlist</h1><div class="sub">${plural(rows.length, 'listing')} · printed ${esc(now.toLocaleDateString('en-AU'))}</div>
 ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` : '<div></div>'}<div>
 <div class="p">${esc(r.price)}</div><div class="a">${esc(r.address)}</div>
 <div class="m">${esc(factsLine(r, ' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}${r.rating ? `<div class="m">My rating: ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</div>` : ''}
-${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
+${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).length ? `<div class="m">Ask:</div><ul class="q">${askList(r, amenities).map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
 </div></div>`).join('')}</body></html>`;
 
   // Drift canary: share of rows with each field, tracked as an average over searches. A field
@@ -3276,6 +3287,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
+    ['Ask', (r) => askList(r, cfg.amenities).join(' '), null],
     ['Agency', (r) => r.agency || '', null],
     ['Lease', (r) => leaseText(r.lease).replace(/^Lease /, ''), null],
     ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
@@ -3319,7 +3331,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3624,6 +3636,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   @media (pointer: coarse){ #rf-lbar:not(.rf-lbar-min){padding-right:52px} #rf-lbar:not(.rf-lbar-min)>[data-l=min]{min-width:44px;min-height:44px;top:0;right:0} }
   #rf-lbar .rf-lbar-due{flex-basis:100%;font-weight:700;color:var(--rf-err)}
   #rf-lbar .rf-lbar-lab{font-size:12px;color:var(--rf-muted);margin-right:6px}
+  #rf-lbar .rf-lbar-ask ul{margin:2px 0 0;padding-left:18px;white-space:normal}
   #rf-lbar .rf-lbar-more summary::before{content:'▸ '} #rf-lbar .rf-lbar-more[open] summary::before{content:'▾ '}
   #rf-lbar .rf-lbar-more summary{list-style:none} #rf-lbar .rf-lbar-more summary::-webkit-details-marker{display:none}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
@@ -4293,7 +4306,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const w = window.open('', '_blank');
     if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
     w.document.open();
-    w.document.write(printHtml(rows, new Date(), checklistItems(cfg.checklist)));
+    w.document.write(printHtml(rows, new Date(), checklistItems(cfg.checklist), cfg.amenities));
     w.document.close();
     w.addEventListener('load', () => w.print(), { once: true });
   });
@@ -4596,7 +4609,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     }
     if (b.dataset.act === 'enq') {
       const r = rowOf(id);
-      if (r) copyText(enquiryText(r, cfg.enquiry)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
+      if (r) copyText(enquiryText(r, cfg.enquiry, cfg.amenities)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
       return;
     }
     if (b.dataset.act === 'copy') {
@@ -6203,10 +6216,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const next = nx ? `<div class="rf-lbar-info rf-lbar-next">Next: <a href="${esc(safeUrl(nx.r.url))}">${esc(clockAt(nx.at))} ${esc(String(nx.r.address || '').split(',')[0])}</a>${nx.km != null ? ` · ${nx.km} km` : ''}${leave}</div>` : '';
     lbarTick(!!nx);
     // Applications close soon and you haven't applied: say so above the fold, with a one-tap fix.
+    const asks = askList(r, cfg.amenities);
     const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
     return `${due}${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks"><span class="rf-lbar-lab" aria-hidden="true">My rating</span>${ratingHtml(r, 'data-l="rt"')}</div>
-      ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
+      ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div>${asks.length ? `<div class="rf-lbar-info rf-lbar-ask"><span class="rf-lbar-lab">Ask the agent</span><ul>${asks.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}</details>`;
   }
   // The note is edited in the bar (multi-line, themed, read by screen readers as a labelled
   // field): Enter saves, Shift+Enter is a new line, Esc cancels; focus goes back to Note.

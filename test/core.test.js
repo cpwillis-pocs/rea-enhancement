@@ -666,6 +666,19 @@ test('cash to move: move-in plus the overlap; sort puts unknowns last; CSV and C
   assert.match(core.compareHtml(extra.slice(0, 2), { ...cfg, leaseEnd: '', moveCosts: '1000' }), /Cash to move/, 'shown with moving costs alone');
 });
 
+test('ask list: heads-ups, unmentioned features you filter on, unknown availability; in enquiry, print and Compare', () => {
+  const r = { id: '1', url: 'u', address: '1 A St', price: '$600', watch: 'water,road', amen: { pets: 'yes', furnished: 'no' }, avail: null };
+  assert.deepEqual(core.askList(r, 'pets:yes,furnished:no,dishwasher:yes,lift:yes'), [
+    'How is water usage billed, and is the home water efficient?', 'How loud is the road inside with the windows shut?',
+    'Does it have dishwasher?', 'Does it have lift?', 'When is it available?']);
+  assert.deepEqual(core.askList({ ...r, watch: '', avail: new Date() }, 'pets:yes'), [], 'nothing to ask');
+  assert.ok(core.WATCHOUTS.every((w) => /\?$/.test(w.ask)), 'every heads-up has a question');
+  assert.equal(core.enquiryText(r, 'Hi. {questions}', ''), 'Hi. How is water usage billed, and is the home water efficient? How loud is the road inside with the windows shut? When is it available?');
+  assert.doesNotMatch(core.enquiryText(r, ''), /water/, 'the default template leaves them out');
+  assert.match(core.printHtml([r], new Date(), [], 'pets:yes'), /<ul class="q"><li>How is water/);
+  assert.match(core.compareHtml([r, { ...r, id: '2', watch: '' }], { ...core.DEFAULT_CFG }), /<th scope="row">Ask<\/th><td>How is water/);
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };
