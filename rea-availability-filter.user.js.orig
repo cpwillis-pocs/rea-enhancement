@@ -809,7 +809,7 @@
   const toolBytes = (storage) => toolKeys(storage).reduce((n, k) => { try { return n + 2 * (k.length + (storage.getItem(k) || '').length); } catch { return n; } }, 0);
   const fmtBytes = (b) => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
-  // Remembered rows as stored (entry flag f:3; f:2 still reads): column names once per search (`rk`), each row an
+  // Remembered rows as stored (entry flag f:2): column names once per search (`rk`), each row an
   // array of values, and REA's URL prefixes dropped. About half the characters of one object per
   // row. In memory and in backups they are plain objects; old unflagged entries still read.
   const REA_ORIGIN = 'https://www.realestate.com.au', IMG_ORIGIN = 'https://i2.au.reastatic.net';
@@ -889,6 +889,7 @@
       }
       return { evicted, ok: false };
     };
+    // Trims rows from the end until the entry fits SNAP_ENTRY_BUDGET. Returns whether it trimmed.
     // Trims until the entry fits SNAP_ENTRY_BUDGET, cheapest loss first and furthest down first:
     // row text, gone rows' text, then row features and headlines, then gone rows themselves.
     // Sizes are tracked from the fields changed, not by re-stringifying rows. Returns whether it trimmed.
@@ -1603,7 +1604,7 @@
       if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun)/i.test(tail)) continue;
       const d = parseAvail(`Available ${tail.split(/[.;,\n]|\s[-–]\s/)[0]}`, now, { keepPast: true }); // this clause only: not "…, lease starts 20 October"
       if (d && d < startOfDay(now)) return ''; // closed already: nothing to nudge
-      if (d) return ymdLocal(d);
+      if (d) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
     return '';
   };
@@ -2016,6 +2017,8 @@
     ...Object.fromEntries(SETTINGS.map((x) => [x.key, x.def])),
   };
 
+  // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
+  // keyword: null) falls back to the default instead of throwing on every render.
   // Settings a backup carries: your own setup (places, checklist, template, weights, theme…),
   // not this search's filters. Restored through sanitizeCfg, so a hand-edited file can't break it.
   // Not `remember`/`remindSaved`: restoring a backup made with Remember off must not delete this
@@ -2038,8 +2041,6 @@
   // Types, plus values a hand-edited file could get wrong: a sort that exists, real calendar dates.
   const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd', 'noticeGiven']);
   const isYmd = (v) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'); return !!d && !isNaN(d) && d.toISOString().startsWith(v); };
-  // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
-  // keyword: null) falls back to the default instead of throwing on every render.
   const sanitizeCfg = (c) => (c && typeof c === 'object'
     ? Object.fromEntries(Object.keys(DEFAULT_CFG).filter((k) => typeof c[k] === typeof DEFAULT_CFG[k] && (k !== 'sort' || Object.hasOwn(SORTS, c[k]))
       && (!CFG_DATES.has(k) || c[k] === '' || isYmd(c[k])) && settingOk(k, c[k])).map((k) => [k, c[k]]))
@@ -2090,6 +2091,7 @@
   // Keyword: space-separated terms, all must match; "-term" excludes; "quoted phrase" kept whole.
   // Lowercase without accents, so "cafe" finds "café" (row text is stored folded).
   const fold = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  // Every term must appear; -term must not; "a phrase" as typed; a|b means either.
   // "Inspections I can make": a weekend, or 5pm or later, in the listing's own time zone.
   const INSPECT_WHEN = { weekend: 'Inspect on a weekend', evening: 'Inspect after 5pm', either: 'Weekend or after 5pm', mine: 'Inspect at my times' };
   // "My times": comma- or line-separated entries of days and an optional time range, eg
@@ -2151,7 +2153,6 @@
     const weekend = d === 0 || d === 6, evening = min >= 17 * 60;
     return when === 'weekend' ? weekend : when === 'evening' ? evening : weekend || evening;
   };
-  // Every term must appear; -term must not; "a phrase" as typed; a|b means either.
   const keywordTest = (q) => {
     const terms = fold(q).match(/-?"[^"]+"|\S+/g) || [];
     const inc = [], exc = [];
@@ -2229,6 +2230,8 @@
     return rows;
   };
 
+  // Active filters as removable chips: [{ key, amen?, label }]. `without` gives the cfg with
+  // that one chip removed, so the UI can show how many listings each filter is removing.
   const shortDate = (ymd) => dtf({ day: 'numeric', month: 'short' }).format(new Date(ymd + 'T00:00:00'));
   const NUM_FMT = new Intl.NumberFormat('en-AU');
   const money = (v) => `$${NUM_FMT.format(+v)}`;
@@ -2243,8 +2246,6 @@
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
   const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'maxKm', 'withinDays', 'leaseMin'];
-  // Active filters as removable chips: [{ key, amen?, label }]. `without` gives the cfg with
-  // that one chip removed, so the UI can show how many listings each filter is removing.
   const activeFilters = (cfg) => {
     const out = [];
     for (const k of FILTER_KEYS) {
@@ -2518,7 +2519,7 @@
     add('changedOnly', cfg.changedOnly, (r) => !!(r.prevPrice || r.prevAvail || r.featChange));
     add('unopenedOnly', cfg.unopenedOnly, (r) => !r.openedAt);
     add('unreviewedOnly', cfg.unreviewedOnly, (r) => !r.reviewedAt);
-    for (const id of watchIds(cfg.noWatch)) add(`watch:${id}`, true, (r) => !watchIds(r.watch).includes(id));
+    for (const id of watchIds(cfg.noWatch)) add(`watch:${id}`, true, (r) => !String(r.watch || '').split(',').includes(id));
     add('staleOnly', cfg.staleOnly, (r) => r.listed instanceof Date && now - r.listed > STALE_MS);
     add('maxKm', kmMax != null && anchor, (r) => r.km != null && r.km <= kmMax); // no location fails a distance cap
     for (const [id, st] of Object.entries(parseAmenCfg(cfg.amenities))) add(`amen:${id}`, true, st === 'yes' ? (r) => r.amen?.[id] === 'yes' : (r) => r.amen?.[id] !== 'yes');
@@ -3167,7 +3168,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, noticeBy, noticeDue, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, onePerBuilding, withBuildings, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, noticeBy, noticeDue, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -5245,56 +5246,42 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (only && els.length === Math.min(n, rows.length) && rows.length === ui.lastPaintTotal && [...els].every((el, i) => el._rf?.id === rows[i].id)) {
       els.forEach((el, i) => {
         if (!only.has(rows[i].id)) return;
-        const [p] = itemParts([rows[i]]);
+        const [p] = itemParts([rows[i]], i, rows.length);
         if (el._rf.html === p.html) return;
         const tpl = document.createElement('template');
         tpl.innerHTML = p.html;
         tpl.content.firstElementChild._rf = p;
         el.replaceWith(tpl.content.firstElementChild);
       });
-      return numberItems(rows.length);
+      return;
     }
     ui.lastPaintTotal = rows.length;
-    const parts = itemParts(rows.slice(0, n));
-    // Keyed: an item whose markup is unchanged keeps its node wherever it moved (a hide drops one
-    // node instead of redrawing everything below it). Mostly new markup is one innerHTML.
-    const byId = new Map([...els].map((el) => [el._rf?.id, el]));
-    const kept = parts.filter((p) => byId.get(p.id)?._rf.html === p.html).length;
-    if (kept < parts.length / 2) {
+    const parts = itemParts(rows.slice(0, n), 0, rows.length);
+    const same = els.length === parts.length && parts.every((p, i) => els[i]._rf?.id === p.id);
+    const changed = same ? parts.filter((p, i) => els[i]._rf.html !== p.html).length : Infinity;
+    if (changed > parts.length / 2) {
       ui.list.innerHTML = parts.map((p) => p.html).join('') + moreHtml(rows.length - n);
       ui.list.querySelectorAll(':scope > .rf-item').forEach((el, i) => { el._rf = parts[i]; });
-      return numberItems(rows.length);
+      return;
     }
-    ui.list.querySelector(':scope > .rf-more-btn')?.remove();
     const tpl = document.createElement('template');
-    let at = ui.list.firstElementChild;
-    for (const p of parts) {
-      let el = byId.get(p.id);
-      if (el && el._rf.html === p.html) byId.delete(p.id);
-      else { tpl.innerHTML = p.html; el = tpl.content.firstElementChild; el._rf = p; }
-      if (el === at) at = at.nextElementSibling; else ui.list.insertBefore(el, at);
-    }
-    for (const el of byId.values()) el.remove();
-    numberItems(rows.length);
+    parts.forEach((p, i) => {
+      if (els[i]._rf.html === p.html) return;
+      tpl.innerHTML = p.html;
+      const el = tpl.content.firstElementChild;
+      el._rf = p;
+      els[i].replaceWith(el);
+    });
+    ui.list.querySelector(':scope > .rf-more-btn')?.remove();
     ui.list.insertAdjacentHTML('beforeend', moreHtml(rows.length - n));
   };
-  // Position in the list is set here, after the markup lands, so an item's markup doesn't change
-  // when one above it goes (and the keyed paint can keep its node).
-  const numberItems = (total) => ui.list.querySelectorAll(':scope > .rf-item').forEach((el, i) => {
-    const pos = String(i + 1), set = String(total);
-    if (el.getAttribute('aria-posinset') !== pos) el.setAttribute('aria-posinset', pos);
-    if (el.getAttribute('aria-setsize') !== set) el.setAttribute('aria-setsize', set);
-    const old = el.getAttribute('aria-label') || '', lab = old.replace(/^\d+ of \d+: /, `${pos} of ${set}: `);
-    if (old !== lab) el.setAttribute('aria-label', lab);
-  });
   function renderMore() {
     const shown = ui.list.querySelectorAll('.rf-item').length;
     ui.list.querySelector('.rf-more-btn')?.remove();
-    const parts = itemParts(ui.rows.slice(shown, shown + RENDER_CHUNK));
+    const parts = itemParts(ui.rows.slice(shown, shown + RENDER_CHUNK), shown, ui.rows.length);
     ui.list.insertAdjacentHTML('beforeend', parts.map((p) => p.html).join('') + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
     const els = ui.list.querySelectorAll(':scope > .rf-item');
     parts.forEach((p, i) => { if (els[shown + i]) els[shown + i]._rf = p; });
-    numberItems(ui.rows.length);
   }
 
   // Money facts in one line: move-in (bond flag), lease overlap/gap, share of income, vs median.
@@ -5312,17 +5299,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => (Array.isArray(t)
     ? `<span${t[1] ? ` title="${esc(t[1])}"` : ''}>${esc(t[0])}</span>` : `<span>${esc(t)}</span>`)).join('')}</div>` : '');
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
-  // Markup per listing, without its place in the list (numberItems sets "12 of 150" afterwards).
-  function itemParts(rows) {
+  // `offset`/`total`: this chunk's place in the whole list, for screen readers ("12 of 150").
+  function itemParts(rows, offset = 0, total = rows.length) {
     const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist);
-    return rows.map((r) => ({ id: r.id, html: itemHtml(r) }));
-    function itemHtml(r) {
+    return rows.map((r, i) => ({ id: r.id, html: itemHtml(r, i) }));
+    function itemHtml(r, i) {
       const kq = cfg.keyword.trim() ? keywordEvidence(r.text, cfg.keyword) : '';
       const name = [r.price, r.address, r.available && r.available !== '-' ? `available ${r.available.replace(/^available\s*/i, '')}` : ''].filter(Boolean).join(', ');
       const { am, wt } = tagItemsOf(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       const na = sl ? needsAction(r, now) : '';
       return `
-      <div tabindex="-1" role="article" aria-posinset="0" aria-setsize="0" aria-label="${esc(`0 of 0: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
+      <div tabindex="-1" role="article" aria-posinset="${offset + i + 1}" aria-setsize="${total}" aria-label="${esc(`${offset + i + 1} of ${total}: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener" aria-label="${esc(`${name} (opens the listing)`)}">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>
