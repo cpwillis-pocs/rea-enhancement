@@ -1985,29 +1985,29 @@
   // gathers entries into a fieldset; `after` names fixed markup drawn after the entry.
   const WEIGHT_OPTS = [['0', 'Ignore'], ['1', 'Less'], ['2', 'Normal'], ['3', 'More']];
   const SETTINGS = [
-    { key: 'annotate', kind: 'check', def: true, label: "Show badges and buttons on REA's result cards", name: 'card badges' },
-    { key: 'dimCards', kind: 'check', def: true, label: "Fade REA cards that don't match filters", name: 'card fading' },
-    { key: 'compact', kind: 'check', def: false, label: 'Compact list', help: 'Small photos and the key facts only, so about twice as many listings fit on screen (d).', name: 'compact list' },
-    { key: 'theme', kind: 'select', def: '', label: 'Theme', options: [['', 'System'], ['light', 'Light'], ['dark', 'Dark']], name: 'theme' },
-    { key: 'remember', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
-    { key: 'remindSaved', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
-    ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'Best match: how much each counts', name: 'weights' })),
-    { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
-    { key: 'periodic', kind: 'check', def: false, label: 'My lease is periodic (month to month, no end date)', name: 'periodic lease',
+    { key: 'annotate', section: 'Display', kind: 'check', def: true, label: "Show badges and buttons on REA's result cards", name: 'card badges' },
+    { key: 'dimCards', section: 'Display', kind: 'check', def: true, label: "Fade REA cards that don't match filters", name: 'card fading' },
+    { key: 'compact', section: 'Display', kind: 'check', def: false, label: 'Compact list', help: 'Small photos and the key facts only, so about twice as many listings fit on screen (d).', name: 'compact list' },
+    { key: 'theme', section: 'Display', kind: 'select', def: '', label: 'Theme', options: [['', 'System'], ['light', 'Light'], ['dark', 'Dark']], name: 'theme' },
+    ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'How much each counts', name: 'weights', section: 'Best match' })),
+    { key: 'periodic', section: 'Your move', kind: 'check', def: false, label: 'My lease is periodic (month to month, no end date)', name: 'periodic lease',
       help: "A periodic lease ends one notice period after you give notice. Until you do, it's counted from today, so set your notice period below." },
-    { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
+    { key: 'leaseEnd', section: 'Your move', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
       help: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing (sort: Least overlap)." },
-    { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
+    { key: 'noticeDays', section: 'Your move', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
       help: "Days before your lease ends that you must tell your landlord or agent. It depends on your state and your lease, so check them. Needs your lease end above; the Shortlist and the calendar export then remind you." },
-    { key: 'noticeGiven', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
+    { key: 'noticeGiven', section: 'Your move', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
       help: 'Once you have given notice: the reminders stop.' },
-    { key: 'moveCosts', kind: 'int', def: '', min: 0, max: 100000, step: 50, label: 'Other moving costs, $ (optional)', placeholder: 'eg 1500', name: 'moving costs',
+    { key: 'moveCosts', section: 'Your move', kind: 'int', def: '', min: 0, max: 100000, step: 50, label: 'Other moving costs, $ (optional)', placeholder: 'eg 1500', name: 'moving costs',
       help: 'Removalists, cleaning, connections: added to Cash to move, its sort and its filter.' },
-    { key: 'checklist', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
-    { key: 'enquiry', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
-      help: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
-    { key: 'income', kind: 'int', def: '', min: 0, max: 99999999, step: 1000, label: 'Household income, $ a year before tax (optional)', placeholder: 'eg 120000', name: 'income',
+    { key: 'income', section: 'Your move', kind: 'int', def: '', min: 0, max: 99999999, step: 1000, label: 'Household income, $ a year before tax (optional)', placeholder: 'eg 120000', name: 'income',
       help: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
+    { key: 'icsAlarm', section: 'Reminders & templates', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
+    { key: 'checklist', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
+    { key: 'enquiry', section: 'Reminders & templates', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
+      help: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
+    { key: 'remember', section: 'Your data', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
+    { key: 'remindSaved', section: 'Your data', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
   ];
   const SETTING_BY_KEY = new Map(SETTINGS.map((x) => [x.key, x]));
   const settingOk = (k, v) => {
@@ -2031,9 +2031,10 @@
       const input = x.kind === 'date' ? 'type="date"' : x.kind === 'int' ? `type="number" min="${x.min}"${x.max < 99999999 ? ` max="${x.max}"` : ''} step="${x.step || 1}" inputmode="numeric"` : `type="text" maxlength="${x.maxLength}"`;
       return `<label${t}>${esc(x.label)}<input ${input} id="${id}"${ph}${it}${db}></label>${help}`;
     };
-    let out = '';
+    let out = '', section = '';
     for (let i = 0; i < SETTINGS.length; i++) {
       const x = SETTINGS[i];
+      if (x.section && x.section !== section) { section = x.section; out += `<h3 class="rf-sect">${esc(section)}</h3>`; }
       if (x.group) {
         const g = [];
         while (SETTINGS[i]?.group === x.group) g.push(SETTINGS[i++]);
@@ -3558,6 +3559,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-warnbar .rf-warn-msg{flex:1 1 60%;min-width:0}
   .rf-compare th[scope=row],.rf-market-t th[scope=row]{position:sticky;left:0;z-index:1;background:var(--rf-bg)} /* the label stays as the table scrolls sideways */
   @media (max-width:480px){ .rf-compare th[scope=row]{max-width:96px;white-space:normal} }
+  .rf-more [data-forget]{color:var(--rf-err)}
+  .rf-more .rf-sect{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--rf-line);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--rf-fg)}
+  .rf-more .rf-sect:first-of-type{border-top:0;padding-top:0}
   .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
@@ -3826,6 +3830,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       </div>
       <details class="rf-more" id="rf-more">
         <summary>More filters</summary>
+        <h3 class="rf-sect">Rent &amp; size</h3>
         <div class="rf-grid3">
           <label>Min $/wk<input type="number" min="0" step="25" id="rf-priceMin" inputmode="numeric"></label>
           <label>Max $/wk<input type="number" min="0" step="25" id="rf-priceMax" inputmode="numeric"></label>
@@ -3836,6 +3841,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
           <label title="${esc(SQM_NOTE)}"><span>Min m²<span class="rf-tip" tabindex="0" role="note" aria-label="${esc(SQM_NOTE)}">ⓘ</span></span><input type="number" min="0" max="2000" step="5" id="rf-sizeMin" inputmode="numeric" aria-label="Min m²"></label>
         </div>
+        <h3 class="rf-sect">Type &amp; features</h3>
         <div class="rf-amen rf-types" role="group" aria-label="Property type: pick any number (none picked means any)">
           <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
         </div>
@@ -3843,27 +3849,30 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <input type="hidden" id="rf-amenities"><span class="rf-label">Features</span>
           ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
         </div>
+        <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
         <div class="rf-amen rf-nowatch" role="group" aria-label="Hide listings whose text mentions">
           <span class="rf-label">Hide if mentioned</span><input type="hidden" id="rf-noWatch">
           ${WATCHOUTS.map((w) => `<button type="button" class="rf-chip" data-nowatch="${w.id}" aria-pressed="false">${w.label}</button>`).join('')}
         </div>
+        <h3 class="rf-sect">Location</h3>
         <div class="rf-dist">
           <label>Distance from<input type="text" id="rf-anchor" placeholder="-33.87, 151.21 or a Google Maps link" autocomplete="off"></label>
           <label>Max km<input type="number" min="0" step="1" id="rf-maxKm" inputmode="decimal"></label>
         </div>
-        <div class="rf-grid3">
-          <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
-        </div>
-        <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
-        <input type="hidden" id="rf-building">
         <label>Other places (optional, one per line)<textarea id="rf-places" rows="2" placeholder="Work: -33.87, 151.21&#10;Uni: Google Maps link"
           title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
         <div class="rf-meta rf-places-fb" aria-live="polite"></div>
-        <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
+        <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
+        <input type="hidden" id="rf-building">
+        <h3 class="rf-sect">Lease &amp; inspections</h3>
+        <div class="rf-grid3">
+          <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
+        </div>
         <label>Inspection on<input type="date" id="rf-inspectOn"></label>
         <label title="Keeps listings with at least one upcoming inspection you can get to, in the listing's local time">Inspections I can make<select id="rf-inspectWhen">
           <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option><option value="mine">At my times…</option></select></label>
         <label title="Days and times you can get to an inspection, in the listing's local time. Used by Inspections I can make: At my times">My inspection times<input type="text" id="rf-inspectFree" placeholder="eg Sat 9-13, Sun, weekdays 17:30-" spellcheck="false"></label>
+        <h3 class="rf-sect">Show only</h3>
         <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
         <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
         <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
