@@ -679,6 +679,45 @@ test('ask list: heads-ups, unmentioned features you filter on, unknown availabil
   assert.match(core.compareHtml([r, { ...r, id: '2', watch: '' }], { ...core.DEFAULT_CFG }), /<th scope="row">Ask<\/th><td>How is water/);
 });
 
+test('application pack: ticks by name, a label for the apply nudges, stale ticks ignored', () => {
+  const cfg = { ...core.DEFAULT_CFG, packList: 'ID, Payslips, References' };
+  assert.equal(core.packLabel(cfg), 'Pack: 0 of 3 ready');
+  const c2 = { ...cfg, packDone: core.packToggle(cfg, 'Payslips') };
+  assert.equal(c2.packDone, 'Payslips');
+  assert.equal(core.packLabel({ ...c2, packDone: core.packToggle(c2, 'ID') }), 'Pack: 2 of 3 ready');
+  assert.equal(core.packToggle(c2, 'Payslips'), '', 'untick');
+  assert.equal(core.packLabel({ ...cfg, packDone: 'ID,Payslips,References,Old item' }), 'Application pack ready');
+  assert.equal(core.packToggle({ ...cfg, packDone: 'Old item' }, 'ID'), 'ID', 'an item no longer on the list is dropped');
+  assert.equal(core.packState(core.DEFAULT_CFG).items.length, 5, 'a default pack');
+});
+
+test('moving plan: once approved, a moving list per listing, moving day and condition report in the calendar', () => {
+  const won = { id: '146500001', appStatus: 'approved', address: '1 New St, Bondi' };
+  const rows = [{ id: '2', appStatus: 'applied' }, won];
+  assert.equal(core.movePlan([rows[0]], core.DEFAULT_CFG), null, 'not approved: no plan');
+  const cfg = { ...core.DEFAULT_CFG, movingList: 'Removalists, Power, Internet', moveDate: '2026-10-20', ecrDays: '7' };
+  let plan = core.movePlan(rows, cfg);
+  assert.deepEqual([plan.next, plan.done, plan.moveDate, plan.ecrBy], ['Removalists', [], '2026-10-20', '2026-10-27']);
+  const moveDone = core.moveToggle(cfg, plan, 'Removalists');
+  assert.equal(moveDone, '146500001|Removalists');
+  plan = core.movePlan(rows, { ...cfg, moveDone });
+  assert.equal(plan.next, 'Power');
+  assert.equal(core.movePlan([{ ...won, id: '146500009' }], { ...cfg, moveDone }).next, 'Removalists', 'ticks were for another listing');
+  assert.equal(core.moveToggle(cfg, plan, 'Removalists'), '', 'untick the last');
+  assert.equal(core.movePlan(rows, { ...cfg, ecrDays: '' }).ecrBy, '', 'no days: no due date');
+  const now = new Date(2026, 9, 1, 12).getTime();
+  const ics = core.toIcs([], now, { move: plan });
+  assert.match(ics, /UID:move@rea-enhancement\r\nDTSTAMP:\S+\r\nDTSTART;VALUE=DATE:20261020/);
+  assert.match(ics, /SUMMARY:Moving day: 1 New St\\, Bondi/);
+  assert.match(ics, /DESCRIPTION:Still to do: Power\\, Internet/);
+  assert.match(ics, /UID:ecr@rea-enhancement\r\nDTSTAMP:\S+\r\nDTSTART;VALUE=DATE:20261027/);
+  assert.equal(core.toIcs([], new Date(2026, 10, 1).getTime(), { move: plan }), '', 'both past: nothing');
+  const sent = [];
+  core.toIcs([], now, { move: plan, sent });
+  const moved = core.toIcs([], now, { prev: sent, move: null });
+  assert.match(moved, /UID:move@rea-enhancement[\s\S]*STATUS:CANCELLED/, 'moving day cleared: taken out of the calendar');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

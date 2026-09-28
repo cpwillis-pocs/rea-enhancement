@@ -2045,6 +2045,10 @@
       help: "Days before your lease ends that you must tell your landlord or agent. It depends on your state and your lease, so check them. Needs your lease end above; the Shortlist and the calendar export then remind you." },
     { key: 'noticeGiven', section: 'Your move', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
       help: 'Once you have given notice: the reminders stop.' },
+    { key: 'moveDate', section: 'Your move', kind: 'date', def: '', label: 'Moving day (optional)', name: 'moving day',
+      help: "Once you're approved somewhere: the Shortlist shows your moving list, and the calendar export adds moving day and when the condition report is due." },
+    { key: 'ecrDays', section: 'Your move', kind: 'int', def: '', min: 1, max: 30, label: 'Days to return the condition report (optional)', placeholder: "check your state's rules", name: 'condition report days',
+      help: "After you move in, you have a set number of days to return the entry condition report. It depends on your state, so check its rules. Needs your moving day." },
     { key: 'moveCosts', section: 'Your move', kind: 'int', def: '', min: 0, max: 100000, step: 50, label: 'Other moving costs, $ (optional)', placeholder: 'eg 1500', name: 'moving costs',
       help: 'Removalists, cleaning, connections: added to Cash to move, its sort and its filter.' },
     { key: 'rentNow', section: 'Your move', kind: 'int', def: '', min: 0, max: 20000, step: 10, label: 'My current rent, $ a week (optional)', placeholder: 'eg 650', name: 'current rent',
@@ -2053,6 +2057,9 @@
       help: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
     { key: 'icsAlarm', section: 'Reminders & templates', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
     { key: 'checklist', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
+    { key: 'packList', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 300, label: 'Application pack (comma-separated)', placeholder: () => PACK_DEFAULT, name: 'application pack',
+      help: 'What agents usually ask for when you apply. Tick what you have ready on the Shortlist; the apply reminders say how much is. Names only: no documents are stored.' },
+    { key: 'movingList', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 400, label: 'Moving list (comma-separated)', placeholder: () => MOVING_DEFAULT, name: 'moving list' },
     { key: 'enquiry', section: 'Reminders & templates', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
       help: 'Placeholders: {address} {price} {available} {inspection} {link}, and {questions} for what to ask (heads-ups, features you filter on it doesn\'t mention). Keep personal details out: this is stored in your browser on REA\'s site.' },
     { key: 'remember', section: 'Your data', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
@@ -2098,7 +2105,7 @@
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', cashMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
-    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false,
+    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false, packDone: '', moveDone: '',
     ...Object.fromEntries(SETTINGS.map((x) => [x.key, x.def])),
   };
 
@@ -2110,7 +2117,7 @@
   const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
   // What a restore would do, shown before anything is merged.
   const SETTING_NAMES = { ...Object.fromEntries(SETTINGS.filter((x) => x.name).map((x) => [x.key, x.name])),
-    places: 'places', inspectFree: 'inspection times', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
+    places: 'places', inspectFree: 'inspection times', packDone: 'application pack', moveDone: 'moving list', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
   const backupSummary = (data, cur) => {
     const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
     const c = backupCfg(data?.cfg);
@@ -2122,7 +2129,7 @@
     };
   };
   // Types, plus values a hand-edited file could get wrong: a sort that exists, real calendar dates.
-  const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd', 'noticeGiven']);
+  const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd', 'noticeGiven', 'moveDate']);
   const isYmd = (v) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'); return !!d && !isNaN(d) && d.toISOString().startsWith(v); };
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
   // keyword: null) falls back to the default instead of throwing on every render.
@@ -2137,7 +2144,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', 'packDone', 'moveDone', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -2805,7 +2812,34 @@
     const pending = rows.filter((r) => r !== won && r.appStatus === 'applied' && !deadEnd(r)).length;
     return { r: won, by, days: cfg.periodic ? Math.round(+cfg.noticeDays) || 0 : 0, pending };
   };
-  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, noticeGiven = '', followUps = false, prev = null, sent = null } = {}) => {
+  // Tick lists kept in settings: your application pack (what you have ready to send) and, once
+  // approved, your moving list. Ticks are item names; the moving list's are for one listing
+  // ("id|item,item"), so moving again starts afresh.
+  const PACK_DEFAULT = 'Photo ID, Payslips, Rental ledger, References, Bank statement';
+  const MOVING_DEFAULT = 'Book removalists, Connect power and gas, Connect internet, Redirect mail, Update your address, Book the end-of-lease clean, Hand back the old keys';
+  const tickItems = (v, def) => [...new Set(String(v || def).split(/[,\n]/).map((x) => clip(x.trim(), 40)).filter(Boolean))].slice(0, CHECK_MAX);
+  const tickSet = (v) => new Set(String(v || '').split(',').filter(Boolean));
+  const packState = (cfg) => { const items = tickItems(cfg.packList, PACK_DEFAULT), done = tickSet(cfg.packDone); return { items, done: items.filter((i) => done.has(i)) }; };
+  const packLabel = (cfg) => { const { items, done } = packState(cfg); return done.length === items.length ? 'Application pack ready' : `Pack: ${done.length} of ${items.length} ready`; };
+  const packToggle = (cfg, item) => { const d = tickSet(cfg.packDone); if (d.has(item)) d.delete(item); else d.add(item); return [...d].filter((i) => packState(cfg).items.includes(i)).join(','); };
+  const addDaysYmd = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); return ymdLocal(new Date(y, m - 1, d + n)); };
+  // Approved somewhere: the moving list, what's next on it, moving day and when the entry
+  // condition report is due (moving day plus your state's days). null otherwise.
+  const movePlan = (rows, cfg) => {
+    const won = rows.find((r) => r.appStatus === 'approved');
+    if (!won) return null;
+    const items = tickItems(cfg.movingList, MOVING_DEFAULT);
+    const [forId, list] = String(cfg.moveDone || '').split('|');
+    const d = forId === won.id ? tickSet(list) : new Set();
+    const moveDate = isYmd(cfg.moveDate || '') ? cfg.moveDate : '', days = Math.round(+cfg.ecrDays);
+    return { r: won, items, done: items.filter((i) => d.has(i)), next: items.find((i) => !d.has(i)) || '', moveDate, ecrBy: moveDate && days >= 1 && days <= 30 ? addDaysYmd(moveDate, days) : '' };
+  };
+  const moveToggle = (cfg, plan, item) => {
+    const d = new Set(plan.done);
+    if (d.has(item)) d.delete(item); else d.add(item);
+    return d.size ? `${plan.r.id}|${plan.items.filter((i) => d.has(i)).join(',')}` : '';
+  };
+  const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, noticeGiven = '', followUps = false, move = null, prev = null, sent = null } = {}) => {
     // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
     // and then reinstated is live again when the newer file is imported.
     const seq = Math.floor(now / 60000);
@@ -2876,6 +2910,16 @@
         allDay('notice@rea-enhancement', by < today ? today : by, `Give notice to vacate (lease ends ${leaseEnd})`,
           [`DESCRIPTION:${icsText(`${Math.round(+noticeDays)} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`], { cancel: noticeGivenFor(leaseEnd, noticeGiven), alarm: by >= today });
       }
+    }
+    // Your move (`move`: movePlan's result): moving day, with what's left on the moving list, and
+    // the day the entry condition report is due.
+    if (move?.moveDate && move.moveDate >= today) {
+      const addr = move.r.address || 'your new place', left = move.items.filter((i) => !move.done.includes(i));
+      allDay('move@rea-enhancement', move.moveDate, `Moving day: ${addr}`, left.length ? [`DESCRIPTION:${icsText(`Still to do: ${left.join(', ')}`)}`] : [], { alarm: move.moveDate > today });
+    }
+    if (move?.ecrBy && move.ecrBy >= today) {
+      allDay('ecr@rea-enhancement', move.ecrBy, `Return the condition report: ${move.r.address || 'new place'}`,
+        [`DESCRIPTION:${icsText("Note and photograph anything worn or damaged before you send it back: it's what your bond is judged against.")}`], { alarm: move.ecrBy > today });
     }
     // `prev`: what the last shortlist export sent ([{ u: uid, s: DTSTART line }]). Anything upcoming
     // that isn't in this one (unshortlisted, a deadline the agent removed, a lease end cleared)
@@ -3331,7 +3375,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3370,7 +3414,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   const icsSent = () => keyStore(storageOr('localStorage'), ICS_SENT_KEY); // lazy: storageOr is defined further down
   function downloadIcs(rows, { reminders = false, track = false } = {}) {
     const sent = [];
-    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.periodic ? (cfg.noticeGiven ? leaseEndOf(cfg) : '') : cfg.leaseEnd, noticeDays: cfg.periodic ? 0 : num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true } : {}),
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.periodic ? (cfg.noticeGiven ? leaseEndOf(cfg) : '') : cfg.leaseEnd, noticeDays: cfg.periodic ? 0 : num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true, move: movePlan(marks.shortlist(), cfg) } : {}),
       ...(track ? { prev: icsSent().getJson() || [], sent } : {}) });
     if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
@@ -3511,6 +3555,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .rf-tabs button[aria-selected=true]{color:var(--rf-fg);border-bottom-color:var(--rf-accent)}
   .rf-sl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
+  .rf-sl-ticks{flex-basis:100%} .rf-sl-ticks summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)} .rf-sl-ticks .rf-checks{margin:6px 0 0}
   .rf-sl-bar .rf-label{flex-basis:100%}
   .rf-sl-bar .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-note{margin:-2px 9px 8px 124px;padding:6px 8px;border-radius:6px;background:var(--rf-hover);font-size:12px;
@@ -3883,6 +3928,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
         <button class="rf-btn sec" data-sl="backup" title="Download shortlist, hidden listings, notes and remembered searches as JSON">Backup</button>
         <button class="rf-btn sec" data-sl="restore" title="Merge a backup file">Restore</button>
       </div></details>
+      <div class="rf-sl-ticks" hidden></div>
       <input type="file" accept="application/json,.json" hidden>
     </div>
     <div class="rf-controls">
@@ -3930,7 +3976,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
           title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
         <div class="rf-meta rf-places-fb" aria-live="polite"></div>
         <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
-        <input type="hidden" id="rf-building">
+        <input type="hidden" id="rf-building"><input type="hidden" id="rf-packDone"><input type="hidden" id="rf-moveDone">
         <h3 class="rf-sect">Lease &amp; inspections</h3>
         <div class="rf-grid3">
           <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
@@ -5096,6 +5142,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       if (sb) { marks.toggleSuburb(sb.dataset.unhideSb); refreshMarks(); }
     });
     wireShortlistBar(panel);
+    wireTicks();
     ui.run.addEventListener('click', () => busy || run());
     ui.partial.querySelector('[data-resume]').addEventListener('click', () => busy || run(true, { resume: true }));
     ui.refresh.addEventListener('click', () => busy || run(true));
@@ -5293,6 +5340,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   function renderShortlist() {
     const all = marks.shortlist();
     const rows = shortlistRows(all);
+    renderTicks(all);
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
     ui.rows = rows;
     setExport(rows.length === 0);
@@ -5323,7 +5371,40 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       const notice = due ? (due.days < 0 ? `Your notice date (${shortDate(due.by)}) has passed.` : `Give notice by ${shortDate(due.by)}${due.days ? ` (${plural(due.days, 'day')})` : ' (today)'} for your lease ending ${shortDate(cfg.leaseEnd)}.`)
         : won?.by ? `Give notice by ${shortDate(won.by)}.` : won?.days ? `Give ${won.days} days' notice when you're ready.` : won ? 'Set your notice period in Settings for its date.' : '';
       ui.status.append(` ${won ? `Approved for ${addr}. ` : ''}${notice}${won?.pending ? ` ${plural(won.pending, 'other application')} still waiting.` : ''} `, b);
+    } else {
+      const plan = movePlan(all, cfg); // notice handled: the moving list leads
+      if (plan?.next) ui.status.append(` Approved for ${String(plan.r.address || 'a listing').split(',')[0]}. Next on your moving list: ${plan.next}${plan.moveDate ? ` (moving ${shortDate(plan.moveDate)})` : ''}.`);
     }
+  }
+
+  // Above the Shortlist: your application pack while you're applying, your moving list once approved.
+  function renderTicks(all) {
+    const plan = movePlan(all, cfg), box = ui.slBar.querySelector('.rf-sl-ticks');
+    const applying = !plan && all.some((r) => !deadEnd(r) && ['', 'to inspect', 'inspected'].includes(r.appStatus || ''));
+    box.hidden = !plan && !applying;
+    if (box.hidden) return;
+    const chips = (items, done, attr, label) => `<div class="rf-checks" role="group" aria-label="${label}">${items.map((i) => {
+      const on = done.includes(i);
+      return `<button type="button" class="rf-chip" ${attr}="${esc(i)}" aria-pressed="${on}">${on ? '✓ ' : ''}${esc(i)}</button>`;
+    }).join('')}</div>`;
+    const { items, done } = plan || packState(cfg);
+    const head = plan ? `Moving list ${done.length}/${items.length}${plan.moveDate ? ` · moving ${shortDate(plan.moveDate)}` : ''}` : packLabel(cfg).replace(/^Pack:/, 'Application pack:');
+    const open = ui.ticksOpen ?? false;
+    box.innerHTML = `<details${open ? ' open' : ''}><summary>${esc(head)}</summary>${plan ? chips(items, done, 'data-mv', 'Moving list') : chips(items, done, 'data-pack', 'Application pack')}</details>`;
+    box.firstChild.addEventListener('toggle', (e) => { ui.ticksOpen = e.currentTarget.open; });
+  }
+  function wireTicks() {
+    ui.slBar.querySelector('.rf-sl-ticks').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pack],[data-mv]');
+      if (!b) return;
+      const pack = b.dataset.pack != null, item = pack ? b.dataset.pack : b.dataset.mv;
+      const plan = pack ? null : movePlan(marks.shortlist(), cfg);
+      if (!pack && !plan) return;
+      ui.applyCfg(pack ? { ...cfg, packDone: packToggle(cfg, item) } : { ...cfg, moveDone: moveToggle(cfg, plan, item) });
+      ui.ticksOpen = true;
+      renderShortlist();
+      ui.slBar.querySelector(`[data-${pack ? 'pack' : 'mv'}="${CSS.escape(item)}"]`)?.focus();
+    });
   }
 
   const updateCounts = () => {
@@ -5686,7 +5767,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       ${r.buildingN || r.alsoListed?.length ? `<div class="rf-group rf-sec">${r.buildingN ? `<button type="button" class="rf-chip" data-act="bldg" title="Show only listings at ${esc(r.buildingAddr)}">${r.buildingN} in this building</button>` : ''}${r.alsoListed?.length
         ? ` <span class="rf-meta">Also listed ${r.alsoListed.map((x) => `${x.agency ? `by ${esc(x.agency)} ` : ''}${x.price ? `at ${esc(x.price)}` : ''}`).join('; ')}</span>` : ''}</div>` : ''}
       ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
-      ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
+      ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? ${esc(packLabel(cfg))}. <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => r.checks?.[k]).length}/${checks.length}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];
@@ -6217,7 +6298,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     lbarTick(!!nx);
     // Applications close soon and you haven't applied: say so above the fold, with a one-tap fix.
     const asks = askList(r, cfg.amenities);
-    const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
+    const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))} · ${esc(packLabel(cfg))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
     return `${due}${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks"><span class="rf-lbar-lab" aria-hidden="true">My rating</span>${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div>${asks.length ? `<div class="rf-lbar-info rf-lbar-ask"><span class="rf-lbar-lab">Ask the agent</span><ul>${asks.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}</details>`;

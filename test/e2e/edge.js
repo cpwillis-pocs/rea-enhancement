@@ -2166,6 +2166,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101'], 'only the close deadline needs action');
     assert.match(await page.textContent('.rf-item .rf-nudge'), /Applications close Fri,? 25 Sept?: apply\?/);
     assert.match(await page.textContent('.rf-item'), /Apply by Fri,? 25 Sept?/);
+    // The application pack: tick what's ready; the apply nudge counts it.
+    assert.equal(await page.textContent('.rf-sl-ticks summary'), 'Application pack: 0 of 5 ready');
+    await page.click('.rf-sl-ticks summary');
+    await page.click('.rf-sl-ticks [data-pack="Payslips"]');
+    assert.equal(await page.getAttribute('.rf-sl-ticks [data-pack="Payslips"]', 'aria-pressed'), 'true');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.pack), 'Payslips', 'focus stays on the chip');
+    assert.match(await page.textContent('.rf-item .rf-nudge'), /apply\? Pack: 1 of 5 ready\./);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
     const ics = fs.readFileSync(await dl.path(), 'utf8');
     assert.match(ics, /UID:146500101-ab@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260925/);
@@ -2179,6 +2186,11 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-status button:has-text("I\'ve given notice")');
     await waitStatus(page, /^Noted: notice given/);
     assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).noticeGiven, '2026-09-23');
+    // Notice given: the moving list takes the pack's place, and its next item leads.
+    assert.match(await page.textContent('.rf-sl-ticks summary'), /^Moving list 0\/7$/);
+    await page.click('.rf-sl-ticks [data-mv="Book removalists"]');
+    await waitStatus(page, /Approved for 2 Hall St\. Next on your moving list: Connect power and gas\./);
+    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).moveDone, '146500102|Book removalists');
     await page.click('.rf-item .rf-nudge [data-na=applied]');
     assert.equal((await marks(page))['146500101'].as, 'applied');
     await page.waitForFunction(() => !document.querySelector('.rf-item .rf-nudge'));
@@ -2315,7 +2327,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     };
     const page = await open(ctx, `${ORIGIN}/property-unit-nsw-bondi-146500101`, { route });
     await page.waitForSelector('#rf-lbar .rf-lbar-due');
-    assert.match(await page.textContent('#rf-lbar .rf-lbar-due'), /Apply by Fri,? 25 Sept?: Mark applied/);
+    assert.match(await page.textContent('#rf-lbar .rf-lbar-due'), /Apply by Fri,? 25 Sept? · Pack: 0 of 5 ready: Mark applied/);
     await page.click('#rf-lbar .rf-lbar-more summary');
     const info = await page.textContent('#rf-lbar .rf-lbar-more .rf-lbar-info');
     assert.match(info, /cash to move \$[\d,]+/, 'cash to move with the lease overlap');

@@ -23,7 +23,7 @@ The script is folded into `// #region` blocks (VS Code and most editors fold the
 4. **text heuristics**: amenities, heads-up, availability, apply-by, lease terms, size, taken.
 5. **rows**: `toRow()`, one row per listing.
 6. **filters and sorts**: `SETTINGS` (the Settings section's spec: markup, defaults, backup, value checks), `DEFAULT_CFG`, `sanitizeCfg`, sorts, inspection times, filters, chips, medians, scores, lease fit.
-7. **exports**: CSV/TSV columns, calendar (ICS) with reminders.
+7. **exports**: CSV/TSV columns, calendar (ICS) with reminders (fixed UIDs for lease end, notice, moving day `move@` and condition report `ecr@`), application pack and moving list (`packState`, `movePlan`).
 8. **share links**: shortlist in a URL fragment, re-validated on the way in.
 9. **health**: fill-rate canary for REA drift.
 10. **views**: plan, map, market and compare, then the `module.exports` guard.
