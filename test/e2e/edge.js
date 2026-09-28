@@ -723,6 +723,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.getAttribute('.rf-market-btn', 'aria-pressed'), 'true');
     assert.ok((await page.$$('.rf-market tbody tr')).length >= 2, 'bed groups');
     assert.match(await page.textContent('.rf-market'), /By agency, in these listings/, 'fixture agencies compared');
+    const ag = await page.getAttribute('.rf-market [data-market-ag]', 'data-market-ag');
+    await page.click('.rf-market [data-market-ag]');
+    await waitStatus(page, new RegExp(`^Hid every listing from ${ag}`));
+    const hidden = () => page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).ag || {}));
+    assert.deepEqual(await hidden(), [ag], 'agency hidden from the market view');
+    await page.click('.rf-status .rf-undo');
+    assert.deepEqual(await hidden(), [], 'and Undo brings it back');
     await page.focus('.rf-market-btn'); await page.keyboard.press('m');
     assert.ok(await page.$('.rf-item'), 'm toggles back to the list');
     await page.keyboard.press('m'); await page.waitForSelector('.rf-market table');

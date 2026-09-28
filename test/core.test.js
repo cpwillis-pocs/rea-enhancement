@@ -719,6 +719,8 @@ test('market: agency patterns count drops, relists, taken and days listed; only 
     { agency: 'Ray White', n: 2, dropped: 1, relisted: 0, taken: 1, medianDays: 15 },
   ], 'a rise is not a drop; one-listing agencies left out');
   assert.match(core.marketHtml(m), /By agency, in these listings[\s\S]*not a rating of the agency/);
+  const rec = core.agencyRecord([{ agency: 'Ray White', appStatus: 'approved' }]);
+  assert.match(core.marketHtml(m, '', { records: rec }), /<th scope="row">Ray White<\/th>(?:<td>[^<]*<\/td>){5}<td>you: 1 applied, 1 approved<\/td><td><button type="button" class="rf-btn sec" data-market-ag="Ray White" aria-label="Hide every listing from Ray White">/);
   assert.deepEqual(core.marketStats(rows.slice(0, 2), now).byAgency, [], 'one agency: nothing to compare');
   assert.doesNotMatch(core.marketHtml(core.marketStats(rows.slice(0, 2), now)), /By agency/);
 });
@@ -1139,6 +1141,10 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   for (const t of ['Applications close Mon 1 Sep', 'Applications closed 20/9', 'Applications close Fri 3 Oct 2025',
     'Applications close 48 hours after the open home, available 15 October', 'applications close 5pm Friday, lease starts 20 October']) assert.equal(core.applyByOf(t, now), '', t);
   assert.equal(core.applyByOf('Applications close Fri 3 Oct at 5pm.', now), '2026-10-03');
+  const listedAt = new Date(2026, 8, 26); // a Saturday
+  assert.equal(core.applyByOf('Applications due by 5pm Friday.', now, { listedAt }), '2026-10-02', 'a weekday alone: the first after it was listed');
+  assert.equal(core.applyByOf('Applications due by 5pm Friday.', now), '', 'not guessed without a listed date');
+  assert.equal(core.applyByOf('Applications close Friday', now, { listedAt: new Date(2026, 8, 1) }), '', 'that Friday has passed');
   const soon = { applyBy: '2026-09-30' };
   for (const dead of [{ gone: true }, { taken: 'leased' }, { hidden: true }, { appStatus: 'declined' }]) assert.equal(core.needsAction({ ...soon, ...dead }, +now), '', JSON.stringify(dead));
   assert.equal(core.needsAction({ ...soon, hidden: true, resurfaced: true }, +now), 'applyby', 'a resurfaced one is on show');

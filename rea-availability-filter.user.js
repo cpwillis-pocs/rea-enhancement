@@ -1595,13 +1595,22 @@
   // YYYY-MM-DD ('' when the text doesn't give one). Not "close to shops": the word must follow
   // "applications", or be "closing date".
   const APPLY_BY_G = /\b(?:applications?|apps)\s+(?:close[sd]?|closing|are due|due|must be (?:in|submitted|received|lodged))\b|\bclosing date(?:\s+for\s+applications?)?\b/gi;
-  const applyByOf = (text, now = new Date()) => {
+  // A weekday alone ("due by 5pm Friday") is the first such day on or after `listedAt` (REA's
+  // listed date): never counted from today, which would slide the deadline forward every week.
+  const WEEKDAY_ONLY = /^(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\s+)?(?:on\s+|this\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm))?\s*$/i;
+  const applyByOf = (text, now = new Date(), { listedAt = null } = {}) => {
     const src = String(text || '');
     APPLY_BY_G.lastIndex = 0;
     for (let m; (m = APPLY_BY_G.exec(src));) {
       const tail = src.slice(m.index + m[0].length, m.index + m[0].length + 48).replace(/^[\s:,-]*(?:(?:by|on|is|at|before|this|the|of)\s+)*/i, '');
       if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun)/i.test(tail)) continue;
-      const d = parseAvail(`Available ${tail.split(/[.;,\n]|\s[-–]\s/)[0]}`, now, { keepPast: true }); // this clause only: not "…, lease starts 20 October"
+      const clause = tail.split(/[.;,\n]|\s[-–]\s/)[0].trim(); // this clause only: not "…, lease starts 20 October"
+      let d = parseAvail(`Available ${clause}`, now, { keepPast: true });
+      const wd = !d && clause.match(WEEKDAY_ONLY);
+      if (wd && listedAt instanceof Date && !isNaN(listedAt)) {
+        d = startOfDay(listedAt);
+        d.setDate(d.getDate() + ((dayOf(wd[1]) - d.getDay() + 7) % 7));
+      }
       if (d && d < startOfDay(now)) return ''; // closed already: nothing to nudge
       if (d) return ymdLocal(d);
     }
@@ -1851,7 +1860,7 @@
     const said = [row.headline, str(listing.description), ...row.features].join(' ');
     row.watch = watchOf(said).join(',');
     row.applyVia = applyViaOf(said);
-    row.applyBy = applyByOf(said);
+    row.applyBy = applyByOf(said, undefined, { listedAt: row.listed });
     row.taken = takenOf(row.headline, str(listing.description));
     row.byAppt = !row.inspections.length && byApptOf(said);
     row.lease = leaseCode(leaseTermOf(said));
@@ -3093,7 +3102,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       <div class="rf-meta rf-map-key"><span class="rf-dot-lo">●</span> below the median · <span class="rf-dot-mid">●</span> near it · <span class="rf-dot-hi">●</span> above · <span class="rf-dot-na">●</span> no median · larger: shortlisted · ■ your places. Straight lines, no streets.</div></div>`;
   }
 
-  function marketHtml(m, trend = '') {
+  // `records`: your own applications per agency (agencyRecord), shown beside the counts.
+  function marketHtml(m, trend = '', { records = null } = {}) {
     const $ = (v) => (v == null ? '–' : money(v));
     const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
     const top = Math.max(1, ...m.byWeek.map((w) => w.n));
@@ -3105,8 +3115,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         <td>${range(g.p25, g.p75)}</td><td>${range(g.min, g.max)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>
       ${m.bySuburb.length ? `<div class="rf-market-t"><table><caption>By suburb</caption><thead><tr><th scope="col">Suburb</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-      ${m.byAgency?.length ? `<div class="rf-market-t"><table><caption>By agency, in these listings</caption><thead><tr><th scope="col">Agency</th><th scope="col">Listings</th><th scope="col">Rent dropped</th><th scope="col">Relisted</th><th scope="col">Says taken</th><th scope="col">Median days listed</th></tr></thead>
-      <tbody>${m.byAgency.map((g) => `<tr><th scope="row">${esc(g.agency)}</th><td>${g.n}</td><td>${g.dropped}</td><td>${g.relisted}</td><td>${g.taken}</td><td>${g.medianDays ?? '–'}</td></tr>`).join('')}</tbody></table>
+      ${m.byAgency?.length ? `<div class="rf-market-t"><table><caption>By agency, in these listings</caption><thead><tr><th scope="col">Agency</th><th scope="col">Listings</th><th scope="col">Rent dropped</th><th scope="col">Relisted</th><th scope="col">Says taken</th><th scope="col">Median days listed</th>${records ? '<th scope="col">Your applications</th>' : ''}<th scope="col"><span class="rf-sr">Hide</span></th></tr></thead>
+      <tbody>${m.byAgency.map((g) => `<tr><th scope="row">${esc(g.agency)}</th><td>${g.n}</td><td>${g.dropped}</td><td>${g.relisted}</td><td>${g.taken}</td><td>${g.medianDays ?? '–'}</td>${records ? `<td>${esc(recordText(records.get(agencyKey(g.agency)))) || '–'}</td>` : ''}<td><button type="button" class="rf-btn sec" data-market-ag="${esc(g.agency)}" aria-label="Hide every listing from ${esc(g.agency)}">Hide</button></td></tr>`).join('')}</tbody></table>
       <div class="rf-meta">Counts from the listings shown, not a rating of the agency. Days listed are from REA's listed date, or when this browser first saw the listing.</div></div>` : ''}
       <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
         const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
@@ -3440,6 +3450,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   #rf-toast{right:20px;bottom:72px;max-width:min(360px,calc(100vw - 32px))}
   #rf-toast button{font:600 12px system-ui,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);cursor:pointer}
   #rf-remind{right:20px;bottom:72px;gap:8px;max-width:min(340px,calc(100vw - 32px))}
+  .rf-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .rf-whytags{margin:0 9px 8px 124px}.rf-whytags ul{margin:0;padding-left:18px}.rf-whytags li{margin:2px 0}
   .rf-set-help{display:block;margin:-4px 0 6px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
@@ -4271,6 +4282,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (e.target.closest('.rf-more-btn')) return renderMore();
     const pin = e.target.closest('[data-map-id]');
     if (pin) return ui.mapPick?.(pin.dataset.mapId);
+    const hideAg = e.target.closest('[data-market-ag]');
+    if (hideAg) { // market view: hide an agency's listings, with Undo
+      const name = hideAg.dataset.marketAg;
+      marks.toggleAgency(name);
+      refreshMarks();
+      return offerUndo(`Hid every listing from ${name}.`, () => { marks.toggleAgency(name); refreshMarks(); });
+    }
     const week = e.target.closest('[data-week]'); // market view, map and the inspection planner live in the list too
     if (week) return ui.pickWeek?.(week);
     const plan = e.target.closest('[data-plan-ics]');
@@ -5255,7 +5273,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     if (ui.mapOn) ui.list.innerHTML = mapHtml(rows, cfg);
-    else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : ''); else paintList(rows);
+    else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : '', { records: agencyRecord(marks.shortlist()) }); else paintList(rows);
     toListTop();
   }
 
