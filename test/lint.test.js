@@ -113,3 +113,14 @@ test('lint keeps #regions flat, closed and in step with the ARCHITECTURE section
   assert.match(r.stderr, /"Section index" lists config, stores.*keys.*; the script's regions are .*keyboard/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('lint wants every storage key in the ARCHITECTURE storage table', () => {
+  const dir = copy();
+  fs.mkdirSync(path.join(dir, 'docs'));
+  for (const f of ['docs/ARCHITECTURE.md', 'docs/ROADMAP.md']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
+  edit(dir, (s) => s.replace("const ICS_SENT_KEY = `${TOOL_PREFIX}ics/v1`;", "const ICS_SENT_KEY = `${TOOL_PREFIX}ics/v1`, NEW_KEY = `${TOOL_PREFIX}secret-new/v1`;"));
+  const r = lint(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /storage key "secret-new\/v1" isn't in docs\/ARCHITECTURE\.md/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

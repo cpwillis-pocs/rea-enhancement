@@ -1952,6 +1952,7 @@
       // rather than reading page 1 twenty times.
       const got = rowsFrom(results);
       if (page > 1 && got.length && got.every((r) => ids.has(r.id))) { paging = 'repeat'; break; }
+      if (page > 1 && !got.length) { paging = 'empty'; break; } // the page count promised more: don't read on through blanks
       const pages = results.pagination?.maxPageNumberAvailable;
       if (page === 1 && !pages && got.length >= PAGE_FULL) paging = 'missing';
       total = pages || 1;
@@ -5742,6 +5743,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
       setWarn('format', ''); // every page read: an earlier odd page was a one-off
       if (res.paging) formatWarn(res.paging === 'repeat' ? "A later results page repeated the first, so the search stopped there: REA may have changed how it pages results."
+        : res.paging === 'empty' ? "A later results page came back empty, so the search stopped there: REA may have changed how it pages results."
         : "REA's page count wasn't found, so only the first page was read: REA may have changed how it pages results.");
       store.set(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0));
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;

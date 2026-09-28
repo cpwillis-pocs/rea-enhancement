@@ -88,6 +88,14 @@ if (fs.existsSync(archPath)) {
     if (listed.join('|') !== names.join('|')) err(`docs/ARCHITECTURE.md "Section index" lists ${listed.join(', ') || 'nothing'}; the script's regions are ${names.join(', ')}`);
   }
 }
+// Every storage key the script builds from TOOL_PREFIX is in ARCHITECTURE's storage table, so a
+// new one can't ship undocumented (PRIVACY.md is reviewed with it).
+if (fs.existsSync(archPath)) {
+  const arch = fs.readFileSync(archPath, 'utf8');
+  for (const k of new Set([...src.matchAll(/`\$\{TOOL_PREFIX\}([^`$]+)`/g)].map((m) => m[1]))) {
+    if (!arch.includes(`\`${k}\``) && !arch.includes(`\`${k}<`) && !arch.includes(`\`${k}*`)) err(`storage key "${k}" isn't in docs/ARCHITECTURE.md's storage table`);
+  }
+}
 const engines = JSON.parse(read('package.json')).engines?.node;
 if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"; CI tests Node 20, 22 and 24`);
 

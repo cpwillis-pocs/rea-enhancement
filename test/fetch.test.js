@@ -67,6 +67,10 @@ test('fetchAllPages: stops when REA repeats a page, says when the page count is 
   assert.equal(m.paging, 'missing');
   const one = await core.fetchAllPages(BASE, () => {}, { fetchImpl: async () => resp(200, page(results({ exact: [listing({ id: 'x' })] }))), wait: noWait });
   assert.equal(one.paging, undefined, 'a short single page is just a small search');
+  let k = 0;
+  const empty = await core.fetchAllPages(BASE, () => {}, { fetchImpl: async () => (k++ ? resp(200, page(results({ exact: [], maxPage: 5 }))) : resp(200, page(results({ exact: [listing({ id: 'e1' })], maxPage: 5 })))), wait: noWait });
+  assert.equal(empty.paging, 'empty');
+  assert.equal(k, 2, 'stopped at the empty page');
 });
 
 test('fetchAllPages: ignores seed from a different search', async () => {
