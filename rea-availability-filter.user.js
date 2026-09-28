@@ -3562,6 +3562,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-more [data-forget]{color:var(--rf-err)}
   .rf-more .rf-sect{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--rf-line);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--rf-fg)}
   .rf-more .rf-sect:first-of-type{border-top:0;padding-top:0}
+  .rf-ck-more{margin:0 9px 6px 124px} .rf-ck-more>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)}
+  .rf-ck-more .rf-checks{margin-left:0}
   .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
@@ -3633,7 +3635,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-med.up{color:var(--rf-up)}
   .rf-app{display:flex;align-items:center;gap:6px;margin:-2px 9px 8px 124px;font-size:12px;color:var(--rf-muted)}
   .rf-app select{font:12px system-ui,sans-serif;padding:3px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
-  .rf-sl-q{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:130px}
+  .rf-sl-q{font:13px system-ui,sans-serif;padding:7px 8px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);flex:1 1 100%;min-width:0;order:-1} /* first and full width: the bar's other controls wrap under it */
   .rf-sl-filter{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-empty{padding:28px 16px;text-align:center;color:var(--rf-soft)}
   [data-rf-id][data-rf-pos]{position:relative}
@@ -3679,7 +3681,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   @media (max-width:480px){ #rf-launch{right:12px;bottom:12px} .rf-grid3{grid-template-columns:repeat(2,1fr)}
     .rf-dates{grid-template-columns:1fr 1fr} .rf-dates>label:last-child{grid-column:1/-1} .rf-controls{max-height:48vh}
     .rf-actions{flex-wrap:wrap} .rf-actions .rf-bulk{flex:1 1 100%}
-    .rf-acts,.rf-note,.rf-note-edit,.rf-app,.rf-group,.rf-nudge,.rf-checks,.rf-whytags{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
+    .rf-acts,.rf-note,.rf-note-edit,.rf-app,.rf-group,.rf-nudge,.rf-checks,.rf-whytags,.rf-ck-more{margin-left:9px} .rf-note-edit{width:calc(100% - 18px)}
     .rf-weights{grid-template-columns:repeat(2,minmax(0,1fr))}
     .rf-card{grid-template-columns:88px 1fr} .rf-card img{width:88px;height:66px}
     .rf-controls .rf-sort{flex:1 1 100%} .rf-menu-list{left:0;right:auto}
@@ -4432,6 +4434,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // Clicks inside a listing (shortlist, hide, note, status, checklist, ⋯ menu…), delegated from the
   // list. `write`/`onChange` put a setting into the form and apply it (building, anchor, places).
   function wireList(panel, { write, onChange }) {
+  ui.list.addEventListener('toggle', (e) => { // remember which checklists you opened or closed
+    if (!e.target.matches?.('.rf-ck-more')) return;
+    const id = e.target.closest('.rf-item')?.dataset.id;
+    if (id) (ui.ckOpen ||= new Set())[e.target.open ? 'add' : 'delete'](id);
+  }, true);
   ui.list.addEventListener('click', (e) => {
     if (e.target.closest('.rf-more-btn')) return renderMore();
     const pin = e.target.closest('[data-map-id]');
@@ -5540,6 +5547,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return parts.length ? `<div class="rf-meta">${parts.join(' · ')}</div>` : '';
   }
 
+  // A shortlisted listing's checklist folds away until it matters: open around an inspection, once
+  // ticked, or when you opened it (kept across redraws).
+  const ckOpen = (r) => r.appStatus === 'to inspect' || r.appStatus === 'inspected' || !!(r.checks && Object.keys(r.checks).length) || !!ui.ckOpen?.has(r.id);
   // Tags are labels, or [label, why] for a per-tag tooltip.
   const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => (Array.isArray(t)
     ? `<span${t[1] ? ` title="${esc(t[1])}"` : ''}>${esc(t[0])}</span>` : `<span>${esc(t)}</span>`)).join('')}</div>` : '');
@@ -5584,11 +5594,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
       ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
-      ${r.starred && sl ? `<div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
+      ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => r.checks?.[k]).length}/${checks.length}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];
         return checkBtn(k, v, 'class="rf-chip"');
-      }).join('')}</div>` : ''}
-      ${r.starred && sl ? `<div class="rf-app">${ratingHtml(r, 'data-act="rate"')}</div>` : ''}
+      }).join('')}</div></details>` : ''}
+      ${r.starred && sl ? `<div class="rf-app"><span class="rf-meta" aria-hidden="true">My rating</span> ${ratingHtml(r, 'data-act="rate"')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">

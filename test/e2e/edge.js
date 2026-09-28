@@ -1017,6 +1017,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const id = await page.getAttribute('.rf-item', 'data-id');
     await page.click(`.rf-item[data-id="${id}"] [data-act=s]`);
     await page.click('[data-view=shortlist]');
+    assert.equal(await page.$eval(`.rf-item[data-id="${id}"] .rf-ck-more`, (d) => d.open), false, 'checklist folded until it matters');
+    await page.click(`.rf-item[data-id="${id}"] .rf-ck-more summary`);
     await page.click(`.rf-item[data-id="${id}"] [data-ck="Natural light"]`);
     await page.click(`.rf-item[data-id="${id}"] [data-ck="Noise"]`); await page.click(`.rf-item[data-id="${id}"] [data-ck="Noise"]`);
     assert.equal(await page.getAttribute(`.rf-item[data-id="${id}"] [data-ck="Natural light"]`, 'data-state'), 'yes');
