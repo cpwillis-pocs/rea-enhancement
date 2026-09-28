@@ -55,11 +55,11 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 14;
+  const ROWS_VERSION = 14; // bump when toRow() shape changes
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
-  const ROW_RUNTIME = ['_worst', '_worstFor', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
+  const ROW_RUNTIME = ['_worst', '_worstFor', 'rating', 'fit', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
-    'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope', 'buildingN', 'buildingAddr', 'alsoListed']; // bump when toRow() shape changes
+    'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope', 'buildingN', 'buildingAddr', 'alsoListed'];
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
   const ROW_INFINITE = ['priceNum', 'ppb', 'upfront', 'bondNum']; // "unknown" numbers held as Infinity
   const ROWS_TTL_MS = 10 * 60 * 1000;
@@ -4231,7 +4231,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     item.dataset.rv = on ? '1' : '';
   };
   const listKeys = (e) => {
-    const items = [...ui.list.querySelectorAll('.rf-item')];
+    const items = listItems();
     if (!items.length) return false;
     const cur = document.activeElement?.closest?.('.rf-item');
     const i = cur ? items.indexOf(cur) : -1;
@@ -4256,8 +4256,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       case 'PageUp': move(i < 0 ? 0 : -5); return true;
       case 'g': case 'Home': items[0].focus(); items[0].scrollIntoView({ block: 'nearest' }); return true;
       case 'G': case 'End': { // the rest render first (capped), then the last listing
-        for (let n = 0; n < 20 && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
-        const all = ui.list.querySelectorAll('.rf-item'), last = all[all.length - 1];
+        for (let n = 0; n < 20 && moreBtn(); n++) renderMore();
+        const all = listItems(), last = all[all.length - 1];
         last.focus(); last.scrollIntoView({ block: 'nearest' }); return true;
       }
       case '1': case '2': case '3': case '4': case '5': { // application status of a shortlisted listing
@@ -4778,7 +4778,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     // rebuilt when that changes.
     if (typeof IntersectionObserver === 'function') {
       let io = null;
-      const observeMore = () => { if (!io) return; io.disconnect(); const b = ui.list.querySelector(':scope > .rf-more-btn'); if (b) io.observe(b); };
+      const observeMore = () => { if (!io) return; io.disconnect(); const b = moreBtn(); if (b) io.observe(b); };
       ui.watchMore = () => {
         io?.disconnect();
         io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting && x.target.isConnected)) renderMore(); }, { root: listScroller(), rootMargin: '600px 0px' });
@@ -4944,7 +4944,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   function setView(view) {
     ui.closePeek?.();
     const place = (ui.place ||= {});
-    if (ui.view && ui.view !== view) place[ui.view] = { top: listScroller().scrollTop, shown: ui.list.querySelectorAll('.rf-item').length, sig: placeSig(ui.view) };
+    if (ui.view && ui.view !== view) place[ui.view] = { top: listScroller().scrollTop, shown: listItems().length, sig: placeSig(ui.view) };
     const back = place[view]?.sig === placeSig(view) ? place[view] : null;
     if (back) ui.keepShown = back.shown;
     ui.view = view;
@@ -4988,22 +4988,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       for (const [i, r] of rows.entries()) {
         if (pause.until()) throw pausedErr(pause.until());
         setStatus(`Re-checking ${i + 1} of ${rows.length}…`);
-        let res, html;
-        try { // body read inside too: a reset mid-download is one unreadable listing, not the end
-          for (let attempt = 0; ; attempt++) { // a 429 gets one wait and retry before it counts as a bot check
-            res = await fetch(r.url, { credentials: 'include', signal: withTimeout(ctrl.signal, FETCH_TIMEOUT_MS) });
-            if (res.status !== 429 || attempt) break;
-            const after = Math.min(+res.headers?.get?.('Retry-After') || 0, RETRY_AFTER_MAX_S);
-            await sleep(after > 0 ? after * 1000 : jitter(RETRY_BASE_MS * 2), ctrl.signal);
-          }
-          html = res.ok ? await res.text() : '';
-        } catch (err) {
+        let res, html, kind;
+        try { ({ res, html, kind } = await fetchListingPage(r.url, ctrl.signal)); } catch (err) { // a reset mid-download is one unreadable listing, not the end
           if (ctrl.signal.aborted) throw err;
           tally.unknown++; continue;
         }
         // A 403, a second 429, or a page with no data that isn't a removed listing stops everything.
-        const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
-        if (kind === 'format') formatWarn("A listing page loaded, but its data isn't where the script reads it: REA may have changed its format.");
         if (BOT_KINDS.has(kind)) {
           tripPause(botCheck(`Re-check: ${kind === 'challenge' ? 'challenge page' : `HTTP ${res.status}`}`));
           throw pausedErr(pause.until());
@@ -5131,7 +5121,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       sbs.map((a) => `<button type="button" class="rf-chip" data-unhide-sb="${esc(a)}" aria-label="Show suburb ${esc(a)} again">${esc(a)} (suburb) ×</button>`).join('');
     const c = marks.counts();
     ui.slCount.textContent = `(${c.starred})`;
-    for (const el of ui.panel.querySelectorAll('[data-count]')) el.textContent = `(${c[el.dataset.count]})`;
+    for (const el of (ui.countEls ||= [...ui.panel.querySelectorAll('[data-count]')])) el.textContent = `(${c[el.dataset.count]})`;
   };
 
   // Inline note editor; Enter saves, Shift+Enter newline, Esc cancels (without closing the drawer).
@@ -5174,7 +5164,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     knownVer++;
     updateCounts();
     const scroller = listScroller(), top = scroller.scrollTop;
-    const shown = ui.list.querySelectorAll('.rf-item').length;
+    const shown = listItems().length;
     ui.keepShown = shown; // re-render as many as were showing, in one pass
     if (ui.view === 'shortlist') renderShortlist();
     else if (cache) showResults();
@@ -5341,7 +5331,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   // (and focus). Anything else, or most items changed, is one innerHTML.
   const paintList = (rows) => {
     const n = Math.max(RENDER_CHUNK, ui.keepShown || 0);
-    const els = ui.list.querySelectorAll(':scope > .rf-item');
+    const els = listItems();
     const only = ui.onlyIds;
     if (only && els.length === Math.min(n, rows.length) && rows.length === ui.lastPaintTotal && [...els].every((el, i) => el._rf?.id === rows[i].id)) {
       els.forEach((el, i) => {
@@ -5363,10 +5353,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const kept = parts.filter((p) => byId.get(p.id)?._rf.html === p.html).length;
     if (kept < parts.length / 2) {
       ui.list.innerHTML = parts.map((p) => p.html).join('') + moreHtml(rows.length - n);
-      ui.list.querySelectorAll(':scope > .rf-item').forEach((el, i) => { el._rf = parts[i]; });
+      listItems().forEach((el, i) => { el._rf = parts[i]; });
       return numberItems(rows.length);
     }
-    ui.list.querySelector(':scope > .rf-more-btn')?.remove();
+    moreBtn()?.remove();
     // Gone ones out and changed ones swapped where they stand first, so the walk below moves
     // nothing when the order is unchanged (moving a node would blur what's focused in it).
     const tpl = document.createElement('template');
@@ -5389,9 +5379,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     numberItems(rows.length);
     ui.list.insertAdjacentHTML('beforeend', moreHtml(rows.length - n));
   };
+  // The list's items and its "more" button are its direct children (the button last): walking the
+  // children beats a selector query over every listing's subtree on each click.
+  const listItems = () => { const out = []; for (const el of ui.list.children) if (el.classList.contains('rf-item')) out.push(el); return out; };
+  const moreBtn = () => { const el = ui.list.lastElementChild; return el?.classList.contains('rf-more-btn') ? el : null; };
   // Position in the list is set here, after the markup lands, so an item's markup doesn't change
   // when one above it goes (and the keyed paint can keep its node).
-  const numberItems = (total) => ui.list.querySelectorAll(':scope > .rf-item').forEach((el, i) => {
+  const numberItems = (total) => listItems().forEach((el, i) => {
     const pos = String(i + 1), set = String(total);
     if (el.getAttribute('aria-posinset') !== pos) el.setAttribute('aria-posinset', pos);
     if (el.getAttribute('aria-setsize') !== set) el.setAttribute('aria-setsize', set);
@@ -5399,11 +5393,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (old !== lab) el.setAttribute('aria-label', lab);
   });
   function renderMore() {
-    const shown = ui.list.querySelectorAll('.rf-item').length;
+    const shown = listItems().length;
     ui.list.querySelector('.rf-more-btn')?.remove();
     const parts = itemParts(ui.rows.slice(shown, shown + RENDER_CHUNK));
     ui.list.insertAdjacentHTML('beforeend', parts.map((p) => p.html).join('') + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
-    const els = ui.list.querySelectorAll(':scope > .rf-item');
+    const els = listItems();
     parts.forEach((p, i) => { if (els[shown + i]) els[shown + i]._rf = p; });
     numberItems(ui.rows.length);
   }
@@ -5623,7 +5617,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     placeTimer = setTimeout(() => {
       const slot = placeSlot();
       if (!slot || ui.panel.hidden || (ui.view === 'shortlist' && (ui.planDay || ui.compare))) return;
-      const items = [...ui.list.querySelectorAll('.rf-item')];
+      const items = listItems();
       const cur = document.activeElement?.closest?.('.rf-item');
       const edge = ui.panel.classList.contains('rf-full') ? ui.list.getBoundingClientRect().top : ui.status.getBoundingClientRect().bottom;
       const at = cur && ui.list.contains(cur) ? cur : items.find((el) => el.getBoundingClientRect().bottom > edge + 8);
@@ -5652,7 +5646,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     return !!p && p.sig === placeFor('shortlist') && goToPlace(p);
   }
   function goToPlace(p) {
-    for (let n = 0; n < 20 && ui.list.querySelectorAll('.rf-item').length < p.shown && ui.list.querySelector(':scope > .rf-more-btn'); n++) renderMore();
+    for (let n = 0; n < 20 && listItems().length < p.shown && moreBtn(); n++) renderMore();
     const el = itemEl(p.id);
     if (!el) return false;
     el.scrollIntoView({ block: 'start' });
@@ -5889,6 +5883,21 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const lbarMin = { get: () => lbarKey.get() === '1', set: (v) => (v ? lbarKey.set('1') : lbarKey.clear()) };
   // #endregion
   // #region listing bar
+  // One listing page for Re-check and the listing bar: a 429 gets one wait and retry before it
+  // counts as a bot check; the body is read here too; a format change is reported once here.
+  async function fetchListingPage(url, signal) {
+    let res;
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(url, { credentials: 'include', signal: withTimeout(signal, FETCH_TIMEOUT_MS) });
+      if (res.status !== 429 || attempt) break;
+      const after = Math.min(+res.headers?.get?.('Retry-After') || 0, RETRY_AFTER_MAX_S);
+      await sleep(after > 0 ? after * 1000 : jitter(RETRY_BASE_MS * 2), signal);
+    }
+    const html = res.ok ? await res.text() : '';
+    const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
+    if (kind === 'format') formatWarn("A listing page loaded, but its data isn't where the script reads it: REA may have changed its format.");
+    return { res, html, kind };
+  }
   function renderListingBar({ onlyIfMoved = false } = {}) {
     let bar = document.getElementById('rf-lbar');
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
@@ -5927,12 +5936,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
     if (r.partial && bar._fetching !== id && !pause.until()) {
       bar._fetching = id;
-      fetch(location.href, { credentials: 'include', signal: withTimeout(null, FETCH_TIMEOUT_MS) })
-        .then(async (res) => {
-          const html = res.ok ? await res.text() : '';
-          const kind = classifyPage({ status: res.status, html, redirectedTo: res.redirected ? res.url : '', listing: true });
+      fetchListingPage(location.href, null)
+        .then(({ html, kind }) => {
           if (BOT_KINDS.has(kind)) tripPause(botCheck(`listing page: ${kind}`));
-          if (kind === 'format') formatWarn("This listing page's data isn't where the script reads it: REA may have changed its format.");
           return kind === 'ok' ? html : '';
         })
         .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok') rawListingSample = out.listing; if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
@@ -6396,7 +6402,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         step('saved', renderSaved);
         step('remind', remindSaved);
         step('backup nudge', nudgeBackup);
-      step('safety copy', () => (typeof indexedDB === 'undefined' ? null : offerMirror()));
+        step('safety copy', () => (typeof indexedDB === 'undefined' ? null : offerMirror()));
         step('annotate', ensureVisiblePage);
         ui.panel.dataset.rfReady = '1'; // every startup step has run (tests wait on it)
         if (ui.openWhenReady) { ui.openWhenReady = false; ui.launch.click(); }
