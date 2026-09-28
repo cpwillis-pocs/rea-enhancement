@@ -2288,6 +2288,25 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 66. A redraw from another tab's change keeps focus where it was: the keyed paint swaps the
+  // changed item in place and moves no other node.
+  await block('66', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 6).map((x) => x.dataset.id));
+    await page.focus(`.rf-item[data-id="${ids[5]}"] [data-act=s]`);
+    const other = await ctx.newPage();
+    await other.route('**/*', serve()); await other.goto(SEARCH);
+    for (const [act, id] of [['star', ids[0]], ['hide', ids[1]]]) {
+      await other.evaluate(([a, i]) => { const k = 'rea-avail-filter/marks/v1', d = JSON.parse(localStorage.getItem(k) || '{"v":1,"m":{}}'); d.m[i] = { ...(d.m[i] || { f: 1, l: 1 }), ...(a === 'star' ? { s: 1, st: 1 } : { h: 1 }) }; localStorage.setItem(k, JSON.stringify(d)); }, [act, id]);
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => document.activeElement.closest('.rf-item')?.dataset.id), ids[5], `focus kept after another tab's ${act}`);
+    }
+    console.log('focus kept across redraws: ok');
+    await other.close(); await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

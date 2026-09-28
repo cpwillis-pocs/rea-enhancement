@@ -1150,6 +1150,8 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   assert.equal(core.applyByOf('Applications due by 5pm Friday.', now, { listedAt }), '2026-10-02', 'a weekday alone: the first after it was listed');
   assert.equal(core.applyByOf('Applications due by 5pm Friday.', now), '', 'not guessed without a listed date');
   assert.equal(core.applyByOf('Applications are due by COB Friday.', now, { listedAt }), '2026-10-02');
+  for (const [t, want] of [['Applications close Fri, 3 Oct', '2026-10-03'], ['Applications close Friday, 3 October 2026', '2026-10-03'], ['Applications close 3.10.2026', '2026-10-03'],
+    ['Applications close 5.30pm Friday 3 October', '2026-10-03'], ['Applications closed 1 Sep. Applications now close Friday 9 October', '2026-10-09']]) assert.equal(core.applyByOf(t, now, { listedAt }), want, t);
   assert.equal(core.applyByOf('Applications close midday Friday', now, { listedAt }), '2026-10-02');
   assert.equal(core.applyByOf('Applications close Friday', now, { listedAt: new Date(2026, 8, 1) }), '', 'that Friday has passed');
   const soon = { applyBy: '2026-09-30' };

@@ -1594,7 +1594,7 @@
   // "Applications close Fri 3 Oct", "closing date for applications: 3/10": the deadline as
   // YYYY-MM-DD ('' when the text doesn't give one). Not "close to shops": the word must follow
   // "applications", or be "closing date".
-  const APPLY_BY_G = /\b(?:applications?|apps)\s+(?:close[sd]?|closing|are due|due|must be (?:in|submitted|received|lodged))\b|\bclosing date(?:\s+for\s+applications?)?\b/gi;
+  const APPLY_BY_G = /\b(?:applications?|apps)\s+(?:(?:now|will)\s+)?(?:close[sd]?|closing|are due|due|must be (?:in|submitted|received|lodged))\b|\bclosing date(?:\s+for\s+applications?)?\b/gi;
   // A weekday alone ("due by 5pm Friday") is the first such day on or after `listedAt` (REA's
   // listed date): never counted from today, which would slide the deadline forward every week.
   const WEEKDAY_ONLY = /^(?:(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|cob|close of business|midday|noon)\s+)?(?:on\s+|this\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm))?\s*$/i;
@@ -1604,14 +1604,16 @@
     for (let m; (m = APPLY_BY_G.exec(src));) {
       const tail = src.slice(m.index + m[0].length, m.index + m[0].length + 48).replace(/^[\s:,-]*(?:(?:by|on|is|at|before|this|the|of)\s+)*/i, '');
       if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun|cob\b|close of business|midday|noon)/i.test(tail)) continue;
-      const clause = tail.split(/[.;,\n]|\s[-–]\s/)[0].trim(); // this clause only: not "…, lease starts 20 October"
+      // This clause only (not "…, lease starts 20 October"), but a comma after a weekday is part of
+      // the date ("Fri, 3 Oct"), and a dot between digits is a time or date ("5.30pm", "3.10.2026").
+      const clause = tail.replace(/^((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?),/i, '$1').split(/\.(?!\d)|[;,\n]|\s[-–]\s/)[0].trim();
       let d = parseAvail(`Available ${clause}`, now, { keepPast: true });
       const wd = !d && clause.match(WEEKDAY_ONLY);
       if (wd && listedAt instanceof Date && !isNaN(listedAt)) {
         d = startOfDay(listedAt);
         d.setDate(d.getDate() + ((dayOf(wd[1]) - d.getDay() + 7) % 7));
       }
-      if (d && d < startOfDay(now)) return ''; // closed already: nothing to nudge
+      if (d && d < startOfDay(now)) continue; // closed already: a later "now close …" may follow
       if (d) return ymdLocal(d);
     }
     return '';
@@ -5335,15 +5337,25 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return numberItems(rows.length);
     }
     ui.list.querySelector(':scope > .rf-more-btn')?.remove();
+    // Gone ones out and changed ones swapped where they stand first, so the walk below moves
+    // nothing when the order is unchanged (moving a node would blur what's focused in it).
     const tpl = document.createElement('template');
+    const want = new Set(parts.map((p) => p.id)), node = new Map();
+    for (const [id, el] of byId) if (!want.has(id)) el.remove();
+    for (const p of parts) {
+      const old = byId.get(p.id);
+      if (old && old._rf.html === p.html) { node.set(p.id, old); continue; }
+      tpl.innerHTML = p.html;
+      const el = tpl.content.firstElementChild;
+      el._rf = p;
+      if (old) old.replaceWith(el);
+      node.set(p.id, el);
+    }
     let at = ui.list.firstElementChild;
     for (const p of parts) {
-      let el = byId.get(p.id);
-      if (el && el._rf.html === p.html) byId.delete(p.id);
-      else { tpl.innerHTML = p.html; el = tpl.content.firstElementChild; el._rf = p; }
+      const el = node.get(p.id);
       if (el === at) at = at.nextElementSibling; else ui.list.insertBefore(el, at);
     }
-    for (const el of byId.values()) el.remove();
     numberItems(rows.length);
     ui.list.insertAdjacentHTML('beforeend', moreHtml(rows.length - n));
   };
