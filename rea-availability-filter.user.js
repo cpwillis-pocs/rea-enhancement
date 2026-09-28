@@ -2732,10 +2732,15 @@
   // Approved somewhere and not yet given notice: what's next (your notice date, whatever the
   // two-week window, and the other applications still waiting). null otherwise.
   const nextSteps = (rows, cfg, now = new Date()) => {
-    const won = rows.find((r) => r.appStatus === 'approved' && !r.gone);
-    if (!won || noticeGivenFor(leaseEndOf(cfg, now) || cfg.leaseEnd, cfg.noticeGiven)) return null;
+    const won = rows.find((r) => r.appStatus === 'approved'); // REA often takes it down once you're approved: still yours
+    if (!won) return null;
+    const end = leaseEndOf(cfg, now) || cfg.leaseEnd, today = ymdLocal(now);
+    // Given notice: for this lease, or (no lease end to tell by) within the last year.
+    const yearAgo = ymdLocal(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()));
+    if (end ? noticeGivenFor(end, cfg.noticeGiven) : isYmd(cfg.noticeGiven || '') && cfg.noticeGiven >= yearAgo) return null;
+    const by = cfg.periodic || (cfg.leaseEnd && cfg.leaseEnd < today) ? '' : noticeBy(cfg.leaseEnd, cfg.noticeDays); // a lease already over has no notice date
     const pending = rows.filter((r) => r !== won && r.appStatus === 'applied' && !deadEnd(r)).length;
-    return { r: won, by: cfg.periodic ? '' : noticeBy(cfg.leaseEnd, cfg.noticeDays), days: cfg.periodic ? Math.round(+cfg.noticeDays) || 0 : 0, pending };
+    return { r: won, by, days: cfg.periodic ? Math.round(+cfg.noticeDays) || 0 : 0, pending };
   };
   const toIcs = (rows, now = Date.now(), { alarm = 0, leaseEnd = '', noticeDays = 0, noticeGiven = '', followUps = false, prev = null, sent = null } = {}) => {
     // Minutes since 1970: each export's events outrank the last one's, so a session cancelled
@@ -2823,7 +2828,8 @@
         events.push(['BEGIN:VEVENT', `UID:${p.u}`, `DTSTAMP:${icsTime(now)}`, p.s, `SEQUENCE:${seq}`, 'STATUS:CANCELLED', 'SUMMARY:Cancelled: no longer on your shortlist', 'END:VEVENT']);
       }
     }
-    if (Array.isArray(sent)) sent.push(...live.map((e) => ({ u: uidOf(e), s: startOf(e) })).slice(0, ICS_SENT_MAX));
+    // Over the cap, the few reminders (lease end, notice, follow-ups, deadlines) are kept before inspections.
+    if (Array.isArray(sent)) sent.push(...live.map((e) => ({ u: uidOf(e), s: startOf(e) })).sort((a, b) => /;VALUE=DATE:/.test(b.s) - /;VALUE=DATE:/.test(a.s)).slice(0, ICS_SENT_MAX));
     if (!events.length) return '';
     return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//rea-enhancement//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR']
       .map(icsFold).join('\r\n') + '\r\n';
@@ -3157,7 +3163,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (!m) return '<div class="rf-market"><div class="rf-plan-head">None of these listings has a location, so there is nothing to map.</div></div>';
     const first = m.dots.find((d) => d.r.starred) || m.dots[0]; // one tab stop; arrows move between dots
     const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
-      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
+      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}${medianLabel(d.r) ? `, ${medianLabel(d.r)}` : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
     return `<div class="rf-market rf-map"><div class="rf-plan-head">${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
       <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
         ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
@@ -3621,6 +3627,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     #rf-panel [aria-pressed=true],#rf-lbar [aria-pressed=true],.rf-badge [aria-pressed=true]{forced-color-adjust:none;background:Highlight!important;color:HighlightText!important;border:1px solid Highlight!important}
     #rf-panel :focus-visible,#rf-lbar :focus-visible,.rf-badge :focus-visible{outline:2px solid Highlight!important;outline-offset:1px}
     #rf-launch{border:1px solid ButtonText}
+    .rf-bar{forced-color-adjust:none;background:Highlight!important} /* the market bars are drawn only with a background */
   }
   .rf-badge .rf-card-acts button:focus-visible{outline:2px solid #087a50!important;outline-offset:1px!important}
   .rf-badge .rf-b-now{background:#087a50!important}

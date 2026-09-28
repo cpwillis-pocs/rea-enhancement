@@ -48,8 +48,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
 
   // Each numbered scenario is a block: E2E_ONLY=24l,26 runs just those; a failure (or a page
   // error it caused) names its block; E2E_TIMES=1 prints each block's duration. E2E_JOBS=n runs
-  // n blocks at once (each has its own browser context), for a quicker local run; CI runs them
-  // one at a time.
+  // n blocks at once (each has its own browser context); CI runs three at a time (ci.yml).
   const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',').map((x) => x.trim()).filter(Boolean) : null;
   const jobs = Math.max(1, Math.min(8, +process.env.E2E_JOBS || 1));
   let current = '', ran = 0;

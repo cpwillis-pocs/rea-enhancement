@@ -1261,4 +1261,7 @@ test('nextSteps: approved somewhere and notice not given: your notice date and w
   assert.equal(core.nextSteps(rows, { ...cfg, noticeGiven: '2026-09-28' }, now), null, 'notice given: nothing next');
   assert.equal(core.nextSteps(rows.slice(1), cfg, now), null, 'not approved anywhere');
   assert.equal(core.nextSteps(rows, { ...cfg, periodic: true }, now).days, 21, 'periodic: your notice period');
+  assert.equal(core.nextSteps([{ appStatus: 'approved' }], { ...core.DEFAULT_CFG, noticeGiven: '2026-09-28' }, now), null, 'no lease end set: "I\'ve given notice" still dismisses it');
+  assert.equal(core.nextSteps([{ appStatus: 'approved' }], { ...cfg, leaseEnd: '2026-01-31' }, now).by, '', 'a lease already over has no notice date');
+  assert.ok(core.nextSteps([{ appStatus: 'approved', gone: true }], cfg, now), 'the approved listing taken down by REA is still yours');
 });
