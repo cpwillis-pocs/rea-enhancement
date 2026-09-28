@@ -3261,7 +3261,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
     };
     const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
-    const body = compareRows(cfg).filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!leaseEndOf(cfg)) && (label !== 'Cash to move' || !!leaseEndOf(cfg) || num(cfg.moveCosts) > 0)).map(([label, show, score]) => {
+    const body = compareRows(cfg).filter(([label, show]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!leaseEndOf(cfg)) && (label !== 'Cash to move' || !!leaseEndOf(cfg) || num(cfg.moveCosts) > 0)
+      && (['My rating', 'Status', 'Note'].includes(label) || rows.some((r) => show(r)))).map(([label, show, score]) => { // a row blank for all says nothing
       const b = score ? best(score) : null;
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
     }).join('');
@@ -3555,9 +3556,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   .rf-ask>span{flex:1 1 100%}
   .rf-check+.rf-set-help{padding-left:20px}
   .rf-warnbar .rf-warn-msg{flex:1 1 60%;min-width:0}
+  .rf-compare th[scope=row],.rf-market-t th[scope=row]{position:sticky;left:0;z-index:1;background:var(--rf-bg)} /* the label stays as the table scrolls sideways */
+  @media (max-width:480px){ .rf-compare th[scope=row]{max-width:96px;white-space:normal} }
   .rf-set-help{display:block;margin:2px 0 8px;font-size:12px;font-weight:400;color:var(--rf-muted);text-transform:none;letter-spacing:0}
   .rf-preset-name{flex:1 1 160px;min-width:0}
   .rf-lbar-edit{flex-basis:100%;min-height:54px;padding:6px 8px;font:inherit;color:var(--rf-fg);background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:6px;resize:vertical}
+  /* The minimise control is a small corner button, so it isn't read as a fifth action next to Hide. */
+  #rf-lbar:not(.rf-lbar-min){padding-right:34px}
+  #rf-lbar:not(.rf-lbar-min)>[data-l=min]{position:absolute;top:4px;right:4px;min-width:26px;min-height:26px;padding:0 6px;border:0;background:none;color:var(--rf-muted);font-size:16px;line-height:1}
+  @media (pointer: coarse){ #rf-lbar:not(.rf-lbar-min){padding-right:52px} #rf-lbar:not(.rf-lbar-min)>[data-l=min]{min-width:44px;min-height:44px;top:0;right:0} }
+  #rf-lbar .rf-lbar-due{flex-basis:100%;font-weight:700;color:var(--rf-err)}
+  #rf-lbar .rf-lbar-lab{font-size:12px;color:var(--rf-muted);margin-right:6px}
+  #rf-lbar .rf-lbar-more summary::before{content:'▸ '} #rf-lbar .rf-lbar-more[open] summary::before{content:'▾ '}
+  #rf-lbar .rf-lbar-more summary{list-style:none} #rf-lbar .rf-lbar-more summary::-webkit-details-marker{display:none}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
   #rf-lbar button,#rf-lbar select{font:600 13px system-ui,sans-serif;padding:6px 10px;border-radius:6px;border:1px solid var(--rf-line);background:var(--rf-sec);color:var(--rf-fg);cursor:pointer}
   #rf-lbar button[aria-pressed=true]{background:var(--rf-accent);border-color:var(--rf-accent);color:#fff}
@@ -6091,8 +6102,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     lbarTick(!!nx);
     // Applications close soon and you haven't applied: say so above the fold, with a one-tap fix.
     const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
-    return `${next}${due}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
-      <div class="rf-lbar-checks">${ratingHtml(r, 'data-l="rt"')}</div>
+    return `${due}${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
+      <div class="rf-lbar-checks"><span class="rf-lbar-lab" aria-hidden="true">My rating</span>${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div></details>`;
   }
   // The note is edited in the bar (multi-line, themed, read by screen readers as a labelled
