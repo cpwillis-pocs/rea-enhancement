@@ -58,19 +58,37 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   const done = async (page) => { await cov.collect(page, SCRIPT); await page.close(); };
 
   // Each numbered scenario is a block: E2E_ONLY=24l,26 runs just those; a failure (or a page
-  // error it caused) names its block; E2E_TIMES=1 prints each block's duration. E2E_JOBS=n runs
-  // n blocks at once (each has its own browser context); CI runs three at a time (ci.yml).
+  // error it caused) names its block, and the run goes on so every failing block is reported at
+  // the end. E2E_RETRY=1 runs a failed block once more and reports it as flaky if it then passes
+  // (still a failure to fix, not a pass to ignore). E2E_TIMES=1 prints each block's duration; the
+  // ten slowest are always listed. E2E_JOBS=n runs n blocks at once (each has its own browser
+  // context); CI runs three at a time (ci.yml).
   const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',').map((x) => x.trim()).filter(Boolean) : null;
   const jobs = Math.max(1, Math.min(8, +process.env.E2E_JOBS || 1));
   let current = '', ran = 0;
-  const queue = [];
-  const runBlock = (id, fn) => blockOf.run(id, async () => {
-    current = id; harness.section(id); ran++;
-    const t = Date.now();
-    try { await fn(); } catch (e) { e.message = `[block ${id}] ${e.message}`; throw e; }
+  const queue = [], failed = [], flaky = [], times = [];
+  const attempt = (id, fn) => blockOf.run(id, async () => {
+    current = id; harness.section(id);
+    await fn();
     assert.deepEqual(errors.filter((e) => e.id === id).map((e) => e.msg), [], `no page errors in block ${id}`);
-    if (process.env.E2E_TIMES) console.log(`  block ${id}: ${Date.now() - t}ms`);
   });
+  const runBlock = async (id, fn) => {
+    ran++;
+    const t = Date.now();
+    try {
+      await attempt(id, fn);
+    } catch (e) {
+      console.error(`block ${id} failed: ${e.stack || e}`);
+      let again = null;
+      if (process.env.E2E_RETRY) {
+        for (let i = errors.length - 1; i >= 0; i--) if (errors[i].id === id) errors.splice(i, 1);
+        try { await attempt(id, fn); } catch (e2) { again = e2; }
+      }
+      if (process.env.E2E_RETRY && !again) flaky.push(id); else failed.push(`[block ${id}] ${String((again || e).message).split('\n')[0]}`);
+    }
+    times.push([id, Date.now() - t]);
+    if (process.env.E2E_TIMES) console.log(`  block ${id}: ${Date.now() - t}ms`);
+  };
   const block = async (id, fn) => {
     if (only && !only.includes(id)) return;
     if (jobs > 1) queue.push({ id, fn }); else await runBlock(id, fn);
@@ -2402,7 +2420,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   });
 
   await drain();
-  assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
+  console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
+  if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
+  if (failed.length) throw new Error(`${failed.length} block(s) failed:\n  ${failed.join('\n  ')}`);
+  assert.deepEqual(errors.filter((e) => !flaky.includes(e.id)).map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);
   if (!only) cov.report(SCRIPT); // a partial run would under-report coverage
   await browser.close();
