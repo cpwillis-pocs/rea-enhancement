@@ -2,6 +2,36 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.33.0
+
+- **The calendar keeps up with your shortlist**:
+  - The Shortlist's calendar export remembers what it last sent (event IDs and start times only, no addresses). The next export cancels whatever dropped off: a listing you unshortlisted, a deadline the agent removed, a lease end you cleared.
+  - The open homes of a listing you declined, or that's taken, hidden or gone, go out cancelled too.
+  - Reminders moved to today don't set an alarm for yesterday.
+- **Periodic (month-to-month) lease**: tick it in Settings. Your lease then ends your notice period after you give notice (counted from today until you do), for lease fit, cash to move and the filters.
+- **Other moving costs** (Settings), such as removalists, cleaning and connections, are added to Cash to move, its sort and its filter.
+- **Next steps once approved**: the Shortlist leads with "Approved for …", your notice date (whatever the two-week window) and how many other applications are still waiting.
+- **The listing-page bar**:
+  - A deadline within three days shows above the fold with Mark applied.
+  - The details add cash to move and your record with that agency.
+  - Your record with each agency now shows on Results too.
+- **Paging changes caught**: if a later results page repeats the first (REA ignoring page numbers), the search stops there. If a full first page comes with no page count, it says only one page was read. Both come with Copy report.
+- Deadlines like "Applications close Fri, 3 Oct", "due 5.30pm Friday", "3.10.2026", "by COB Friday" and a later "now close …" after a passed one are all read. Inspection times like "Sat 10am-2" and "weekdays 6pm-9" are read too.
+- Every setting's explanation is text under it (Compact list and Calendar reminder were hover-only).
+- Fixed:
+  - Another tab's change moved every listing below the one it changed, which dropped keyboard focus. Now only the changed listing is swapped, in place.
+  - "5 star WELS rated" taps counted as water efficient again.
+  - The Market view's Hide on an agency already hidden (with Show hidden on) now says Unhide.
+  - A "notice given" date left over from an earlier lease no longer silences this one.
+  - A follow-up nudge no longer shows for a taken or hidden listing.
+  - The day plan's calendar sends a dead end's sessions as cancelled.
+  - Number settings are clamped when you leave the field, not while you type.
+- Faster, and smaller in storage:
+  - List actions find items from the list itself, and the count badges are cached: about 8 ms less per click with 1000 shown.
+  - Re-check and the listing bar share one listing-page fetch, so the bar gets the one-retry on a 429 too.
+  - Runtime values no longer go into the tab's results cache.
+- Internals: the export buttons' wiring moved out of `build()` (lint budget 480 → 470).
+
 ## 2.32.0
 
 - **Calendar reminders tidy themselves up**: once you apply, hear back, or a listing is taken or gone, re-importing the whole-list calendar takes its old Follow up and Applications close events out, the same way cancelled inspections already work. With a calendar reminder set, the all-day reminders alert at 9am the day before.

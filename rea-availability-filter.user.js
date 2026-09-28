@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.32.0
+// @version      2.33.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -5852,10 +5852,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.32.0', items: [
-    'Calendar reminders you no longer need come out on re-import, and alert the day before; a notice-to-vacate nudge on the Shortlist.',
-    'The day planner skips declined or taken places and respects your own inspection times; a Max cash to move filter.',
-    'Why these tags? in the ⋯ menu, and Settings explain each field in plain text.',
+  const WHATS_NEW = { version: '2.33.0', items: [
+    'The Shortlist calendar takes out what you drop, and a declined or taken listing\'s open homes.',
+    'Periodic leases and other moving costs in Settings; next steps once you\'re approved.',
+    'The listing-page bar shows a close deadline with Mark applied, cash to move and your record with the agency.',
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',

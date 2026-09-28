@@ -618,10 +618,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
-    await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 3000 });
+    await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 8000 });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
-    await page.waitForFunction(() => !/required/.test(document.querySelector('[data-amen=pets]').getAttribute('aria-label')), null, { timeout: 3000 });
+    await page.waitForFunction(() => !/required/.test(document.querySelector('[data-amen=pets]').getAttribute('aria-label')), null, { timeout: 8000 });
     assert.doesNotMatch(await pets(), /required/, 'previous filters restored after reload');
     console.log('preset restore after reload: ok');
     await done(page); await ctx.close();

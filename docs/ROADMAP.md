@@ -2,7 +2,7 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.32.0)
+## Where it stands (v2.33.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
@@ -15,7 +15,7 @@ The project went from a single-purpose availability-date filter (1.0.0) to a ful
 | **Returning** | Remembered and pinned searches with new / gone listings and a rent trend, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
 | **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Full keyboard control, dark mode (system, or set in Settings), phone layout, screen-reader labels (card buttons named per listing), High Contrast styles, a first-run welcome, badges and quick actions on REA's own cards, a bar on listing pages. |
 | **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a safety copy in IndexedDB, a size budget for remembered searches, a 10-minute pause after a bot check, a double-run guard, a one-time what's-new note after updates. |
-| **Project** | 216 unit tests (including shapes from `reaFilter.shape()`), 77 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, an optional local live check (`npm run live`), editor `#region`s with a checked Section index, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Project** | 221 unit tests (including shapes from `reaFilter.shape()`), 82 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, an optional local live check (`npm run live`), editor `#region`s with a checked Section index, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -50,7 +50,10 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 
 ## Ideas not built yet
 
-The 2.31.0 audit (its bugs, eleven ideas and the measured slow spots) shipped in 2.32.0 (see the [CHANGELOG](../CHANGELOG.md#2320)). Not done from it: a full FILTERS spec like SETTINGS (a consistency test guards the six places a filter touches instead), skipping the safety-copy write in tabs that only heard about a change (the wipe check runs on it), and the sub-millisecond items (the distance key string, sharing `prepRows` between `applyFilters` and `removedBy`, `evidenceOf`'s per-call RegExp, the snapshot save's second stringify).
+The 2.32.0 audit (its bugs, eleven ideas and the measured slow spots) shipped in 2.33.0 (see the [CHANGELOG](../CHANGELOG.md#2330)). Measured and still open:
+- The end of a 1000-listing search is one long task of about 165 ms (about 80 ms at a real 500). `adopt` takes 77 ms of it and `snaps.save` 56 ms. Deferring the save needs `adopt` split, because it uses the save's new/gone result.
+- `fitBudget`'s first full stringify is thrown away for any search over the budget: 6–12 ms at 500–1000 listings. Estimating the size from a sample of packed rows would avoid it.
+- A full FILTERS spec (a consistency test guards it for now).
 
 Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. Also still open: doing the end-of-search save in a later task. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
 
