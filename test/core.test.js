@@ -1167,6 +1167,8 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   assert.match(ics, /UID:146500001-ab@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/);
   assert.match(ics, /UID:146500002-fu@rea-enhancement\r\n(?:(?!END:VEVENT)[\s\S])*?TRIGGER:-PT15H/, 'live reminder alerts at 9am the day before');
   assert.doesNotMatch(ics.split('UID:146500001-fu')[1].split('END:VEVENT')[0], /VALARM/, 'no alarm on a cancelled one');
+  const overdue = core.toIcs([{ id: '146500009', address: '9 Z St', appStatus: 'applied', appAt: new Date(2026, 8, 1).getTime(), inspections: [] }], +now, { followUps: true, alarm: 60 });
+  assert.doesNotMatch(overdue, /VALARM/, 'moved to today: no alarm set for yesterday');
   const dead = core.toIcs([{ id: '146500003', address: '3 C St', appStatus: 'declined', inspections: [{ at: +now + 864e5, label: 'x' }] }], +now);
   assert.match(dead, /STATUS:CANCELLED\r\nSUMMARY:Cancelled: inspection 3 C St/, "a declined listing's open homes go out cancelled");
   assert.doesNotMatch(dead, /SUMMARY:Inspection:/);
@@ -1178,6 +1180,7 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   const cfg = { ...core.DEFAULT_CFG, leaseEnd: '2026-10-31', noticeDays: '21' };
   assert.deepEqual(core.noticeDue(cfg, now), { by: '2026-10-10', days: 12 });
   assert.equal(core.noticeDue({ ...cfg, noticeGiven: '2026-09-27' }, now), null);
+  assert.deepEqual(core.noticeDue({ ...cfg, noticeGiven: '2025-09-01' }, now), { by: '2026-10-10', days: 12 }, 'notice given for an earlier lease: still nudged');
   assert.equal(core.noticeDue({ ...cfg, leaseEnd: '2026-12-31' }, now), null, 'not yet');
   // Planner: dead ends left out and counted; sessions outside your times marked, never routed.
   const at = (h) => Date.UTC(2026, 8, 29, h - 10); // Sydney is UTC+10 in September

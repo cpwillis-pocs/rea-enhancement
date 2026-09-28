@@ -57,7 +57,7 @@
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
   const ROWS_VERSION = 14;
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
-  const ROW_RUNTIME = ['starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
+  const ROW_RUNTIME = ['_worst', '_worstFor', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
     'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope', 'buildingN', 'buildingAddr', 'alsoListed']; // bump when toRow() shape changes
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -279,7 +279,7 @@
     }
     return '';
   }; // an application with no answer after this long gets a "follow up?" nudge
-  const needsFollowUp = (r, now = Date.now()) => !r.gone && r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
+  const needsFollowUp = (r, now = Date.now()) => !deadEnd(r) && r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
   // Your track record per agency across the shortlist: { applied, approved, declined } by agency name.
   const agencyRecord = (rows) => {
     const out = new Map();
@@ -1501,7 +1501,7 @@
     { id: 'stepfree', label: 'Step-free', yes: 'Step-free', neg: /\bwalk[- ]up\b|\bstairs only\b|\bno lift\b|\bsplit[- ]level\b/,
       pos: /\bstep[- ]free\b|\bwheelchair (?:access(?:ible)?|friendly)\b|\blevel (?:entry|access)\b|\bno (?:stairs|steps)\b|\bsingle[- ](?:level|storey)\b/ },
     // Where tenants can only be charged for water if the home is water efficient (eg NSW, VIC).
-    { id: 'watereff', label: 'Water efficient', yes: 'Water efficient', gate: 'water', neg: /\b(?:not|non)[- ]water[- ]efficien|\b(?:does not|doesn't|do not|don't|fails? to|is not|isn't) (?:meet|comply with|compliant with|in compliance with)[^.]{0,30}water[- ]efficien|\bnot (?:compliant|in compliance) with[^.]{0,20}water[- ]efficien/,
+    { id: 'watereff', label: 'Water efficient', yes: 'Water efficient', gate: ['water', 'wels'], neg: /\b(?:not|non)[- ]water[- ]efficien|\b(?:does not|doesn't|do not|don't|fails? to|is not|isn't) (?:meet|comply with|compliant with|in compliance with)[^.]{0,30}water[- ]efficien|\bnot (?:compliant|in compliance) with[^.]{0,20}water[- ]efficien/,
       pos: /\bwater[- ]efficien(?:t|cy)(?: (?:compliant|standards|certified|devices|fixtures))?\b|\b(?:[3-6]|three|four|five|six)[- ]star (?:wels|water)\b|\bwater[- ]saving (?:fixtures|devices|shower ?heads?|taps)\b/ },
   ];
   // "X: No" per amenity, built once.
@@ -1512,7 +1512,7 @@
   const amenitiesOf = (row) => {
     const text = `${(row.features || []).join(' | ')} | ${row.amenText ?? row.text ?? ''}`.toLowerCase();
     const kv = KV_NO_GATE.test(text); // every kvNo needs this, and most listings have none
-    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.gate && !text.includes(a.gate) ? null
+    return Object.fromEntries(AMENITIES.map((a) => [a.id, a.gate && ![].concat(a.gate).some((g) => text.includes(g)) ? null
       : a.neg.test(text) ? 'no' : !a.pos.test(text) ? null : kv && a.kvNo.test(text) ? 'no' : 'yes'])); // kvNo only matches where pos does
   };
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
@@ -2699,9 +2699,16 @@
   // Within NOTICE_NUDGE_DAYS of the last day to give notice (and not given): { by, days } for the
   // Shortlist's nudge, days < 0 once that day has passed while the lease still runs.
   const NOTICE_NUDGE_DAYS = 14;
+  // "Notice given on" counts only for this lease: a date from a lease a year or more back
+  // (left in Settings) mustn't silence the next one.
+  const noticeGivenFor = (leaseEnd, given) => {
+    if (!isYmd(given || '') || !isYmd(leaseEnd || '')) return false;
+    const [y, m, d] = leaseEnd.split('-').map(Number);
+    return given >= ymdLocal(new Date(y - 1, m - 1, d));
+  };
   const noticeDue = (cfg, now = new Date()) => {
     const by = noticeBy(cfg.leaseEnd, cfg.noticeDays), today = ymdLocal(now);
-    if (!by || cfg.noticeGiven || cfg.leaseEnd < today) return null;
+    if (!by || noticeGivenFor(cfg.leaseEnd, cfg.noticeGiven) || cfg.leaseEnd < today) return null;
     const days = Math.round((new Date(`${by}T00:00:00`) - startOfDay(now)) / DAY_MS);
     return days <= NOTICE_NUDGE_DAYS ? { by, days } : null;
   };
@@ -2749,9 +2756,9 @@
     // A reminder no longer needed (you applied, heard back, or the listing is gone or taken) goes
     // out again cancelled under its UID, like a cancelled inspection, so re-importing removes it.
     // With a calendar reminder set, live ones alert at 9am the day before.
-    const allDay = (uid, ymd, summary, extra = [], { cancel = false } = {}) => events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`,
+    const allDay = (uid, ymd, summary, extra = [], { cancel = false, alarm: wantAlarm = true } = {}) => events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`,
       `DTSTART;VALUE=DATE:${ymd.replace(/-/g, '')}`, `SEQUENCE:${seq}`, 'TRANSP:TRANSPARENT', cancel ? 'STATUS:CANCELLED' : '', `SUMMARY:${icsText(cancel ? `Cancelled: ${summary}` : summary)}`, ...extra,
-      ...(alarm > 0 && !cancel ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(summary)}`, 'TRIGGER:-PT15H', 'END:VALARM'] : []), 'END:VEVENT'].filter(Boolean));
+      ...(alarm > 0 && !cancel && wantAlarm ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(summary)}`, 'TRIGGER:-PT15H', 'END:VALARM'] : []), 'END:VEVENT'].filter(Boolean));
     const today = ymdLocal(new Date(now));
     for (const r of followUps ? rows : []) {
       if (typeof r.appAt !== 'number' || !['applied', 'approved', 'declined'].includes(r.appStatus) || seen.has(`${r.id}-fu`)) continue;
@@ -2759,7 +2766,7 @@
       const due = ymdLocal(new Date(r.appAt + FOLLOW_UP_DAYS * DAY_MS)), cancel = r.appStatus !== 'applied' || deadEnd(r);
       if (cancel && due < today) continue; // long past: nothing in the calendar worth taking out
       allDay(`${r.id}-fu@rea-enhancement`, due < today ? today : due, `Follow up: ${r.address || 'rental application'}`,
-        [r.url ? `URL:${r.url}` : '', `DESCRIPTION:${icsText([`Applied ${ymdLocal(new Date(r.appAt))}`, r.agency, r.applyVia && `via ${r.applyVia}`].filter(Boolean).join(' | '))}`], { cancel });
+        [r.url ? `URL:${r.url}` : '', `DESCRIPTION:${icsText([`Applied ${ymdLocal(new Date(r.appAt))}`, r.agency, r.applyVia && `via ${r.applyVia}`].filter(Boolean).join(' | '))}`], { cancel, alarm: due >= today }); // moved to today: an alarm the day before would be in the past
     }
     for (const r of followUps ? rows : []) {
       if (!r.applyBy || r.applyBy < today || seen.has(`${r.id}-ab`)) continue;
@@ -2774,7 +2781,7 @@
       const by = noticeBy(leaseEnd, noticeDays);
       if (by) {
         allDay('notice@rea-enhancement', by < today ? today : by, `Give notice to vacate (lease ends ${leaseEnd})`,
-          [`DESCRIPTION:${icsText(`${Math.round(+noticeDays)} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`], { cancel: !!noticeGiven });
+          [`DESCRIPTION:${icsText(`${Math.round(+noticeDays)} days' notice, as you set it. Check your lease and your state's tenancy rules.`)}`], { cancel: noticeGivenFor(leaseEnd, noticeGiven), alarm: by >= today });
       }
     }
     if (!events.length) return '';
@@ -3123,7 +3130,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   }
 
   // `records`: your own applications per agency (agencyRecord), shown beside the counts.
-  function marketHtml(m, trend = '', { records = null } = {}) {
+  function marketHtml(m, trend = '', { records = null, hiddenAg = new Set() } = {}) {
     const $ = (v) => (v == null ? '–' : money(v));
     const range = (a, b) => (a == null ? '–' : a === b ? $(a) : `${$(a)}–${$(b)}`);
     const top = Math.max(1, ...m.byWeek.map((w) => w.n));
@@ -3136,7 +3143,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       ${m.bySuburb.length ? `<div class="rf-market-t"><table><caption>By suburb</caption><thead><tr><th scope="col">Suburb</th><th scope="col">Listings</th><th scope="col">Median</th><th scope="col">Per bed</th></tr></thead>
       <tbody>${m.bySuburb.map((g) => `<tr><th scope="row">${esc(g.suburb)}</th><td>${g.n}</td><td>${$(g.median)}</td><td>${$(g.ppb)}</td></tr>`).join('')}</tbody></table></div>` : ''}
       ${m.byAgency?.length ? `<div class="rf-market-t"><table><caption>By agency, in these listings</caption><thead><tr><th scope="col">Agency</th><th scope="col">Listings</th><th scope="col">Rent dropped</th><th scope="col">Relisted</th><th scope="col">Says taken</th><th scope="col">Median days listed</th>${records ? '<th scope="col">Your applications</th>' : ''}<th scope="col"><span class="rf-sr">Hide</span></th></tr></thead>
-      <tbody>${m.byAgency.map((g) => `<tr><th scope="row">${esc(g.agency)}</th><td>${g.n}</td><td>${g.dropped}</td><td>${g.relisted}</td><td>${g.taken}</td><td>${g.medianDays ?? '–'}</td>${records ? `<td>${esc(recordText(records.get(agencyKey(g.agency)))) || '–'}</td>` : ''}<td><button type="button" class="rf-btn sec" data-market-ag="${esc(g.agency)}" aria-label="Hide every listing from ${esc(g.agency)}">Hide</button></td></tr>`).join('')}</tbody></table>
+      <tbody>${m.byAgency.map((g) => `<tr><th scope="row">${esc(g.agency)}</th><td>${g.n}</td><td>${g.dropped}</td><td>${g.relisted}</td><td>${g.taken}</td><td>${g.medianDays ?? '–'}</td>${records ? `<td>${esc(recordText(records.get(agencyKey(g.agency)))) || '–'}</td>` : ''}<td><button type="button" class="rf-btn sec" data-market-ag="${esc(g.agency)}" aria-label="${hiddenAg.has(agencyKey(g.agency)) ? 'Show' : 'Hide'} every listing from ${esc(g.agency)}">${hiddenAg.has(agencyKey(g.agency)) ? 'Unhide' : 'Hide'}</button></td></tr>`).join('')}</tbody></table>
       <div class="rf-meta">Counts from the listings shown, not a rating of the agency. Days listed are from REA's listed date, or when this browser first saw the listing.</div></div>` : ''}
       <h3>Available</h3><ul class="rf-bars">${m.byWeek.map((w, i) => [w, i]).filter(([w]) => w.n || w.from).map(([w, i]) => {
         const data = w.label === 'Unknown' ? '' : ` data-week="${i}"`;
@@ -4055,7 +4062,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   ui.planIcs = (btn) => {
     if (!ui.planDay) return;
     const day = ui.planDay;
-    let rows = shortlistRows().filter((r) => !deadEnd(r)).map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
+    let rows = shortlistRows().map((r) => ({ ...r, inspections: (r.inspections || []).filter((i) => typeof i.at === 'number' && ymdIn(i.at, tzOf(r)) === day),
       inspectCancelledAt: typeof r.inspectCancelledAt === 'number' && ymdIn(r.inspectCancelledAt, tzOf(r)) === day ? r.inspectCancelledAt : null })); // this day's cancellations only
     if (btn.dataset.planIcs === 'route') { // just the suggested sessions
       const picked = [...bestRoute(planDay(rows, day, { free: parseFreeTimes(cfg.inspectFree) })).picked];
@@ -4304,10 +4311,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (pin) return ui.mapPick?.(pin.dataset.mapId);
     const hideAg = e.target.closest('[data-market-ag]');
     if (hideAg) { // market view: hide an agency's listings, with Undo
-      const name = hideAg.dataset.marketAg;
+      const name = hideAg.dataset.marketAg, was = marks.hiddenAgencies().some((a) => agencyKey(a) === agencyKey(name)); // shown with Show hidden on
       marks.toggleAgency(name);
       refreshMarks();
-      return offerUndo(`Hid every listing from ${name}.`, () => { marks.toggleAgency(name); refreshMarks(); });
+      return offerUndo(`${was ? 'Showing' : 'Hid'} every listing from ${name}.`, () => { marks.toggleAgency(name); refreshMarks(); });
     }
     const week = e.target.closest('[data-week]'); // market view, map and the inspection planner live in the list too
     if (week) return ui.pickWeek?.(week);
@@ -4483,12 +4490,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const spec = SETTING_BY_KEY.get(el.id.slice(3));
       if (spec?.kind !== 'int' || el.value.trim() === '') return spec?.kind === 'int' ? '' : el.value;
       const n = Math.round(+el.value);
-      const v = Number.isFinite(n) ? String(Math.min(spec.max, Math.max(spec.min, n))) : '';
-      if (el.value !== v) el.value = v;
-      return v;
+      return Number.isFinite(n) ? String(Math.min(spec.max, Math.max(spec.min, n))) : '';
     };
     const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else { ensureOption(el, v); el.value = v ?? ''; } };
     for (const [k, el] of fields) write(el, cfg[k]);
+    // The field shows the clamped number once you leave it (not while typing "0…" on the way to "05").
+    for (const [k, el] of fields) if (SETTING_BY_KEY.get(k)?.kind === 'int') el.addEventListener('change', () => { const v = read(el); if (el.value !== v) el.value = v; });
     // Put `next` into the form (only what changed) and apply it as if typed.
     function applyCfg(next) {
       for (const [k, el] of fields) if (next[k] !== cfg[k]) write(el, next[k]);
@@ -5299,7 +5306,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     if (ui.mapOn) ui.list.innerHTML = mapHtml(rows, cfg);
-    else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : '', { records: agencyRecord(marks.shortlist()) }); else paintList(rows);
+    else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : '', { records: agencyRecord(marks.shortlist()), hiddenAg: new Set(marks.hiddenAgencies().map(agencyKey)) }); else paintList(rows);
     toListTop();
   }
 

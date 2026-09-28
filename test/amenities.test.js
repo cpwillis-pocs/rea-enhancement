@@ -87,6 +87,10 @@ test('watchOf: negations next to a mention are not heads-ups; broader phrasing c
   for (const [text, want] of cases) assert.equal(core.watchOf(text).join(','), want, text);
 });
 
+test('water efficient: WELS ratings count without the word water (gate covers both)', () => {
+  for (const t of ['5 star WELS rated shower heads', 'four-star wels shower']) assert.equal(core.amenitiesOf({ text: t.toLowerCase() }).watereff, 'yes', t);
+});
+
 test('watchOf: noise heads-ups are about the home itself, not what is nearby', () => {
   const cases = [
     ['Unit on a busy road with double glazing.', 'road'], ['Overlooking a main road.', 'road'], ['Main road frontage.', 'road'],
