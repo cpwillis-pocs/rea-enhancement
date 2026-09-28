@@ -94,7 +94,8 @@ test('watchOf: noise heads-ups are about the home itself, not what is nearby', (
     ['Located above the shops in a vibrant strip.', 'above'], ['Apartment above a popular bar.', 'above'], ['Above ground pool.', ''], ['Walk to shops above the station.', ''],
     ['Backs onto the railway line.', 'rail'], ['Next to the train tracks.', 'rail'], ['Walk to the station.', ''], ['Close to the train line.', ''],
     ['Under the flight path.', 'flight'], ['Not under the flight path.', ''], ['Book your flight path to success', ''],
-    ['Construction next door finishes in June.', 'build'], ['No construction next door.', ''], ['New development nearby with shops', 'build'],
+    ['Construction next door finishes in June.', 'build'], ['No construction next door.', ''], ['New development nearby with shops', ''], ['Brand new development opposite the park', ''], ['Development next door is under way', 'build'],
+    ['A short stroll to cafes on the main street', ''], ['Buses on the main road take you to the city', ''], ['Parking is on the main street', ''], ['Located on a main road.', 'road'],
   ];
   for (const [text, want] of cases) assert.equal(core.watchOf(text).join(','), want, text);
 });

@@ -42,7 +42,7 @@
   "url",
   "watch"
  ],
- "FEAT_V": 6,
+ "FEAT_V": 7,
  "amenityIds": [
   "pets",
   "furnished",
@@ -80,5 +80,5 @@
   "flight",
   "build"
  ],
- "detection": "40079840a3615560"
+ "detection": "2313a039be419aec"
 }

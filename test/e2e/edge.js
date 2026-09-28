@@ -2101,6 +2101,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-launch');
     await page.click('.rf-settings > summary');
     await page.fill('#rf-leaseEnd', '2026-10-31'); await page.dispatchEvent('#rf-leaseEnd', 'change');
+    await page.fill('#rf-noticeDays', '150'); await page.dispatchEvent('#rf-noticeDays', 'change');
+    assert.equal(await page.inputValue('#rf-noticeDays'), '120', 'out of range: clamped, not silently reset later');
     await page.fill('#rf-noticeDays', '21'); await page.dispatchEvent('#rf-noticeDays', 'change');
     await page.click('[data-view=shortlist]');
     await page.selectOption('.rf-sl-filter', '!');

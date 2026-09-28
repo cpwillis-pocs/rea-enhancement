@@ -664,6 +664,7 @@ test('my inspection times: parsed, checked in the listing zone, filtered, and ex
   assert.deepEqual(w('Mon-Wed 7am-8:30am; Thu-Mon'), [['123', 420, 510], ['01456', 0, 1440]]);
   assert.deepEqual(w('saturdays & sun 6-8pm'), [['06', 1080, 1200]], '"6-8pm" is evening');
   assert.deepEqual(w('17:30-'), [['0123456', 1050, 1440]], 'no days: every day');
+  assert.deepEqual(w('weekdays 6pm-12am'), [['12345', 1080, 1440]], '12am as an end is midnight');
   for (const bad of ['nonsense', 'sunburn 9-10', 'sat 13-9', 'sat 25-26', '']) assert.equal(core.parseFreeTimes(bad), null, bad);
   const free = core.parseFreeTimes('Sat 9-13');
   const sat10 = Date.UTC(2026, 8, 26, 0), sat14 = Date.UTC(2026, 8, 26, 4); // 10am and 2pm in Sydney

@@ -326,7 +326,7 @@
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 6; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 7; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -1551,11 +1551,11 @@
     { id: 'garden', label: 'You maintain garden/pool', re: /\btenants? (?:is |are |will be )?(?:responsible for|to maintain|must maintain|maintains?) (?:the |all )?(?:gardens?|lawns?|yard|pool)\b/ },
     // Noise: said of the home itself ("on a busy road", "above the shops"), not of what's nearby
     // ("close to Parramatta Rd shops", "walk to the station").
-    { id: 'road', label: 'Busy road', re: /\b(?:on|fronting|facing|faces|overlook(?:s|ing))\s+(?:a\s+|the\s+)?(?:busy|main|major|arterial)\s+(?:road|rd|street|st|highway|hwy)\b|\b(?:main|busy) road frontage\b/ },
+    { id: 'road', label: 'Busy road', re: /\b(?:(?:is|sits|located|situated|positioned|set|right)\s+on|fronting|facing|faces|overlook(?:s|ing))\s+(?:a\s+|the\s+)?(?:busy|main|major|arterial)\s+(?:road|rd|highway|hwy)\b|\bon (?:a |the )?(?:busy|major|arterial) (?:road|rd|street|highway|hwy)\b|\b(?:main|busy) road frontage\b/ },
     { id: 'above', label: 'Above shops/bar', re: /\b(?:located |situated |set |sits |positioned )?above (?:a |the |an? )?(?:local |busy |popular )?(?:shops?|shopfronts?|retail|commercial|bar|pub|hotel|restaurants?|caf[eé]s?|nightclub|club)\b/ },
     { id: 'rail', label: 'Next to rail line', re: /\b(?:backs? (?:on)?to|backing (?:on)?to|adjacent to|next to|beside|alongside|overlook(?:s|ing))\s+(?:the\s+)?(?:railway|rail(?:way)? (?:line|corridor|tracks?)|train (?:line|tracks?))\b/ },
     { id: 'flight', label: 'Flight path', re: /\b(?:under|on|beneath) (?:the |a )?flight ?path\b/ },
-    { id: 'build', label: 'Construction nearby', re: /\b(?:construction|building works?|development|demolition)\s+(?:next door|nearby|adjacent|opposite|across the (?:road|street)|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bconstruction (?:site|works?) (?:next door|nearby|adjacent)\b/ },
+    { id: 'build', label: 'Construction nearby', re: /\b(?:construction|building works?|demolition)\s+(?:next door|nearby|adjacent|opposite|across the (?:road|street)|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bdevelopment (?:next door|on the (?:neighbouring|adjoining) (?:block|site|lot))\b|\bconstruction (?:site|works?) (?:next door|nearby|adjacent)\b/ },
   ];
   // A mention right next to a negation ("no application fee", "water usage not charged", "rent
   // bidding is prohibited", "fee: nil") is the good news, not a heads-up. Checked per clause.
@@ -2119,7 +2119,8 @@
       const days = new Set();
       for (const w of dayText.split(/\s*(?:&|\/|\band\b|\s)\s*/).filter(Boolean)) if (!dayToken(w, days)) return null;
       let from = hasRange ? clockMin(t[1]?.trim(), 0) : 0;
-      const to = hasRange ? clockMin(t[2]?.trim(), 1440) : 1440;
+      let to = hasRange ? clockMin(t[2]?.trim(), 1440) : 1440;
+      if (to === 0) to = 1440; // "6pm-12am" ends at midnight
       if (hasRange && t[1] && !/[ap]m/.test(t[1]) && /pm/.test(t[2] || '') && from < 720 && from + 720 < to) from += 720; // "6-8pm" is 6pm to 8pm
       if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || (!days.size && !hasRange)) return null;
       out.push({ days: days.size ? days : new Set(WEEKDAYS.map((_, d) => d)), from, to });
@@ -4380,7 +4381,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
 
     // Inputs map 1:1 to cfg keys via their id (rf-<key>); exactOnly keeps its legacy id.
     const fields = Object.keys(DEFAULT_CFG).map((k) => [k, panel.querySelector(`#rf-${k === 'exactOnly' ? 'exact' : k}`)]);
-    const read = (el) => (el.type === 'checkbox' ? el.checked : el.value);
+    // A whole-number setting typed out of range (notice 150, income 5.5) is clamped to what
+    // sanitizeCfg keeps, so it isn't silently reset on the next load; the field shows it.
+    const read = (el) => {
+      if (el.type === 'checkbox') return el.checked;
+      const spec = SETTING_BY_KEY.get(el.id.slice(3));
+      if (spec?.kind !== 'int' || el.value.trim() === '') return spec?.kind === 'int' ? '' : el.value;
+      const n = Math.round(+el.value);
+      const v = Number.isFinite(n) ? String(Math.min(spec.max, Math.max(spec.min, n))) : '';
+      if (el.value !== v) el.value = v;
+      return v;
+    };
     const write = (el, v) => { if (el.type === 'checkbox') el.checked = !!v; else { ensureOption(el, v); el.value = v ?? ''; } };
     for (const [k, el] of fields) write(el, cfg[k]);
     // Put `next` into the form (only what changed) and apply it as if typed.
