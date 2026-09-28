@@ -1252,3 +1252,13 @@ test('periodic lease: ends your notice period after notice (or today); fit, cash
   assert.deepEqual([r.fit.overlap, core.cashToMove(r)], [15, 3500 + 1500], 'overlap to the periodic end');
   assert.equal(core.noticeDue(cfg, now), null);
 });
+
+test('nextSteps: approved somewhere and notice not given: your notice date and what is still waiting', () => {
+  const now = new Date(2026, 8, 28, 12);
+  const rows = [{ id: 'a', address: '1 A St, Bondi NSW 2026', appStatus: 'approved' }, { id: 'b', appStatus: 'applied' }, { id: 'c', appStatus: 'applied', taken: 'leased' }];
+  const cfg = { ...core.DEFAULT_CFG, leaseEnd: '2026-12-31', noticeDays: '21' };
+  assert.deepEqual(core.nextSteps(rows, cfg, now), { r: rows[0], by: '2026-12-10', days: 0, pending: 1 }, 'the notice date well before the two-week window; a taken one is not waiting');
+  assert.equal(core.nextSteps(rows, { ...cfg, noticeGiven: '2026-09-28' }, now), null, 'notice given: nothing next');
+  assert.equal(core.nextSteps(rows.slice(1), cfg, now), null, 'not approved anywhere');
+  assert.equal(core.nextSteps(rows, { ...cfg, periodic: true }, now).days, 21, 'periodic: your notice period');
+});

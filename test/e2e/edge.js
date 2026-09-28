@@ -2123,6 +2123,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(ics, /UID:notice@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260929/, 'your notice period, from Settings');
     // Within two weeks of the notice date: the Shortlist says so, until you say you've given it.
     assert.match(await status(page), /Give notice by 29 Sept? \(6 days\) for your lease ending 20 Oct/);
+    // Approved somewhere: that leads, with what's still waiting.
+    await page.selectOption('.rf-sl-filter', '');
+    await page.selectOption('.rf-item[data-id="146500102"] select[data-app]', 'approved');
+    await page.waitForFunction(() => /Approved for 2 Hall St\. Give notice by 29 Sept?/.test(document.querySelector('.rf-status').textContent));
     await page.click('.rf-status button:has-text("I\'ve given notice")');
     await waitStatus(page, /^Noted: notice given/);
     assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).noticeGiven, '2026-09-23');
