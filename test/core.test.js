@@ -669,6 +669,7 @@ test('my inspection times: parsed, checked in the listing zone, filtered, and ex
   assert.deepEqual(w('saturdays & sun 6-8pm'), [['06', 1080, 1200]], '"6-8pm" is evening');
   assert.deepEqual(w('17:30-'), [['0123456', 1050, 1440]], 'no days: every day');
   assert.deepEqual(w('weekdays 6pm-12am'), [['12345', 1080, 1440]], '12am as an end is midnight');
+  assert.deepEqual(w('Sat 10am-2, weekdays 6pm-9'), [['6', 600, 840], ['12345', 1080, 1260]], 'an end without am/pm is later the same day');
   for (const bad of ['nonsense', 'sunburn 9-10', 'sat 13-9', 'sat 25-26', '']) assert.equal(core.parseFreeTimes(bad), null, bad);
   const free = core.parseFreeTimes('Sat 9-13');
   const sat10 = Date.UTC(2026, 8, 26, 0), sat14 = Date.UTC(2026, 8, 26, 4); // 10am and 2pm in Sydney
@@ -1148,6 +1149,8 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   const listedAt = new Date(2026, 8, 26); // a Saturday
   assert.equal(core.applyByOf('Applications due by 5pm Friday.', now, { listedAt }), '2026-10-02', 'a weekday alone: the first after it was listed');
   assert.equal(core.applyByOf('Applications due by 5pm Friday.', now), '', 'not guessed without a listed date');
+  assert.equal(core.applyByOf('Applications are due by COB Friday.', now, { listedAt }), '2026-10-02');
+  assert.equal(core.applyByOf('Applications close midday Friday', now, { listedAt }), '2026-10-02');
   assert.equal(core.applyByOf('Applications close Friday', now, { listedAt: new Date(2026, 8, 1) }), '', 'that Friday has passed');
   const soon = { applyBy: '2026-09-30' };
   for (const dead of [{ gone: true }, { taken: 'leased' }, { hidden: true }, { appStatus: 'declined' }]) assert.equal(core.needsAction({ ...soon, ...dead }, +now), '', JSON.stringify(dead));

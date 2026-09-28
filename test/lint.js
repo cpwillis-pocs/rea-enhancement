@@ -48,7 +48,7 @@ if (axeLocal !== axeCi) err(`package.json e2e:setup installs axe-core@${axeLocal
 if (!pwLocal || pwLocal !== pwCi) err(`package.json e2e:setup installs playwright@${pwLocal}, CI pins ${pwCi}: keep them the same`);
 // build() only shrinks: new drawer wiring goes in its own wire*() function. Lower the budget when
 // it gets smaller; never raise it.
-const BUILD_MAX_LINES = 480;
+const BUILD_MAX_LINES = 470;
 const buildAt = src.indexOf('\n  function build() {');
 if (buildAt >= 0) {
   const lines = src.slice(buildAt + 1).split('\n'), len = lines.findIndex((l, i) => i > 0 && l === '  }');

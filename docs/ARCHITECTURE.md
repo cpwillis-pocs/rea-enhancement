@@ -9,7 +9,7 @@ The userscript is a single IIFE with `@grant none` and no dependencies. A `typeo
 | Half | Contents | Tested by |
 |---|---|---|
 | **Pure** (above the guard) | Parsing REA's page data, the views drawn in place of the list (`planHtml`, `mapHtml`, `marketHtml`, `compareHtml`), text heuristics, filters and sorts, medians, route planning, exports (CSV/TSV/ICS/print), share links, and the storage stores (`rowStore`, `marksStore`, `snapshotStore`, `presetStore`, `healthStore`) with an injectable `storage` and clock. Exported with `module.exports`. | `test/*.test.js` (node:test) |
-| **UI** (below the `// ----- ui` marker) | The drawer (`panelHtml()` is its markup; `build()` wires it, with `wireKeys()`, `wireList()`, `wireResize()`, `wirePeek()` and `wireShortlistBar()` split out; lint keeps `build()` under 480 lines), REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
+| **UI** (below the `// ----- ui` marker) | The drawer (`panelHtml()` is its markup; `build()` wires it, with `wireKeys()`, `wireList()`, `wireResize()`, `wirePeek()` and `wireShortlistBar()` split out; lint keeps `build()` under 470 lines), REA card badges, the listing-page bar, SPA navigation, keyboard handling, notes by the launcher. | `test/e2e/smoke.js`, `test/e2e/edge.js` (Playwright, fixture pages on the REA origin) |
 
 New logic goes in the pure half wherever possible, with a unit test.
 

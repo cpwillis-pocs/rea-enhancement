@@ -1597,13 +1597,13 @@
   const APPLY_BY_G = /\b(?:applications?|apps)\s+(?:close[sd]?|closing|are due|due|must be (?:in|submitted|received|lodged))\b|\bclosing date(?:\s+for\s+applications?)?\b/gi;
   // A weekday alone ("due by 5pm Friday") is the first such day on or after `listedAt` (REA's
   // listed date): never counted from today, which would slide the deadline forward every week.
-  const WEEKDAY_ONLY = /^(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\s+)?(?:on\s+|this\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm))?\s*$/i;
+  const WEEKDAY_ONLY = /^(?:(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|cob|close of business|midday|noon)\s+)?(?:on\s+|this\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm))?\s*$/i;
   const applyByOf = (text, now = new Date(), { listedAt = null } = {}) => {
     const src = String(text || '');
     APPLY_BY_G.lastIndex = 0;
     for (let m; (m = APPLY_BY_G.exec(src));) {
       const tail = src.slice(m.index + m[0].length, m.index + m[0].length + 48).replace(/^[\s:,-]*(?:(?:by|on|is|at|before|this|the|of)\s+)*/i, '');
-      if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun)/i.test(tail)) continue;
+      if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun|cob\b|close of business|midday|noon)/i.test(tail)) continue;
       const clause = tail.split(/[.;,\n]|\s[-–]\s/)[0].trim(); // this clause only: not "…, lease starts 20 October"
       let d = parseAvail(`Available ${clause}`, now, { keepPast: true });
       const wd = !d && clause.match(WEEKDAY_ONLY);
@@ -2138,6 +2138,7 @@
       let from = hasRange ? clockMin(t[1]?.trim(), 0) : 0;
       let to = hasRange ? clockMin(t[2]?.trim(), 1440) : 1440;
       if (to === 0) to = 1440; // "6pm-12am" ends at midnight
+      if (hasRange && t[2] && !/[ap]m/.test(t[2]) && (/[ap]m/.test(t[1] || '') || from < 720) && to <= from && to + 720 > from) to += 720; // "10am-2", "6pm-9": the end is later the same day
       if (hasRange && t[1] && !/[ap]m/.test(t[1]) && /pm/.test(t[2] || '') && from < 720 && from + 720 < to) from += 720; // "6-8pm" is 6pm to 8pm
       if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || (!days.size && !hasRange)) return null;
       out.push({ days: days.size ? days : new Set(WEEKDAYS.map((_, d) => d)), from, to });
@@ -4871,6 +4872,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.run.addEventListener('click', () => busy || run());
     ui.partial.querySelector('[data-resume]').addEventListener('click', () => busy || run(true, { resume: true }));
     ui.refresh.addEventListener('click', () => busy || run(true));
+    wireExports();
+    ui.ready = true; // last: init steps only run against a fully wired drawer
+  }
+
+  // Export buttons (Results bar and Shortlist menu): what's on screen, as CSV, TSV, a copy or a calendar.
+  function wireExports() {
     for (const b of ui.exports) {
       b.addEventListener('click', async () => {
         const rows = ui.view === 'shortlist' ? shortlistRows() : cache ? applyFilters(pool(), cfg) : null;
@@ -4884,7 +4891,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         }
       });
     }
-    ui.ready = true; // last: init steps only run against a fully wired drawer
   }
 
   const rowById = (id) => known.get(id) || cache?.find((r) => r.id === id) || null;
