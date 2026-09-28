@@ -2108,7 +2108,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     await page.click('#rf-launch');
     await page.click('.rf-settings > summary');
-    await page.fill('#rf-leaseEnd', '2026-10-31'); await page.dispatchEvent('#rf-leaseEnd', 'change');
+    await page.fill('#rf-leaseEnd', '2026-10-20'); await page.dispatchEvent('#rf-leaseEnd', 'change');
     await page.fill('#rf-noticeDays', '150'); await page.dispatchEvent('#rf-noticeDays', 'change');
     assert.equal(await page.inputValue('#rf-noticeDays'), '120', 'out of range: clamped, not silently reset later');
     await page.fill('#rf-noticeDays', '21'); await page.dispatchEvent('#rf-noticeDays', 'change');
@@ -2120,7 +2120,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
     const ics = fs.readFileSync(await dl.path(), 'utf8');
     assert.match(ics, /UID:146500101-ab@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260925/);
-    assert.match(ics, /UID:notice@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20261010/, 'your notice period, from Settings');
+    assert.match(ics, /UID:notice@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260929/, 'your notice period, from Settings');
+    // Within two weeks of the notice date: the Shortlist says so, until you say you've given it.
+    assert.match(await status(page), /Give notice by 29 Sept? \(6 days\) for your lease ending 20 Oct/);
+    await page.click('.rf-status button:has-text("I\'ve given notice")');
+    await waitStatus(page, /^Noted: notice given/);
+    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).noticeGiven, '2026-09-23');
     await page.click('.rf-item .rf-nudge [data-na=applied]');
     assert.equal((await marks(page))['146500101'].as, 'applied');
     await page.waitForFunction(() => !document.querySelector('.rf-item .rf-nudge'));
