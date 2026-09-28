@@ -1928,7 +1928,8 @@
   async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal, keepPartial = false, isCached = () => false } = {}) {
     const rows = [];
     const key = searchKey(base);
-    let page = 1, max = 1, total = 1, sample = null;
+    let page = 1, max = 1, total = 1, sample = null, paging = '';
+    const ids = new Set();
     do {
       signal?.throwIfAborted();
       const label = `page ${page}${max > 1 ? ` of ${max}` : ''}`;
@@ -1944,16 +1945,25 @@
         if (!keepPartial || page === 1 || signal?.aborted || err?.name === 'AbortError') throw err;
         return { rows, truncated: total > MAX_PAGES, sample, failed: { page, max, message: String(err?.message || err) } };
       }
-      total = results.pagination?.maxPageNumberAvailable || 1;
+      // Guards against REA changing how it pages: a page count gone missing reads one page and
+      // says so; a later page that repeats what came before (REA ignoring /list-N) stops there
+      // rather than reading page 1 twenty times.
+      const got = rowsFrom(results);
+      if (page > 1 && got.length && got.every((r) => ids.has(r.id))) { paging = 'repeat'; break; }
+      const pages = results.pagination?.maxPageNumberAvailable;
+      if (page === 1 && !pages && got.length >= PAGE_FULL) paging = 'missing';
+      total = pages || 1;
       max = Math.min(total, MAX_PAGES);
-      rows.push(...rowsFrom(results));
+      for (const r of got) ids.add(r.id);
+      rows.push(...got);
       sample ??= sampleOf(results);
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
       if (page <= max && !seeded && !nextSeeded && !isCached(pageUrl(base, page))) await wait(jitter(PAGE_DELAY_MS), signal);
     } while (page <= max);
-    return { rows, truncated: total > MAX_PAGES, sample };
+    return { rows, truncated: total > MAX_PAGES, sample, ...(paging ? { paging } : {}) };
   }
+  const PAGE_FULL = 20; // a results page this full with no page count is probably not the last
 
   // --------------------------------------------------------------- filter
   // #endregion
@@ -5661,6 +5671,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const drift = [...moved, ...drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`)];
       setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
       setWarn('format', ''); // every page read: an earlier odd page was a one-off
+      if (res.paging) formatWarn(res.paging === 'repeat' ? "A later results page repeated the first, so the search stopped there: REA may have changed how it pages results."
+        : "REA's page count wasn't found, so only the first page was read: REA may have changed how it pages results.");
       store.set(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0));
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`

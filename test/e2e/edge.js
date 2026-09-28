@@ -2274,6 +2274,20 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 65. REA ignoring /list-N (every page is page 1): the search stops at the repeat and says so,
+  // with Copy report, instead of reading page 1 twenty times.
+  await block('65', async () => {
+    const ctx = await browser.newContext();
+    const hits = [];
+    const base = serve(hits, { pages: 3 });
+    const page = await open(ctx, SEARCH, { route: (r) => (/list-[23]/.test(r.request().url()) ? r.fulfill({ status: 200, contentType: 'text/html', body: reaPage(1, { pages: 3 }) }) : base(r)) });
+    await run(page);
+    assert.match(await page.textContent('.rf-warn-msg'), /repeated the first, so the search stopped there/);
+    assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
+    console.log('pagination change guard: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

@@ -54,6 +54,21 @@ test('fetchAllPages: walks pages, reuses seed, flags truncation', async () => {
   assert.ok(r.rows[1].url.endsWith('seed'));
 });
 
+test('fetchAllPages: stops when REA repeats a page, says when the page count is missing', async () => {
+  const same = async () => resp(200, page(results({ exact: [listing({ id: 'a' }), listing({ id: 'b' })], maxPage: 5 })));
+  let n = 0;
+  const r = await core.fetchAllPages(BASE, () => {}, { fetchImpl: async (u) => { n++; return same(u); }, wait: noWait });
+  assert.equal(r.paging, 'repeat');
+  assert.equal(n, 2, 'stopped at the first repeated page, not five');
+  assert.equal(r.rows.length, 2);
+  const full = results({ exact: Array.from({ length: 20 }, (_, i) => listing({ id: String(1000 + i) })) });
+  delete full.pagination;
+  const m = await core.fetchAllPages(BASE, () => {}, { fetchImpl: async () => resp(200, page(full)), wait: noWait });
+  assert.equal(m.paging, 'missing');
+  const one = await core.fetchAllPages(BASE, () => {}, { fetchImpl: async () => resp(200, page(results({ exact: [listing({ id: 'x' })] }))), wait: noWait });
+  assert.equal(one.paging, undefined, 'a short single page is just a small search');
+});
+
 test('fetchAllPages: ignores seed from a different search', async () => {
   const urls = [];
   const fetchImpl = async (u) => (urls.push(u), resp(200, page(results({ exact: [listing()] }))));
