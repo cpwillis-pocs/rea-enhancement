@@ -656,6 +656,10 @@ test('cash to move: move-in plus the overlap; sort puts unknowns last; CSV and C
   assert.equal(line.split(',')[head.split(',').indexOf('cash_to_move')], '4100');
   assert.match(core.compareHtml(out.slice(0, 2), cfg), /Cash to move<\/th><td class="rf-best">\$3,900<\/td><td>\$4,100/);
   assert.doesNotMatch(core.compareHtml(out.slice(0, 2), { ...cfg, leaseEnd: '' }), /Cash to move/, 'only with a lease end (else it is Move-in)');
+  const capped = { ...core.DEFAULT_CFG, leaseEnd: '2026-10-10', cashMax: '4000' };
+  assert.deepEqual(core.filterRows(rows, capped, now).map((r) => r.id), ['gap'], 'Max cash to move: the overlap counts; unknown move-in fails');
+  assert.deepEqual(core.activeFilters(capped).map((c) => c.label), ['Cash to move ≤ $4,000']);
+  assert.deepEqual(core.filterRows(rows, { ...capped, leaseEnd: '' }, now).map((r) => r.id), ['over', 'gap'], 'no lease end: it is the move-in cost');
 });
 
 test('my inspection times: parsed, checked in the listing zone, filtered, and explained when unreadable', () => {

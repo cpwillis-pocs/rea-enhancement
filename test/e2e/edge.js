@@ -2174,6 +2174,23 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 62. Max cash to move: a chip, fewer listings, and Clear takes it off.
+  await block('62', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const total = await count(page);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-cashMax', '4000'); await page.dispatchEvent('#rf-cashMax', 'change');
+    await page.waitForFunction((n) => document.querySelectorAll('.rf-item').length < n, total);
+    assert.ok(await page.$('.rf-achip:has-text("Cash to move ≤ $4,000")'), 'chip shown');
+    await page.click('.rf-clear');
+    assert.equal(await page.inputValue('#rf-cashMax'), '');
+    assert.equal(await count(page), total);
+    console.log('max cash to move: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

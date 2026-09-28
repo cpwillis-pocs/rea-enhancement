@@ -2013,7 +2013,7 @@
   };
   const DEFAULT_CFG = {
     from: '', to: '', withinDays: '', exactOnly: false,
-    priceMin: '', priceMax: '', upfrontMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
+    priceMin: '', priceMax: '', upfrontMax: '', cashMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
     onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false,
     ...Object.fromEntries(SETTINGS.map((x) => [x.key, x.def])),
@@ -2050,7 +2050,7 @@
 
   // cfg keys that narrow results (FILTER_KEYS), live under "More filters" (MORE_KEYS), or
   // are display preferences that Clear keeps (DISPLAY_PREFS).
-  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'type', 'keyword',
+  const FILTER_KEYS = ['from', 'to', 'withinDays', 'priceMin', 'priceMax', 'upfrontMax', 'cashMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'type', 'keyword',
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
@@ -2239,13 +2239,13 @@
   const statusOptions = (cur) => APP_STATUSES.map((v) => `<option value="${v}"${v === cur ? ' selected' : ''}>${statusLabel(v)}</option>`).join('');
   const CHIP_LABELS = {
     from: (v) => `From ${shortDate(v)}`, to: (v) => `To ${shortDate(v)}`, withinDays: (v) => `Within ${Math.round(v / 7)} wks`,
-    priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`,
+    priceMin: (v) => `≥ ${money(v)}/wk`, priceMax: (v) => `≤ ${money(v)}/wk`, upfrontMax: (v) => `Move-in ≤ ${money(v)}`, cashMax: (v) => `Cash to move ≤ ${money(v)}`,
     bedsMin: (v) => `${v}+ bed`, bathsMin: (v) => `${v}+ bath`, carsMin: (v) => `${v}+ car`, sizeMin: (v) => `${v}+ m²`, type: (v) => v,
     keyword: (v) => `"${v}"`, inspectOn: (v) => `Inspecting ${shortDate(v)}`, inspectWhen: (v) => INSPECT_WHEN[v] || '', hideNoImage: () => 'Has a photo', hideTaken: () => 'Not taken',
     exactOnly: () => 'No surrounding suburbs', onlyStarred: () => 'Shortlisted', newOnly: () => 'New only', changedOnly: () => 'Changed only', unopenedOnly: () => 'Not opened yet', unreviewedOnly: () => 'Not reviewed', leaseMin: (v) => `Lease ${v}+ mo`, onePerBuilding: () => 'One per building', building: (v) => `Building: ${v.split('|')[1] || 'one building'}`,
     staleOnly: () => 'Listed 3+ wks', maxKm: (v) => `≤ ${v} km`, floorplanOnly: () => 'Floorplan',
   };
-  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'maxKm', 'withinDays', 'leaseMin'];
+  const NUM_KEYS = ['priceMin', 'priceMax', 'upfrontMax', 'cashMax', 'bedsMin', 'bathsMin', 'carsMin', 'sizeMin', 'maxKm', 'withinDays', 'leaseMin'];
   // Active filters as removable chips: [{ key, amen?, label }]. `without` gives the cfg with
   // that one chip removed, so the UI can show how many listings each filter is removing.
   const activeFilters = (cfg) => {
@@ -2530,6 +2530,10 @@
     add('priceMin', pMin != null, (r) => Number.isFinite(r.priceNum) && r.priceNum >= pMin);
     add('priceMax', pMax != null, (r) => r.priceNum <= pMax);
     add('upfrontMax', upMax != null, (r) => (r.upfront ?? Infinity) <= upMax); // unknown bond fails a move-in cap
+    // Move-in plus rent paid twice while your lease overlaps (the fit is worked out here: rows
+    // get theirs only after filtering).
+    const cashMax = num(cfg.cashMax);
+    add('cashMax', cashMax != null, (r) => (Number.isFinite(r.upfront) ? r.upfront + (leaseFit(r, cfg.leaseEnd, now)?.cost || 0) : Infinity) <= cashMax);
     for (const [k, key] of [['beds', 'bedsMin'], ['baths', 'bathsMin'], ['cars', 'carsMin']]) {
       const v = num(cfg[key]);
       add(key, v != null, (r) => r[k] !== '' && +r[k] >= v);
@@ -3689,6 +3693,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           <label>Min $/wk<input type="number" min="0" step="25" id="rf-priceMin" inputmode="numeric"></label>
           <label>Max $/wk<input type="number" min="0" step="25" id="rf-priceMax" inputmode="numeric"></label>
           <label title="Bond + 2 weeks' rent">Max move-in $<input type="number" min="0" step="100" id="rf-upfrontMax" inputmode="numeric"></label>
+          <label title="Move-in plus any rent you'd pay twice while your current lease overlaps (set its end in Settings)">Max cash to move $<input type="number" min="0" step="100" id="rf-cashMax" inputmode="numeric"></label>
           <label>Min beds<input type="number" min="0" max="9" id="rf-bedsMin" inputmode="numeric"></label>
           <label>Min baths<input type="number" min="0" max="9" id="rf-bathsMin" inputmode="numeric"></label>
           <label>Min cars<input type="number" min="0" max="9" id="rf-carsMin" inputmode="numeric"></label>
