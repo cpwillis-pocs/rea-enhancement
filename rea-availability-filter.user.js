@@ -250,7 +250,7 @@
     sq: typeof r.sqm === 'number' ? sqmOk(r.sqm) : null, sqt: r.sqm != null && r.sqmFromText ? 1 : null,
   });
   // Summary fields a search result always carries in full (empty means none, not unknown).
-  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'le', 'am', 'tk', 'bp'];
+  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'ab', 'le', 'am', 'tk', 'bp']; // a deadline the agent took out goes too
   // The upcoming stored inspection missing from the fresh list (null if none went). A session
   // still listed by label only (no time) is not missing.
   const cancelledInspection = (old, next, t) => {
@@ -3866,8 +3866,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     clearTimeout(mirrorTimer); mirrorTimer = 0;
     if (marks.takeWiped()) { mirrorHeld = true; offerMirror(); } // storage emptied mid-visit
     if (mirrorHeld) return;
-    const data = marks.exportData();
-    if (!mirrorWeight(data)) return; // never overwrite a copy with nothing (that's when it's needed)
+    const data = marks.exportData(); // empty too: you emptied it here, so it isn't offered back as "gone"
     data.presets = presets.exportData();
     data.cfg = backupCfg(cfg);
     idbDo('readwrite', (st) => st.put({ at: Date.now(), data }, 'copy')).catch(() => { /* private window, blocked */ });
@@ -3875,8 +3874,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const mirrorSoon = () => { clearTimeout(mirrorTimer); mirrorTimer = setTimeout(mirrorWrite, MIRROR_DELAY_MS); };
   // Leaving the tab: write now, so a change just made isn't later mistaken for a loss.
   document.addEventListener('visibilitychange', () => { if (document.hidden && mirrorTimer) mirrorWrite(); });
+  // A failed read isn't "no copy": stay held and try again a little later.
+  let mirrorRetries = 0;
   const offerMirror = async () => {
-    const rec = await idbDo('readonly', (st) => st.get('copy')).catch(() => null);
+    let failed = false;
+    const rec = await idbDo('readonly', (st) => st.get('copy')).catch(() => { failed = true; return null; });
+    if (failed) { mirrorHeld = true; if (mirrorRetries++ < 3) setTimeout(offerMirror, 30000); return; }
     const here = marks.exportData(), lost = mirrorLost(rec?.data, here);
     if (!lost) { if (mirrorHeld) releaseMirror(); return; }
     mirrorHeld = true;
@@ -3900,20 +3903,22 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.preset.after(input);
     input.focus();
     let done = false;
-    const finish = (save) => {
+    // `refocus`: Enter / Esc return to the menu; leaving by click or Tab keeps focus where it went
+    // (pulling it back to the menu let one typed letter pick "Delete: …").
+    const finish = (save, refocus) => {
       if (done) return;
       done = true;
       const saved = save && input.value.trim() && presets.save(input.value, cfg, key);
       input.remove();
       if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
       fillPresets();
-      ui.preset.focus();
+      if (refocus) ui.preset.focus();
     };
     input.addEventListener('keydown', (e) => {
       e.stopPropagation(); // typing a name isn't a shortcut, and Esc doesn't close the drawer
-      if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') finish(false);
+      if (e.key === 'Enter') { e.preventDefault(); finish(true, true); } else if (e.key === 'Escape') finish(false, true);
     });
-    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('blur', () => finish(true, false));
   };
   ui.preset.addEventListener('change', () => {
     const v = ui.preset.value;
@@ -4070,11 +4075,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   restoreIn.addEventListener('click', (e) => {
     const b = e.target.closest('[data-restore]');
     if (!b) return;
-    const data = ui.pendingRestore;
+    const data = ui.pendingRestore, fromMirror = ui.restoreFromMirror;
     restoreIn.hidden = true;
     ui.pendingRestore = null;
+    ui.restoreFromMirror = false;
     if (b.dataset.restore !== 'yes' || !data) {
-      if (ui.restoreFromMirror) { ui.restoreFromMirror = false; dropMirror().then(releaseMirror); return setStatus('Safety copy discarded.'); }
+      if (fromMirror) { dropMirror().then(releaseMirror); return setStatus('Safety copy discarded.'); }
+      if (mirrorHeld) offerMirror(); // a file's offer had replaced the safety copy's: bring it back
       return setStatus('Restore cancelled.');
     }
     // Undo puts the three stores and the settings back exactly as they were.
@@ -4082,7 +4089,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
     try {
       const n = marks.importJson(data);
-      mirrorHeld = false; // answered: copies resume (refreshMarks below writes one)
+      // The copy's own offer answered: copies resume (refreshMarks below writes one). A file restored
+      // while that offer waits leaves the copy alone, and it's offered again for what's still missing.
+      if (fromMirror) mirrorHeld = false; else if (mirrorHeld) setTimeout(offerMirror, 0);
       const c = backupCfg(data.cfg);
       if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
       const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
@@ -4093,9 +4102,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
         keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
         marks.invalidate(true);
+        if (fromMirror) mirrorHeld = true; // the copy still holds what the undo took away: offer it again
         ui.applyCfg(cfgBefore);
         fillPresets(); renderSaved(); refreshMarks();
         setStatus('Restore undone.');
+        if (fromMirror) offerMirror();
       }, 'rf-undo-restore');
     } catch (err) { setStatus(err.message, true); }
   });
@@ -4683,7 +4694,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const before = marks.dump(rows.map((r) => r.id));
       const msg = fn(v, rows);
       refreshMarks();
-      if (msg) offerUndo(msg, () => { marks.restoreDump(before); refreshMarks(); });
+      if (msg) offerUndo(msg, () => { marks.restoreDump(before); refreshMarks(); }, 'rf-undo-restore'); // puts entries back wholesale: gone once another tab writes
     });
     bulk(ui.bulk, (v, rows) => {
       if (v === 'star') {
@@ -5053,7 +5064,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const b = e.target.closest('[data-t]');
       if (!b) return;
       if (b.dataset.t === 'undo') undo();
-      else { marks.setHideReason(id, b.dataset.r); if (cache) marks.decorate(cache); }
+      else { marks.setHideReason(id, b.dataset.r); mirrorSoon(); if (cache) marks.decorate(cache); }
       const had = t.contains(document.activeElement);
       clearTimeout(timer);
       t.remove();
@@ -5070,7 +5081,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     for (const reason of HIDE_REASONS) {
       const b = Object.assign(document.createElement('button'), { className: 'rf-undo', textContent: reason, type: 'button' });
       // No re-render: the listing is hidden, and re-rendering would replace this status line.
-      b.addEventListener('click', () => { marks.setHideReason(id, reason); if (cache) marks.decorate(cache); why.replaceChildren(` Noted: ${reason}.`); }, { once: true });
+      b.addEventListener('click', () => { marks.setHideReason(id, reason); mirrorSoon(); if (cache) marks.decorate(cache); why.replaceChildren(` Noted: ${reason}.`); }, { once: true });
       why.append(b, ' ');
     }
     ui.status.append(why);
@@ -5715,6 +5726,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     if (!id) { bar?.remove(); return; }
     if (onlyIfMoved && bar?.dataset.id === id) return; // same listing (eg a gallery ?query): keep focus
     if (bar?._editing && bar.dataset.id === id) return; // a note half-typed isn't redrawn away
+    if (bar?._editing) bar._finishEdit?.(true, false); // moved to another listing mid-note: keep the draft (not every browser fires blur on removal)
     const focusSel = bar?.contains(document.activeElement) ? lbarFocusSel(document.activeElement) : null;
     if (!bar) {
       bar = Object.assign(document.createElement('div'), { id: 'rf-lbar' });
@@ -5804,19 +5816,21 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     bar.querySelector('[data-l=min]').after(ta);
     bar._editing = true;
     ta.focus();
-    const finish = (save) => {
+    const finish = (save, refocus) => {
       if (!bar._editing) return;
       bar._editing = false;
+      bar._finishEdit = null;
       if (save && ta.value !== (r.note || '')) { marks.setNote(id, ta.value); mirrorSoon(); }
       renderListingBar();
-      bar.querySelector('[data-l=n]')?.focus();
+      if (refocus) bar.querySelector('[data-l=n]')?.focus(); // not when you clicked away
     };
+    bar._finishEdit = finish;
     ta.addEventListener('keydown', (e) => {
       e.stopPropagation(); // typing isn't a shortcut
-      if (e.key === 'Escape') finish(false);
-      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') finish(false, true);
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true, true); }
     });
-    ta.addEventListener('blur', () => finish(true));
+    ta.addEventListener('blur', () => finish(true, false));
   }
   function onListingBar(e) {
     const bar = e.currentTarget, id = bar.dataset.id, r = bar._row;
@@ -6054,6 +6068,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     window.addEventListener('popstate', fire);
     window.addEventListener('rf:navigate', () => {
       const active = isSearchPage(location.href);
+      if (active && mirrorHeld && !ui.pendingRestore && typeof indexedDB !== 'undefined') offerMirror(); // started on a listing page: ask here
       ui.launch.hidden = !active && !ui.pendingShare; // an unanswered share offer stays reachable
       if (!active && !ui.pendingShare) ui.setOpen(false);
       setTimeout(ensureVisiblePage, NAV_SETTLE_MS);

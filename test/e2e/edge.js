@@ -553,6 +553,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.$('.rf-preset-name'), null, 'Esc cancels');
     assert.ok(await page.isVisible('#rf-panel'), 'without closing the drawer');
     assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:nope'));
+    await page.selectOption('.rf-preset', 'c:save');
+    await page.keyboard.type('clicked away');
+    await page.click('#rf-from');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'rf-from', 'leaving by click keeps focus where it went');
+    assert.ok((await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:clicked away'), 'and saves');
+    await page.selectOption('.rf-preset', 'd:clicked away');
     await presetSave(page, 'c:save', '3-bed');
     assert.match(await status(page), /Saved preset "3-bed"/);
     await page.click('.rf-clear');
@@ -2126,6 +2132,34 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForFunction((s) => !document.querySelector(s), item);
     assert.ok(await page.$('.rf-achip:has-text("No busy road")'), 'chip shown');
     console.log('noise heads-ups: ok');
+    await done(page); await ctx.close();
+  });
+
+  // 61. A backup file restored while the safety copy's offer waits doesn't overwrite the copy:
+  // the copy is offered again for what the file didn't bring back.
+  await block('61', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
+    for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
+    await page.clock.runFor(2500);
+    const file = { app: 'rea-enhancement', kind: 'marks', v: 1, m: { [ids[0]]: (await marks(page))[ids[0]] } };
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
+    await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
+    await page.click('#rf-launch');
+    await page.waitForSelector('.rf-restore-in:not([hidden])');
+    assert.match(await page.textContent('.rf-restore-msg'), /safety copy .* has 2 listings/);
+    await page.click('[data-view=shortlist]');
+    await page.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+    await page.waitForFunction(() => /^Restore 1 listing/.test(document.querySelector('.rf-restore-msg')?.textContent || ''));
+    await page.click('[data-restore=yes]');
+    await page.waitForFunction(() => /^Some of your shortlist .* has 2 listings/.test(document.querySelector('.rf-restore-in:not([hidden]) .rf-restore-msg')?.textContent || ''), null, { timeout: 5000 });
+    await page.click('[data-restore=yes]');
+    await waitStatus(page, /^Restored/);
+    const m = await marks(page);
+    assert.ok(ids.every((id) => m[id]?.s === 1), 'both back');
+    console.log('file restore while the safety copy waits: ok');
     await done(page); await ctx.close();
   });
 
