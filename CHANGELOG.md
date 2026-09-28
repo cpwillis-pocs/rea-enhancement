@@ -2,6 +2,45 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.34.0
+
+- **What to ask the agent**: each heads-up (water billed, short lease, busy road…), each feature you filter on that a listing doesn't mention, and an unknown move-in date become plain questions. They show in the listing bar's details, the printout and Compare, and `{questions}` in your enquiry template adds them to the message.
+- **Your move, start to finish**:
+  - **Application pack**: tick the documents you have ready (a default list, or your own in Settings; names only) above the Shortlist. Apply-by nudges say "Pack: 3 of 5 ready".
+  - **Moving list**: once you're approved and have given notice, the Shortlist leads with the next thing on it. It's ticked off per listing, so moving again starts afresh.
+  - **Moving day** and **condition report days** (Settings) add moving day, with what's left on the list, and the report's due date to the calendar export.
+  - **Current rent** (Settings): each listing shows "+$50/wk vs now", with a Compare row and a `vs_current_rent` spreadsheet column.
+- **Share with a partner**: a share link can carry your notes, application statuses and ratings (one question, off by default). Opening one fills in a status only where you have none, and puts their rating in the note, never over yours. Older links open as before.
+- **In-drawer questions** replace the browser's pop-ups: including notes in a share link, and Delete all my data (focus starts on Cancel, Esc cancels).
+- **Easier to use**:
+  - On a phone, the controls fold into one bar once there are results, so the list starts at the top.
+  - More filters and Settings are grouped under headings, with Delete all my data last in red.
+  - A shortlisted listing's checklist folds away until it matters.
+  - The day plan, map and market view have a ×.
+  - Compare drops rows that are blank for every listing and keeps its labels in view as it scrolls.
+  - The listing bar's minimise is a corner button and its deadline line leads.
+  - Warnings and offers sit under the tabs.
+  - Touch keeps 44px targets, cards included.
+  - Pressed view buttons are tinted rather than looking like Search.
+  - Before a search, Bulk, Market, Map and the exports are hidden rather than greyed out.
+- Fixed:
+  - A session dropped from this morning is cancelled in the calendar. Its UTC stamp is now compared as an instant.
+  - A search stopped by a paging guard (a repeated or empty later page) isn't saved as complete, in a search or in Check all.
+  - A filtered Shortlist calendar export no longer cancels what's filtered out.
+  - Shortlist exports and the printout carry distances, lease fit and moving costs.
+  - Esc closes the note editor again.
+  - Delete all my data leaves nothing behind.
+  - Deadlines like "Thu. 8 Oct", "5pm, Thursday 8 October" and "Friday at 5pm" are read, and my inspection times like "Sat 12-2".
+  - Next steps once approved: I've given notice dismisses it with no lease end set, a lease already over has no notice date, and it stays when REA takes the approved listing down.
+- **Faster**:
+  - The end-of-search snapshot is trimmed and written in the next task, so results paint first.
+  - Its size budget is worked out from per-row pieces instead of a thrown-away full stringify.
+  - Saved searches redraw only while the drawer is open.
+- **Tests**:
+  - The accessibility check adds forced colours, reduced motion, and 640x450 and 320px windows (no sideways scrolling).
+  - e2e reports every failed block, not just the first. `E2E_RETRY=1` flags flaky blocks, and the ten slowest are listed.
+  - Lint requires every storage key to be documented.
+
 ## 2.33.0
 
 - **The calendar keeps up with your shortlist**:

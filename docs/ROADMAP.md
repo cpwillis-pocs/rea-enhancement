@@ -2,7 +2,7 @@
 
 Where the project stands, the decisions already taken, what is known not to work perfectly, and ideas that were considered but not built. The feature list is in the [README](../README.md), every change is in the [CHANGELOG](../CHANGELOG.md), and the internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Where it stands (v2.33.0)
+## Where it stands (v2.34.0)
 
 The project went from a single-purpose availability-date filter (1.0.0) to a full rental-search companion across 30+ releases. Each area below is built, unit- or e2e-tested, and described in the README.
 
@@ -10,12 +10,12 @@ The project went from a single-purpose availability-date filter (1.0.0) to a ful
 |---|---|
 | **Finding** | Crawl every page of a search (one page at a time, capped, resumable after a failure). Filters: dates, rent, move-in cost, cash to move, beds/baths/cars, floor size, several property types, 19 amenities, heads-up clauses (including noise: busy road, bar below, rail, flight path, construction), lease length, taken listings, inspection day or "inspections I can make" (weekends, evenings or your own typed times), distance to up to 3 places, building. Keywords with OR and accent folding. 13 sorts (including price per m² and cash to move), each reversible. |
 | **Judging** | Map view, rent trend per remembered search, tag tooltips quoting the text each tag was read from, amenity detail (pets welcome vs on application, heating type, water efficient), rent vs the median in the listing's own suburb, per-agency patterns in the market view, best-match score with adjustable weights, move-in cost and bond flag, cash to move, applications-close dates, lease overlap or gap against your current lease, share of income, price and date change history, relists, twin listings, market view. |
-| **Deciding** | Shortlist across searches with notes, checklist, your 1–5 rating, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text. |
-| **Inspecting** | The next stop and your checklist on the listing page, inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders (plus follow-ups, application deadlines, your notice date and your lease end, withdrawn once no longer needed), a notice-to-vacate nudge, after-inspection prompts, cancelled-inspection notices. |
+| **Deciding** | Shortlist across searches with notes, checklist, your 1–5 rating, application status and follow-ups. Hide with reasons (a price-hidden listing comes back if it gets cheaper). Reviewed marks, compare table, photo peek, enquiry text, questions to ask the agent (from heads-ups and features you filter on), rent vs what you pay now, share links for a partner with statuses and ratings. |
+| **Inspecting** | The next stop and your checklist on the listing page, inspection times in the listing's time zone, a day planner with clash detection and a suggested route, calendar export with reminders (plus follow-ups, application deadlines, your notice date and your lease end, withdrawn once no longer needed), a notice-to-vacate nudge, after-inspection prompts, cancelled-inspection notices, an application pack to tick off, and once approved a moving list with moving day and the condition report's due date in the calendar. |
 | **Returning** | Remembered and pinned searches with new / gone listings and a rent trend, Check all, a daily reminder, presets bound to searches, share links, backup and restore. |
-| **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Full keyboard control, dark mode (system, or set in Settings), phone layout, screen-reader labels (card buttons named per listing), High Contrast styles, a first-run welcome, badges and quick actions on REA's own cards, a bar on listing pages. |
+| **Using it** | Side drawer that scrolls as one page (resizable, compact mode, reopens on the listing you were on after a reload, in Results and Shortlist) or expanded near full screen. Controls fold into one bar on a phone once there are results. Full keyboard control, dark mode (system, or set in Settings), phone layout, screen-reader labels (card buttons named per listing), High Contrast styles, a first-run welcome, badges and quick actions on REA's own cards, a bar on listing pages. |
 | **Keeping it working** | Several fallback field paths, discovery by shape, results found by shape if REA renames them, cards found without `<article>` (and a banner if none can be recognised), drift warnings, `reaFilter.selfcheck()` / `probe()` / `shape()` (paste-safe listing structure), storage-full warning, a safety copy in IndexedDB, a size budget for remembered searches, a 10-minute pause after a bot check, a double-run guard, a one-time what's-new note after updates. |
-| **Project** | 221 unit tests (including shapes from `reaFilter.shape()`), 82 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, an optional local live check (`npm run live`), editor `#region`s with a checked Section index, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
+| **Project** | 227 unit tests (including shapes from `reaFilter.shape()`), 83 e2e scenario blocks plus a smoke flow (run three at a time in CI, `E2E_JOBS`), 98%+ UI line coverage, a lint for privacy and storage rules, SECURITY.md and PRIVACY.md, an optional local live check (`npm run live`), editor `#region`s with a checked Section index, and an on-demand CI pipeline (PRs + manual; no push or schedule triggers, to save Actions minutes). |
 
 ## Decisions already taken
 
@@ -50,9 +50,11 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 
 ## Ideas not built yet
 
-The 2.32.0 audit (its bugs, eleven ideas and the measured slow spots) shipped in 2.33.0 (see the [CHANGELOG](../CHANGELOG.md#2330)). Measured and still open:
-- The end of a 1000-listing search is one long task of about 165 ms (about 80 ms at a real 500). `adopt` takes 77 ms of it and `snaps.save` 56 ms. Deferring the save needs `adopt` split, because it uses the save's new/gone result.
-- `fitBudget`'s first full stringify is thrown away for any search over the budget: 6–12 ms at 500–1000 listings. Estimating the size from a sample of packed rows would avoid it.
+The 2.33.0 audit (its bugs, the UI/UX pass, seven ideas and the end-of-search slow spots) shipped in 2.34.0 (see the [CHANGELOG](../CHANGELOG.md#2340)). Considered then and left out:
+- Hiding Search all pages once there are results (Refresh would be the only button): 21 e2e blocks press Search after results, and both buttons read clearly enough.
+- Nested, collapsible groups for the heads-up and amenity chips in More filters: headings were added instead, and the chips stay flat so one tap reaches any of them.
+- A separate "vacate your old place" calendar event: the lease-end reminder already covers it.
+- Moving-list ticks as a marks field: they're kept in settings as `id|item,item` instead, which needs no marks schema change and still starts afresh for a new approved listing.
 - A full FILTERS spec (a consistency test guards it for now).
 
 Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
