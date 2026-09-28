@@ -2304,6 +2304,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx, SEARCH, { route: (r) => (/list-[23]/.test(r.request().url()) ? r.fulfill({ status: 200, contentType: 'text/html', body: reaPage(1, { pages: 3 }) }) : base(r)) });
     await run(page);
     assert.match(await page.textContent('.rf-warn-msg'), /repeated the first, so the search stopped there/);
+    assert.equal(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('rea-avail-filter/snapshots/v1') || '{"s":{}}').s || {}).length), 0, 'not remembered as a full crawl (the rest would count as gone)');
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
     console.log('pagination change guard: ok');
     await done(page); await ctx.close();

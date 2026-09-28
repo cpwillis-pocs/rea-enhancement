@@ -674,6 +674,7 @@ test('my inspection times: parsed, checked in the listing zone, filtered, and ex
   assert.deepEqual(w('17:30-'), [['0123456', 1050, 1440]], 'no days: every day');
   assert.deepEqual(w('weekdays 6pm-12am'), [['12345', 1080, 1440]], '12am as an end is midnight');
   assert.deepEqual(w('Sat 10am-2, weekdays 6pm-9'), [['6', 600, 840], ['12345', 1080, 1260]], 'an end without am/pm is later the same day');
+  assert.deepEqual(w('Sat 12-2, Sun'), [['6', 720, 840], ['0', 0, 1440]], 'a noon start too');
   for (const bad of ['nonsense', 'sunburn 9-10', 'sat 13-9', 'sat 25-26', '']) assert.equal(core.parseFreeTimes(bad), null, bad);
   const free = core.parseFreeTimes('Sat 9-13');
   const sat10 = Date.UTC(2026, 8, 26, 0), sat14 = Date.UTC(2026, 8, 26, 4); // 10am and 2pm in Sydney
@@ -1155,7 +1156,9 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   assert.equal(core.applyByOf('Applications due by 5pm Friday.', now), '', 'not guessed without a listed date');
   assert.equal(core.applyByOf('Applications are due by COB Friday.', now, { listedAt }), '2026-10-02');
   for (const [t, want] of [['Applications close Fri, 3 Oct', '2026-10-03'], ['Applications close Friday, 3 October 2026', '2026-10-03'], ['Applications close 3.10.2026', '2026-10-03'],
-    ['Applications close 5.30pm Friday 3 October', '2026-10-03'], ['Applications closed 1 Sep. Applications now close Friday 9 October', '2026-10-09']]) assert.equal(core.applyByOf(t, now, { listedAt }), want, t);
+    ['Applications close 5.30pm Friday 3 October', '2026-10-03'], ['Applications closed 1 Sep. Applications now close Friday 9 October', '2026-10-09'],
+    ['Applications close Thu. 8 Oct', '2026-10-08'], ['Applications close Thurs. 8th October 2026', '2026-10-08'], ['Applications close 5pm, Thursday 8 October', '2026-10-08'],
+    ['Applications close noon, Fri 2 Oct', '2026-10-02'], ['Applications close Friday at 5pm', '2026-10-02']]) assert.equal(core.applyByOf(t, now, { listedAt }), want, t);
   assert.equal(core.applyByOf('Applications close midday Friday', now, { listedAt }), '2026-10-02');
   assert.equal(core.applyByOf('Applications close Friday', now, { listedAt: new Date(2026, 8, 1) }), '', 'that Friday has passed');
   const soon = { applyBy: '2026-09-30' };
@@ -1238,6 +1241,10 @@ test('toIcs prev/sent: what dropped out of the shortlist since the last export g
   assert.match(ics, /UID:lease-end@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/, 'lease end cleared: cancelled');
   assert.equal(next.length, 1);
   assert.equal(core.toIcs([], now + 60000, { prev: [{ u: 'x@elsewhere', s: 'DTSTART:20261001T000000Z' }, { u: 'old@rea-enhancement', s: 'DTSTART:20250101T000000Z' }] }), '', 'foreign or past entries left alone');
+  const morning = Date.UTC(2026, 8, 27, 23, 30); // 9:30am 28 Sep in Sydney, the 27th in UTC
+  const early = core.toIcs([], morning - 3600e3, { prev: [{ u: `146500009-${morning}@rea-enhancement`, s: `DTSTART:${new Date(morning).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}` }] });
+  assert.match(early, /STATUS:CANCELLED/, "this morning's session, dropped, is cancelled whatever the UTC date");
+  assert.equal(core.toIcs([], now, { prev: [{ u: 'a@rea-enhancement', s: 'DTSTART:20261001T000000Z\r\nX-EVIL:1' }] }), '', 'a stored entry with a line break is ignored');
 });
 
 test('periodic lease: ends your notice period after notice (or today); fit, cash and filters use it; no notice nudge', () => {

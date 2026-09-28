@@ -1597,7 +1597,7 @@
   const APPLY_BY_G = /\b(?:applications?|apps)\s+(?:(?:now|will)\s+)?(?:close[sd]?|closing|are due|due|must be (?:in|submitted|received|lodged))\b|\bclosing date(?:\s+for\s+applications?)?\b/gi;
   // A weekday alone ("due by 5pm Friday") is the first such day on or after `listedAt` (REA's
   // listed date): never counted from today, which would slide the deadline forward every week.
-  const WEEKDAY_ONLY = /^(?:(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|cob|close of business|midday|noon)\s+)?(?:on\s+|this\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm))?\s*$/i;
+  const WEEKDAY_ONLY = /^(?:(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|cob|close of business|midday|noon)\s+)?(?:on\s+|this\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\s*(?:(?:at\s+)?\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm))?\s*$/i;
   const applyByOf = (text, now = new Date(), { listedAt = null } = {}) => {
     const src = String(text || '');
     APPLY_BY_G.lastIndex = 0;
@@ -1606,7 +1606,9 @@
       if (!/^\d|^(?:mon|tue|wed|thu|fri|sat|sun|cob\b|close of business|midday|noon)/i.test(tail)) continue;
       // This clause only (not "…, lease starts 20 October"), but a comma after a weekday is part of
       // the date ("Fri, 3 Oct"), and a dot between digits is a time or date ("5.30pm", "3.10.2026").
-      const clause = tail.replace(/^((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?),/i, '$1').split(/\.(?!\d)|[;,\n]|\s[-–]\s/)[0].trim();
+      const clause = tail.replace(/^((?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|noon|midday|cob)),\s*(?=(?:mon|tue|wed|thu|fri|sat|sun|\d))/i, '$1 ') // "5pm, Thursday 8 October"
+        .replace(/^((?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\s+|noon\s+|midday\s+|cob\s+)?(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*)\.?,?(?=\s+\d)/i, '$1') // "Thu. 8 Oct", "Fri, 3 Oct" (a date follows)
+        .split(/\.(?!\d)|[;,\n]|\s[-–]\s/)[0].trim();
       let d = parseAvail(`Available ${clause}`, now, { keepPast: true });
       const wd = !d && clause.match(WEEKDAY_ONLY);
       if (wd && listedAt instanceof Date && !isNaN(listedAt)) {
@@ -1966,6 +1968,11 @@
     } while (page <= max);
     return { rows, truncated: total > MAX_PAGES, sample, ...(paging ? { paging } : {}) };
   }
+  const PAGING_MSG = {
+    repeat: 'A later results page repeated the first, so the search stopped there: REA may have changed how it pages results.',
+    empty: 'A later results page came back empty, so the search stopped there: REA may have changed how it pages results.',
+    missing: "REA's page count wasn't found, so only the first page was read: REA may have changed how it pages results.",
+  };
   const PAGE_FULL = 20; // a results page this full with no page count is probably not the last
 
   // --------------------------------------------------------------- filter
@@ -2155,7 +2162,7 @@
       let from = hasRange ? clockMin(t[1]?.trim(), 0) : 0;
       let to = hasRange ? clockMin(t[2]?.trim(), 1440) : 1440;
       if (to === 0) to = 1440; // "6pm-12am" ends at midnight
-      if (hasRange && t[2] && !/[ap]m/.test(t[2]) && (/[ap]m/.test(t[1] || '') || from < 720) && to <= from && to + 720 > from) to += 720; // "10am-2", "6pm-9": the end is later the same day
+      if (hasRange && t[2] && !/[ap]m/.test(t[2]) && (/[ap]m/.test(t[1] || '') || from <= 720) && to <= from && to + 720 > from) to += 720; // "10am-2", "6pm-9": the end is later the same day
       if (hasRange && t[1] && !/[ap]m/.test(t[1]) && /pm/.test(t[2] || '') && from < 720 && from + 720 < to) from += 720; // "6-8pm" is 6pm to 8pm
       if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || (!days.size && !hasRange)) return null;
       out.push({ days: days.size ? days : new Set(WEEKDAYS.map((_, d) => d)), from, to });
@@ -2803,10 +2810,10 @@
       if (!r.applyBy || r.applyBy < today || seen.has(`${r.id}-ab`)) continue;
       seen.add(`${r.id}-ab`);
       allDay(`${r.id}-ab@rea-enhancement`, r.applyBy, `Applications close: ${r.address || 'rental'}`, [r.url ? `URL:${r.url}` : ''],
-        { cancel: ['applied', 'approved', 'declined'].includes(r.appStatus) || deadEnd(r) });
+        { cancel: ['applied', 'approved', 'declined'].includes(r.appStatus) || deadEnd(r), alarm: r.applyBy > today }); // today's: the day-before alarm has gone
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) {
-      allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends');
+      allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends', [], { alarm: leaseEnd > today });
       // Your own notice period (it varies by state and lease, so it's yours to enter): the last
       // day to give notice, or today if that's already passed.
       const by = noticeBy(leaseEnd, noticeDays);
@@ -2823,8 +2830,13 @@
     if (Array.isArray(prev)) {
       const here = new Set(events.map(uidOf)), todayIcs = ymdLocal(new Date(now)).replace(/-/g, '');
       for (const p of prev) {
-        if (!p || typeof p.u !== 'string' || !/^DTSTART(?:;VALUE=DATE)?:\d{8}/.test(p.s || '') || here.has(p.u) || !/@rea-enhancement$/.test(p.u)) continue;
-        if (p.s.replace(/^[^:]*:/, '').slice(0, 8) < todayIcs) continue; // past: leave it be
+        // Only what this script writes (nothing a same-page script could slip a line break into).
+        if (!p || typeof p.u !== 'string' || !/^[\w.-]+@rea-enhancement$/.test(p.u) || here.has(p.u)) continue;
+        const t = String(p.s || '').match(/^DTSTART(?:;VALUE=DATE:(\d{8})|:(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z)$/);
+        if (!t) continue;
+        // Past: leave it be. A timed one is compared as the instant it is (its stamp is UTC, so its
+        // date isn't today's local date before 10am in Sydney); an all-day one by date.
+        if (t[1] ? t[1] < todayIcs : Date.UTC(+t[2], +t[3] - 1, +t[4], +t[5], +t[6], +t[7]) < now - INSPECT_GRACE_MS) continue;
         here.add(p.u);
         events.push(['BEGIN:VEVENT', `UID:${p.u}`, `DTSTAMP:${icsTime(now)}`, p.s, `SEQUENCE:${seq}`, 'STATUS:CANCELLED', 'SUMMARY:Cancelled: no longer on your shortlist', 'END:VEVENT']);
       }
@@ -5113,6 +5125,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
           out.push(`${label}: couldn't be read`);
           continue;
         }
+        if (res.paging) { // not every page read: saving it would count the rest as gone
+          formatWarn(PAGING_MSG[res.paging]);
+          ui.savedResult.set(key, { error: true });
+          out.push(`${label}: stopped early (REA's paging may have changed)`);
+          continue;
+        }
         const ids = new Set(res.rows.map((r) => r.id));
         const found = { added: res.rows.filter((r) => !before.has(r.id)).length, gone: [...before].filter((id) => !ids.has(id)).length };
         if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
@@ -5163,7 +5181,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     const won = nextSteps(all, cfg), due = noticeDue(cfg);
     if (won || due) { // your own lease: tell the landlord in time
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: "I've given notice" });
-      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); }, { once: true });
+      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); ui.slFilter.focus(); }, { once: true }); // the button goes with the redraw: focus somewhere that stays
       const addr = won ? String(won.r.address || 'a listing').split(',')[0] : '';
       const notice = due ? (due.days < 0 ? `Your notice date (${shortDate(due.by)}) has passed.` : `Give notice by ${shortDate(due.by)}${due.days ? ` (${plural(due.days, 'day')})` : ' (today)'} for your lease ending ${shortDate(cfg.leaseEnd)}.`)
         : won?.by ? `Give notice by ${shortDate(won.by)}.` : won?.days ? `Give ${won.days} days' notice when you're ready.` : won ? 'Set your notice period in Settings for its date.' : '';
@@ -5763,6 +5781,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
         logError(`search: page ${res.failed.page}: ${res.failed.message}`);
         return;
       }
+      if (res.paging) { // a paging guard stopped it: shown, but like a part-read, not a full crawl
+        formatWarn(PAGING_MSG[res.paging]);
+        learn(res.rows, true, false);
+        adopt(key, res.rows, res.truncated, '', null, false);
+        textClipped = false;
+        return;
+      }
       if (res.sample) rawSample = res.sample;
       let drops = [];
       try { drops = health.record(res.rows); } catch (e) { logError(`health: ${e.message}`); }
@@ -5770,9 +5795,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       const drift = [...moved, ...drops.map((d) => `${d.field} on ${pct(d.now)} of listings (usually ${pct(d.usual)})`)];
       setWarn('drift', drift.length ? `REA may have changed its data: ${drift.join('; ')}. Copy report, then paste it into an issue on the script's GitHub page.` : '');
       setWarn('format', ''); // every page read: an earlier odd page was a one-off
-      if (res.paging) formatWarn(res.paging === 'repeat' ? "A later results page repeated the first, so the search stopped there: REA may have changed how it pages results."
-        : res.paging === 'empty' ? "A later results page came back empty, so the search stopped there: REA may have changed how it pages results."
-        : "REA's page count wasn't found, so only the first page was read: REA may have changed how it pages results.");
       store.set(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0));
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated) : null;
       setWarn('saved', snap?.refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
