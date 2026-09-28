@@ -1180,3 +1180,28 @@ test('2.32 fixes: passed or next-clause deadlines, dead ends, withdrawn reminder
   assert.deepEqual([...core.bestRoute(day).picked].map((x) => x.r.id), ['a']);
   assert.match(core.planHtml(day, '2026-09-29'), /outside your times[\s\S]*1 session left out: declined, taken, hidden or no longer listed/);
 });
+
+// Adding a filter touches several places (default, FILTER_KEYS, chip label, removal, row test):
+// every filter key needs a sample here, and each must give a chip that names it, a removal that
+// clears it, and a row test that runs.
+test('filters: each has a chip, a removal and a row test', () => {
+  const SAMPLE = {
+    from: '2026-10-01', to: '2026-10-31', withinDays: '14', priceMin: '500', priceMax: '900', upfrontMax: '4000', cashMax: '4500',
+    bedsMin: '2', bathsMin: '1', carsMin: '1', sizeMin: '60', type: 'Apartment', keyword: 'pool', inspectOn: '2026-10-03',
+    inspectWhen: 'weekend', hideNoImage: true, hideTaken: true, exactOnly: true, onlyStarred: true, newOnly: true, changedOnly: true,
+    unopenedOnly: true, unreviewedOnly: true, staleOnly: true, amenities: 'pets:yes', noWatch: 'water', maxKm: '5', floorplanOnly: true,
+    leaseMin: '12', onePerBuilding: true, building: 'k|1 Hall St',
+  };
+  const TAG = { from: 'date', to: 'date', withinDays: 'date', amenities: 'amen:pets', noWatch: 'watch:water' };
+  const SET_LEVEL = new Set(['onePerBuilding']); // applied over the whole set, not per row
+  const now = new Date(2026, 8, 23);
+  for (const k of core.FILTER_KEYS) {
+    assert.ok(Object.hasOwn(SAMPLE, k), `${k}: add a sample here (and a chip label, removal and row test in the script)`);
+    const cfg = { ...core.DEFAULT_CFG, [k]: SAMPLE[k], anchor: '-33.89, 151.27' };
+    const chips = core.activeFilters(cfg).filter((c) => c.key === k);
+    assert.equal(chips.length, 1, `${k}: one chip`);
+    assert.notEqual(chips[0].label, k, `${k}: the chip has a label, not the key`);
+    assert.equal(core.activeFilters(core.without(cfg, chips[0])).filter((c) => c.key === k).length, 0, `${k}: removing the chip clears it`);
+    if (!SET_LEVEL.has(k)) assert.ok(core.rowTests(cfg, now).some(([tag]) => tag === (TAG[k] || k)), `${k}: a row test runs`);
+  }
+});
