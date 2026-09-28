@@ -2327,6 +2327,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 68. A periodic lease: tick it and set your notice, and each listing's fit is worked out
+  // against your notice period from today; other moving costs join Cash to move.
+  await block('68', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    await page.click('.rf-settings > summary');
+    await page.check('#rf-periodic');
+    await page.fill('#rf-noticeDays', '21'); await page.dispatchEvent('#rf-noticeDays', 'change');
+    await page.fill('#rf-moveCosts', '1500'); await page.dispatchEvent('#rf-moveCosts', 'change');
+    await page.selectOption('#rf-sort', 'fit');
+    await page.waitForFunction(() => /overlap|gap|starts right after your lease/.test(document.querySelector('.rf-list')?.textContent || ''));
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-exports [data-export=csv]')]);
+    const [head, line] = fs.readFileSync(await dl.path(), 'utf8').split('\r\n');
+    const col = (h) => line.split(',')[head.split(',').indexOf(h)];
+    assert.ok(+col('cash_to_move') >= +col('move_in_cost') + 1500, 'moving costs in cash to move');
+    console.log('periodic lease and moving costs: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   assert.deepEqual(errors.map((e) => e.msg), [], 'no page errors');
   if (only && !ran) throw new Error(`E2E_ONLY=${process.env.E2E_ONLY} matched no block`);

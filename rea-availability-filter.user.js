@@ -57,7 +57,7 @@
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
   const ROWS_VERSION = 14; // bump when toRow() shape changes
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
-  const ROW_RUNTIME = ['_worst', '_worstFor', 'rating', 'fit', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
+  const ROW_RUNTIME = ['_worst', '_worstFor', 'rating', 'fit', 'moveExtra', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
     'km', 'placeKm', '_kmFor', 'median', 'vsMedian', 'medianScope', 'buildingN', 'buildingAddr', 'alsoListed'];
   const ROW_DATES = ['avail', 'nextInspect', 'listed'];
@@ -1985,12 +1985,16 @@
     { key: 'remindSaved', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
     ...[['wRent', 'Rent'], ['wTiming', 'Timing'], ['wDist', 'Distance'], ['wMovein', 'Move-in']].map(([key, label]) => ({ key, kind: 'select', def: '2', label, options: WEIGHT_OPTS, group: 'Best match: how much each counts', name: 'weights' })),
     { key: 'icsAlarm', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
+    { key: 'periodic', kind: 'check', def: false, label: 'My lease is periodic (month to month, no end date)', name: 'periodic lease',
+      help: 'Then your lease ends your notice period after you give notice (from today until you do): set the notice below.' },
     { key: 'leaseEnd', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
       help: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing (sort: Least overlap)." },
     { key: 'noticeDays', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
       help: "Days before your lease ends that you must tell your landlord or agent. It depends on your state and your lease, so check them. Needs your lease end above; the Shortlist and the calendar export then remind you." },
     { key: 'noticeGiven', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
       help: 'Once you have given notice: the reminders stop.' },
+    { key: 'moveCosts', kind: 'int', def: '', min: 0, max: 100000, step: 50, label: 'Other moving costs, $ (optional)', placeholder: 'eg 1500', name: 'moving costs',
+      help: 'Removalists, cleaning, connections: added to Cash to move, its sort and its filter.' },
     { key: 'checklist', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
     { key: 'enquiry', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
       help: 'Placeholders: {address} {price} {available} {inspection} {link}. Keep personal details out: this is stored in your browser on REA\'s site.' },
@@ -2514,7 +2518,8 @@
   function applyFilters(rows, cfg, now = new Date()) {
     cfg = { ...DEFAULT_CFG, ...cfg };
     const kept = filterRows(rows, cfg, now);
-    for (const r of kept) r.fit = leaseFit(r, cfg.leaseEnd, now);
+    const leaseEnd = leaseEndOf(cfg, now);
+    for (const r of kept) { r.fit = leaseFit(r, leaseEnd, now); r.moveExtra = num(cfg.moveCosts) || 0; }
     return withScores(kept, cfg).sort(sorter(cfg.sort, cfg.sortDesc));
   }
 
@@ -2555,7 +2560,7 @@
     // Move-in plus rent paid twice while your lease overlaps (the fit is worked out here: rows
     // get theirs only after filtering).
     const cashMax = num(cfg.cashMax);
-    add('cashMax', cashMax != null, (r) => (Number.isFinite(r.upfront) ? r.upfront + (leaseFit(r, cfg.leaseEnd, now)?.cost || 0) : Infinity) <= cashMax);
+    add('cashMax', cashMax != null, (r) => (Number.isFinite(r.upfront) ? r.upfront + (leaseFit(r, leaseEndOf(cfg, now), now)?.cost || 0) + (num(cfg.moveCosts) || 0) : Infinity) <= cashMax);
     for (const [k, key] of [['beds', 'bedsMin'], ['baths', 'bathsMin'], ['cars', 'carsMin']]) {
       const v = num(cfg[key]);
       add(key, v != null, (r) => r[k] !== '' && +r[k] >= v);
@@ -2634,7 +2639,17 @@
   const fitLabel = (f) => (!f ? '' : f.overlap ? `${plural(f.overlap, 'day')} overlap${f.cost ? ` ≈ ${money(f.cost)}` : ''}` : f.gap ? `${plural(f.gap, 'night')} gap` : 'starts right after your lease');
   const fitKey = (f) => (!f ? Infinity : f.gap ? 1e9 + f.gap : f.cost + f.overlap / 100);
   // Cash on day one: the move-in cost plus any rent paid twice while your lease overlaps.
-  const cashToMove = (r) => (Number.isFinite(r.upfront) ? r.upfront + (r.fit?.cost || 0) : null);
+  // Your lease's last day: the date you set, or on a periodic (month-to-month) lease, your notice
+  // period from the day you gave notice (or from today, if you haven't yet). '' when unknown.
+  const leaseEndOf = (cfg, now = new Date()) => {
+    if (!cfg.periodic) return cfg.leaseEnd || '';
+    const n = Math.round(+cfg.noticeDays);
+    if (!(n >= 1 && n <= 120)) return '';
+    const from = isYmd(cfg.noticeGiven || '') ? new Date(`${cfg.noticeGiven}T00:00:00`) : startOfDay(now);
+    return ymdLocal(new Date(from.getFullYear(), from.getMonth(), from.getDate() + n));
+  };
+  // `moveExtra`: your own other moving costs (Settings), set beside `fit` when rows are filtered.
+  const cashToMove = (r) => (Number.isFinite(r.upfront) ? r.upfront + (r.fit?.cost || 0) + (r.moveExtra || 0) : null);
 
   const historyText = (r) => (r.priceHistory || []).map(([at, p]) => `${ymdLocal(new Date(at))} ${p}`).join(' → ');
   const ppbLabel = (r) => (+r.beds > 1 && Number.isFinite(r.ppb) ? `$${r.ppb}/bed` : '');
@@ -2707,6 +2722,7 @@
     return given >= ymdLocal(new Date(y - 1, m - 1, d));
   };
   const noticeDue = (cfg, now = new Date()) => {
+    if (cfg.periodic) return null; // no fixed end: your notice sets the date, there's no deadline to miss
     const by = noticeBy(cfg.leaseEnd, cfg.noticeDays), today = ymdLocal(now);
     if (!by || noticeGivenFor(cfg.leaseEnd, cfg.noticeGiven) || cfg.leaseEnd < today) return null;
     const days = Math.round((new Date(`${by}T00:00:00`) - startOfDay(now)) / DAY_MS);
@@ -3216,7 +3232,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
       return vals.length > 1 && vals.some((v) => v !== min) ? min : null;
     };
     const head = rows.map((r) => `<th scope="col"><a href="${esc(r.url)}" target="_blank" rel="noopener">${r.img ? `<img src="${esc(r.img)}" alt="">` : ''}<span>${esc(r.address)}</span></a></th>`).join('');
-    const body = compareRows(cfg).filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (!['Your lease', 'Cash to move'].includes(label) || !!cfg.leaseEnd)).map(([label, show, score]) => {
+    const body = compareRows(cfg).filter(([label]) => (label !== 'Of income' || num(cfg.income) > 0) && (label !== 'Places' || parsePlaces(cfg.places).length) && (label !== 'Your lease' || !!leaseEndOf(cfg)) && (label !== 'Cash to move' || !!leaseEndOf(cfg) || num(cfg.moveCosts) > 0)).map(([label, show, score]) => {
       const b = score ? best(score) : null;
       return `<tr><th scope="row">${label}</th>${rows.map((r) => `<td${b != null && score(r) === b ? ' class="rf-best"' : ''}>${esc(show(r)) || '<span class="rf-na">–</span>'}</td>`).join('')}</tr>`;
     }).join('');
@@ -3227,7 +3243,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, noticeBy, noticeDue, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, noticeBy, noticeDue, leaseEndOf, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3266,7 +3282,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   const icsSent = () => keyStore(storageOr('localStorage'), ICS_SENT_KEY); // lazy: storageOr is defined further down
   function downloadIcs(rows, { reminders = false, track = false } = {}) {
     const sent = [];
-    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.leaseEnd, noticeDays: num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true } : {}),
+    const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.periodic ? (cfg.noticeGiven ? leaseEndOf(cfg) : '') : cfg.leaseEnd, noticeDays: cfg.periodic ? 0 : num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true } : {}),
       ...(track ? { prev: icsSent().getJson() || [], sent } : {}) });
     if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
     download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
@@ -5080,7 +5096,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
     // Distance for the shortlist too (applyFilters isn't run over it).
     const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places);
-    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, cfg.leaseEnd); }
+    for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, leaseEndOf(cfg)); r.moveExtra = num(cfg.moveCosts) || 0; }
     ui.rows = rows;
     setExport(rows.length === 0);
     const days = inspectDays(rows);
@@ -5961,7 +5977,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${checklist.length ? `<div
   document.addEventListener('visibilitychange', () => { if (!document.hidden && lbarTimer && document.getElementById('rf-lbar')) renderListingBar(); });
   function lbarDetails(r, open) {
     setDistances(r, cfg, parseAnchor(cfg.anchor), parsePlaces(cfg.places));
-    const fit = cfg.leaseEnd ? leaseFit(r, cfg.leaseEnd) : null, cash = Number.isFinite(r.upfront) && fit?.cost ? r.upfront + fit.cost : null;
+    const fit = leaseEndOf(cfg) ? leaseFit(r, leaseEndOf(cfg)) : null, extra = (fit?.cost || 0) + (num(cfg.moveCosts) || 0);
+    const cash = Number.isFinite(r.upfront) && extra ? r.upfront + extra : null;
     const rec = r.agency ? recordText(agencyRecord(marks.shortlist()).get(agencyKey(r.agency))) : '';
     const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
       cash != null ? `cash to move ${money(cash)}` : '', applyByLabel(r.applyBy), rec ? `${r.agency}: ${rec}` : '', sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',

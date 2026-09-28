@@ -660,6 +660,10 @@ test('cash to move: move-in plus the overlap; sort puts unknowns last; CSV and C
   assert.deepEqual(core.filterRows(rows, capped, now).map((r) => r.id), ['gap'], 'Max cash to move: the overlap counts; unknown move-in fails');
   assert.deepEqual(core.activeFilters(capped).map((c) => c.label), ['Cash to move ≤ $4,000']);
   assert.deepEqual(core.filterRows(rows, { ...capped, leaseEnd: '' }, now).map((r) => r.id), ['over', 'gap'], 'no lease end: it is the move-in cost');
+  const extra = core.applyFilters(rows, { ...cfg, moveCosts: '1000' }, now);
+  assert.equal(core.cashToMove(extra.find((r) => r.id === 'over')), 5100, 'other moving costs added');
+  assert.deepEqual(core.filterRows(rows, { ...capped, moveCosts: '200' }, now).map((r) => r.id), [], 'and counted by the filter');
+  assert.match(core.compareHtml(extra.slice(0, 2), { ...cfg, leaseEnd: '', moveCosts: '1000' }), /Cash to move/, 'shown with moving costs alone');
 });
 
 test('my inspection times: parsed, checked in the listing zone, filtered, and explained when unreadable', () => {
@@ -1234,4 +1238,17 @@ test('toIcs prev/sent: what dropped out of the shortlist since the last export g
   assert.match(ics, /UID:lease-end@rea-enhancement\r\n[\s\S]*?STATUS:CANCELLED/, 'lease end cleared: cancelled');
   assert.equal(next.length, 1);
   assert.equal(core.toIcs([], now + 60000, { prev: [{ u: 'x@elsewhere', s: 'DTSTART:20261001T000000Z' }, { u: 'old@rea-enhancement', s: 'DTSTART:20250101T000000Z' }] }), '', 'foreign or past entries left alone');
+});
+
+test('periodic lease: ends your notice period after notice (or today); fit, cash and filters use it; no notice nudge', () => {
+  const now = new Date(2026, 8, 28, 12);
+  const cfg = { ...core.DEFAULT_CFG, periodic: true, noticeDays: '21', leaseEnd: '2027-06-30' };
+  assert.equal(core.leaseEndOf(cfg, now), '2026-10-19', 'from today');
+  assert.equal(core.leaseEndOf({ ...cfg, noticeGiven: '2026-09-20' }, now), '2026-10-11', 'from the day you gave notice');
+  assert.equal(core.leaseEndOf({ ...cfg, noticeDays: '' }, now), '', 'no notice period: unknown');
+  assert.equal(core.leaseEndOf({ ...cfg, periodic: false }, now), '2027-06-30', 'fixed term: the date you set');
+  const rows = [{ id: 'a', url: 'a', avail: new Date(2026, 9, 5), priceNum: 700, upfront: 3500 }];
+  const [r] = core.applyFilters(rows, cfg, now);
+  assert.deepEqual([r.fit.overlap, core.cashToMove(r)], [15, 3500 + 1500], 'overlap to the periodic end');
+  assert.equal(core.noticeDue(cfg, now), null);
 });
