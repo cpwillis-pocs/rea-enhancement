@@ -2153,7 +2153,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-more summary');
     await page.selectOption('#rf-inspectWhen', 'weekend');
     const weekend = await count(page);
-    assert.equal(await page.isVisible('#rf-inspectFree'), false, 'your times are asked for once At my times is picked');
+    assert.equal(await page.isVisible('#rf-inspectFree'), true, 'your times can be set whatever the filter: {mytimes} and the day planner use them too');
     await page.selectOption('#rf-inspectWhen', 'mine');
     await page.fill('#rf-inspectFree', 'weekends'); await page.dispatchEvent('#rf-inspectFree', 'change');
     await page.waitForFunction((n) => document.querySelectorAll('.rf-item').length === n, weekend);

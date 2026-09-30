@@ -296,7 +296,7 @@
   // What changed on the Shortlist since `since` (your last visit): counts, the listings, and a line.
   const sinceChanges = (rows, since, now = Date.now()) => {
     const after = (t) => typeof t === 'number' && t > since;
-    const today = ymdLocal(new Date(now)), tomorrow = ymdLocal(new Date(now + DAY_MS));
+    const today = ymdLocal(new Date(now)), tomorrow = addDaysYmd(today, 1); // by the calendar: the night clocks change is 23 or 25 hours
     const c = { cheaper: [], dearer: [], gone: [], cancelled: [], changed: [], closing: [] };
     for (const r of rows) {
       if (after(r.priceAt) && r.priceDir) c[r.priceDir === 'down' ? 'cheaper' : 'dearer'].push(r);
@@ -450,7 +450,7 @@
         ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
         beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
         ...moveIn(d.bo, priceNum), agency: d.ag || '',
-        starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, declineReason: DECLINE_REASONS.includes(e.dr) ? e.dr : '', listed: null, lastSeen: e.l || null,
+        starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, declineReason: e.as === 'declined' && DECLINE_REASONS.includes(e.dr) ? e.dr : '', listed: null, lastSeen: e.l || null,
         gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), answers: cleanQa(e.qa), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
         // The latest inspection that has already happened (the display list drops past ones).
         lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
@@ -465,7 +465,7 @@
     // Read-modify-write of one listing's entry: fn(entry, all marks) returns what the setter returns.
     const edit = (id, fn) => { const { m } = fresh(); const out = fn(entry(m, id), m); save(); return out; };
     const bag = (d, f) => (d[f] = isObj(d[f]) ? d[f] : {});
-    const setAs = (e, status) => { if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } };
+    const setAs = (e, status) => { if (status) { e.as = status; e.ast = now(); } else { delete e.as; delete e.ast; } if (status !== 'declined') delete e.dr; }; // a reason only while declined
     // Hidden agencies (ag) and suburbs (sb): name -> shown name, keyed case/space-insensitively.
     const NAMED = { ag: 80, sb: 60 };
     const toggleNamed = (f) => (raw) => {
@@ -565,7 +565,7 @@
           r.appStatus = e?.as || '';
           r.rating = e?.rt >= 1 && e.rt <= 5 ? e.rt : 0;
           r.appAt = e?.as && e.ast ? e.ast : null;
-          r.declineReason = DECLINE_REASONS.includes(e?.dr) ? e.dr : '';
+          r.declineReason = e?.as === 'declined' && DECLINE_REASONS.includes(e.dr) ? e.dr : '';
           r.agencyHidden = !!(r.agency && ag?.[agencyKey(r.agency)]);
           r.suburbHidden = !!(r.suburb && sb?.[agencyKey(r.suburb)]);
           r.firstSeen = e?.f ? new Date(e.f) : null;
@@ -2928,7 +2928,7 @@
   // profile set up, so each is a pack item ("2Apply profile") while one is on the shortlist.
   const portalItem = (p) => `${p} profile`;
   const packPortals = (rows) => [...new Set(rows.filter((r) => r.applyVia && !deadEnd(r)).map((r) => r.applyVia))].sort();
-  const packState = (cfg, portals = []) => { const items = [...tickItems(cfg.packList, PACK_DEFAULT), ...portals.map(portalItem)], done = tickSet(cfg.packDone); return { items, done: items.filter((i) => done.has(i)) }; };
+  const packState = (cfg, portals = []) => { const items = [...new Set([...tickItems(cfg.packList, PACK_DEFAULT), ...portals.map(portalItem)])], done = tickSet(cfg.packDone); return { items, done: items.filter((i) => done.has(i)) }; };
   const packLabel = (cfg, portals = []) => { const { items, done } = packState(cfg, portals); return done.length === items.length ? 'Application pack ready' : `Pack: ${done.length} of ${items.length} ready`; };
   const packToggle = (cfg, item, portals = []) => { const d = tickSet(cfg.packDone); if (d.has(item)) d.delete(item); else d.add(item); return [...d].filter((i) => packState(cfg, portals).items.includes(i) || /\sprofile$/.test(i)).join(','); }; // a portal's tick outlives its listing
   // The apply-by nudge: how ready you are, and whether this listing's portal is set up.
@@ -3265,7 +3265,11 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
   const freeTimesText = (v) => {
     const slots = parseFreeTimes(v);
     if (!slots?.length) return '';
-    const days = (set) => { const d = [...set].sort(); return d.join() === '1,2,3,4,5' ? 'weekdays' : d.join() === '0,6' ? 'weekends' : d.map((x) => DAY_NAMES[x].charAt(0).toUpperCase() + DAY_NAMES[x].slice(1, 3)).join('/'); };
+    const days = (set) => {
+      const d = [...set].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)); // Monday first
+      const k = [...d].sort().join();
+      return k === '0,1,2,3,4,5,6' ? 'any day' : k === '1,2,3,4,5' ? 'weekdays' : k === '0,6' ? 'weekends' : d.map((x) => DAY_NAMES[x].charAt(0).toUpperCase() + DAY_NAMES[x].slice(1, 3)).join('/');
+    };
     const parts = slots.map(({ days: ds, from, to }) => `${days(ds)}${from <= 0 && to >= 1440 ? '' : from <= 0 ? ` before ${clock12(to)}` : to >= 1440 ? ` after ${clock12(from)}` : ` ${clock12(from)}–${clock12(to)}`}`);
     return `I can inspect ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}` : parts[0]}.`;
   };
@@ -3670,7 +3674,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-more>label,.rf-more>.rf-grid3{margin-top:8px}
   .rf-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .rf-controls .rf-sort{display:flex;align-items:center;gap:6px}
-  #rf-panel:not(:has(#rf-inspectWhen option[value="mine"]:checked)) label:has(>#rf-inspectFree){display:none} /* asked for once "At my times" is picked */
   .rf-controls .rf-sort select{width:auto}
   .rf-type{font-weight:400;color:var(--rf-soft);font-size:12px}
   .rf-controls .rf-check{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;text-transform:none;
@@ -3913,7 +3916,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     .rf-lbar-more summary{display:flex;align-items:center}
     /* Every control in the drawer (the a11y check measures them all on a touch phone). */
     #rf-panel button,#rf-panel select{min-height:44px} #rf-panel button{min-width:44px}
-    #rf-panel summary{min-height:44px;display:flex;align-items:center}
+    #rf-panel summary{min-height:44px;box-sizing:border-box;padding-top:12px;padding-bottom:12px} /* stays a list item: keeps its ▸ marker */
   }
   @media (prefers-reduced-motion: reduce){ [data-rf-id][data-rf-match="0"],#rf-panel *,#rf-lbar *{transition:none!important;animation:none!important} }
   [data-rf-id][data-rf-match="0"]:hover{opacity:1}
@@ -4816,7 +4819,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       onChange({ type: 'change' });
       return setStatus(msg);
     }
-    if (b.dataset.act === 'dr') { marks.setDeclineReason(id, b.dataset.r); refreshMarks([id]); itemEl(id, `[data-act=dr][data-r="${CSS.escape(b.dataset.r)}"]`)?.focus(); return; }
+    // A decline reason shows in the agency's record on its other listings too: all redraw.
+    if (b.dataset.act === 'dr') { marks.setDeclineReason(id, b.dataset.r); refreshMarks(); itemEl(id, `[data-act=dr][data-r="${CSS.escape(b.dataset.r)}"]`)?.focus(); return; }
     if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
     if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
     if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
@@ -4877,7 +4881,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const on = marks.toggle(id, act, rowById(id));
     // A star changes only its own listing (unless a filter drops it); a hide, its own and its
     // building's ("N in this building").
-    refreshMarks(act === 's' ? [id] : act === 'h' ? withMates(id) : null);
+    // On the Shortlist a star changes others too (the agency record, the pack's portals): all redraw.
+    refreshMarks(act === 's' && ui.view !== 'shortlist' ? [id] : act === 'h' ? withMates(id) : null);
     // Re-render replaced the button: put focus back (or on the next item if this one left the list).
     const q = (i) => itemEl(i, `[data-act="${act}"]`);
     (q(id) || (next && q(next)) || ui.list).focus?.();
@@ -5365,7 +5370,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   ui.toFilters = () => {
     ui.fold?.(false);
     panel.scrollTop = 0;
-    (ui.view === 'shortlist' ? ui.slBar.querySelector('select, input, button') : panel.querySelector('#rf-from'))?.focus({ preventScroll: true });
+    (ui.view === 'shortlist' ? ui.slQuery : panel.querySelector('#rf-from'))?.focus({ preventScroll: true }); // the search stays when the bar folds
     ui.syncSticky();
   };
   toFilters.addEventListener('click', () => ui.toFilters());
@@ -5420,7 +5425,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   // Where you were in each tab (and for which search + filters), so switching tabs keeps it.
   // Shortlist-only settings (ticks, its order, the visit stamp) don't move your place on Results.
-  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify({ ...cfg, packDone: '', moveDone: '', ecrDone: '', slSort: '', slSeenAt: '' })}`);
+  const SL_ONLY = ['packDone', 'moveDone', 'ecrDone', 'slSort', 'slSeenAt'];
+  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify({ ...cfg, ...Object.fromEntries(SL_ONLY.map((k) => [k, ''])) })}`);
   // Settings live on Results: switch there, open them and go to one field (from the Shortlist's
   // "set your notice period", or a tick list's "Edit this list").
   function openSetting(key) {
@@ -5449,11 +5455,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.panel.classList.toggle('rf-wide', sl && !!ui.compare);
     if (sl && ui.slSince == null) { // this page's first Shortlist visit: changes since the last one (an hour or more ago) are named
       const last = +cfg.slSeenAt || 0;
-      ui.slSince = last || Date.now();
+      ui.slSince = last && Date.now() - last > HOUR_MS ? last : 0; // back within the hour, or a first visit: nothing to name
       if (Date.now() - last > HOUR_MS) { // stored quietly: nothing to redraw
         cfg = { ...cfg, slSeenAt: String(Date.now()) };
+        cfgBase = { ...cfgBase, slSeenAt: cfg.slSeenAt };
         const el = ui.panel.querySelector('#rf-slSeenAt'); if (el) el.value = cfg.slSeenAt;
-        saveCfg(cfg);
+        saveCfg({ ...DEFAULT_CFG, ...loadCfg(), slSeenAt: cfg.slSeenAt }); // only the stamp: another tab's saved settings stay
       }
     }
     if (sl) renderShortlist();
@@ -5573,10 +5580,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         const ids = new Set(res.rows.map((r) => r.id));
         const added = res.rows.filter((r) => !before.has(r.id));
         // How many of the new ones get past the filters: the search's own preset if it has one, else yours.
-        const bound = presets.forSearch(key), fcfg = { ...cfg, ...(bound ? bound.cfg : {}) };
+        const bound = presets.forSearch(key), fcfg = { ...cfg, building: '', ...(bound ? bound.cfg : {}) }; // this tab's building focus is about another search
         let match = null;
         if (added.length && activeFilters(fcfg).length) {
-          const copies = marks.decorate(added.map((r) => ({ ...r }))), anchor = parseAnchor(fcfg.anchor), places = parsePlaces(fcfg.places);
+          const copies = marks.decorate(added.map((r) => ({ ...r, sinceLast: true }))), anchor = parseAnchor(fcfg.anchor), places = parsePlaces(fcfg.places);
           for (const r of copies) setDistances(r, fcfg, anchor, places);
           match = filterRows(copies, fcfg).length;
         }
@@ -5601,6 +5608,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     }
   }
 
+  // Somewhere on the Shortlist bar that's still there: its status filter, or (folded, on a phone) the bar's button.
+  const slFocus = () => (ui.slBar.classList.contains('rf-folded') ? ui.slBar.querySelector('.rf-sl-unfold') : ui.slFilter).focus();
   function renderShortlist() {
     const all = marks.shortlist();
     const rows = shortlistRows(all);
@@ -5633,18 +5642,18 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const since = ui.slSince ? sinceChanges(all, ui.slSince) : null;
     if (since?.text && ui.slFilter.value !== '~') { // since your last visit, with a way to see just those
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: 'Show them' });
-      b.addEventListener('click', () => { ui.slFilter.value = '~'; renderShortlist(); ui.slFilter.focus(); });
+      b.addEventListener('click', () => { ui.slFilter.value = '~'; renderShortlist(); slFocus(); });
       ui.status.append(` Since your last visit (${ago(Date.now() - ui.slSince)}): ${since.text}. `, b);
     }
     const won = nextSteps(all, cfg), due = noticeDue(cfg);
     if (won || due) { // your own lease: tell the landlord in time
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: "I've given notice" });
-      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); if (!cache) renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); ui.slFilter.focus(); }, { once: true }); // the button goes with the redraw: focus somewhere that stays
+      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); if (!cache) renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); slFocus(); }, { once: true }); // the button goes with the redraw: focus somewhere that stays
       const addr = won ? String(won.r.address || 'a listing').split(',')[0] : '';
       const notice = due ? (due.days < 0 ? `Your notice date (${shortDate(due.by)}) has passed.` : `Give notice by ${shortDate(due.by)}${due.days ? ` (${plural(due.days, 'day')})` : ' (today)'} for your lease ending ${shortDate(cfg.leaseEnd)}.`)
         : won?.by ? `Give notice by ${shortDate(won.by)}.` : won?.days ? `Give ${won.days} days' notice when you're ready.` : won ? 'Set your notice period in Settings for its date.' : '';
       const toSet = won && !won.by && !won.days && !due ? Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: 'Open Settings' }) : null;
-      toSet?.addEventListener('click', () => openSetting(cfg.leaseEnd ? 'noticeDays' : 'leaseEnd'));
+      toSet?.addEventListener('click', () => openSetting(cfg.leaseEnd || cfg.periodic ? 'noticeDays' : 'leaseEnd')); // a periodic lease has no end to set
       ui.status.append(` ${won ? `Approved for ${addr}. ` : ''}${notice}${won?.pending ? ` ${plural(won.pending, 'other application')} still waiting.` : ''} `, ...(toSet ? [toSet, ' '] : []), b);
     }
   }
@@ -7038,6 +7047,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
             cfg = { ...cfg, theme: stored.theme };
             const sel = ui.panel.querySelector('#rf-theme'); if (sel) sel.value = stored.theme;
             return applyTheme();
+          }
+          // Shortlist-only (ticks, its order, the visit stamp): taken quietly, redrawn only on the Shortlist,
+          // so another tab's tick doesn't move this tab's Results.
+          if (moved.every((k) => SL_ONLY.includes(k))) {
+            cfg = { ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) };
+            for (const k of moved) { const el = ui.panel.querySelector(`#rf-${k}`); if (el) el.value = stored[k]; }
+            if (ui.view === 'shortlist') renderShortlist();
+            return;
           }
           ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
         }

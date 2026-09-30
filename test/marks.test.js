@@ -417,6 +417,11 @@ test('decline reasons: optional, stored per listing, backed up, counted in the a
   st.setDeclineReason(r.id, 'nonsense');
   assert.equal(st.shortlist()[0].declineReason, '', 'unknown reasons clear it');
   st.setDeclineReason(r.id, 'pets');
+  st.setStatus(r.id, 'approved');
+  assert.equal(st.shortlist()[0].declineReason, '', 'a reason only while declined');
+  st.setStatus(r.id, 'declined');
+  assert.equal(st.shortlist()[0].declineReason, '', 'declined again: the old reason is gone');
+  st.setDeclineReason(r.id, 'pets');
   const back = core.marksStore(mem(), () => 1e12);
   back.importJson(st.exportData());
   assert.equal(back.shortlist()[0].declineReason, 'pets');
