@@ -2118,7 +2118,7 @@
       help: 'What agents usually ask for when you apply. Tick what you have ready on the Shortlist; the apply reminders say how much is. Names only: no documents are stored.' },
     { key: 'movingList', section: 'Reminders & templates', kind: 'textarea', rows: 2, def: '', maxLength: 400, label: 'Moving list (comma-separated)', placeholder: () => MOVING_DEFAULT, name: 'moving list' },
     { key: 'enquiry', section: 'Reminders & templates', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => `eg ${enquiryText({ address: '10 Example St, Bondi', price: '$650 per week', available: 'Available now', inspections: [{ label: 'Sat 11 Oct, 10:00am' }] }, '')}`, name: 'enquiry template',
-      help: 'Placeholders: {address} {price} {available} {inspection} {link}, and {questions} for what to ask (heads-ups, features you filter on it doesn\'t mention). Keep personal details out: this is stored in your browser on REA\'s site.' },
+      help: 'Placeholders: {address} {price} {available} {inspection} {link}, {questions} for what to ask (heads-ups, features you filter on it doesn\'t mention), and {mytimes} for your inspection times. Keep personal details out: this is stored in your browser on REA\'s site.' },
     { key: 'remember', section: 'Your data', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
     { key: 'remindSaved', section: 'Your data', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
   ];
@@ -2878,9 +2878,15 @@
   const MOVING_DEFAULT = 'Book removalists, Connect power and gas, Connect internet, Redirect mail, Update your address, Book the end-of-lease clean, Hand back the old keys';
   const tickItems = (v, def) => [...new Set(String(v || def).split(/[,\n]/).map((x) => clip(x.replace(/\|/g, '/').trim(), 40)).filter(Boolean))].slice(0, CHECK_MAX); // | separates the listing id in moveDone
   const tickSet = (v) => new Set(String(v || '').split(',').filter(Boolean));
-  const packState = (cfg) => { const items = tickItems(cfg.packList, PACK_DEFAULT), done = tickSet(cfg.packDone); return { items, done: items.filter((i) => done.has(i)) }; };
-  const packLabel = (cfg) => { const { items, done } = packState(cfg); return done.length === items.length ? 'Application pack ready' : `Pack: ${done.length} of ${items.length} ready`; };
-  const packToggle = (cfg, item) => { const d = tickSet(cfg.packDone); if (d.has(item)) d.delete(item); else d.add(item); return [...d].filter((i) => packState(cfg).items.includes(i)).join(','); };
+  // `portals`: the apply portals your shortlisted listings name (2Apply, Snug…): each needs its
+  // profile set up, so each is a pack item ("2Apply profile") while one is on the shortlist.
+  const portalItem = (p) => `${p} profile`;
+  const packPortals = (rows) => [...new Set(rows.filter((r) => r.applyVia && !deadEnd(r)).map((r) => r.applyVia))].sort();
+  const packState = (cfg, portals = []) => { const items = [...tickItems(cfg.packList, PACK_DEFAULT), ...portals.map(portalItem)], done = tickSet(cfg.packDone); return { items, done: items.filter((i) => done.has(i)) }; };
+  const packLabel = (cfg, portals = []) => { const { items, done } = packState(cfg, portals); return done.length === items.length ? 'Application pack ready' : `Pack: ${done.length} of ${items.length} ready`; };
+  const packToggle = (cfg, item, portals = []) => { const d = tickSet(cfg.packDone); if (d.has(item)) d.delete(item); else d.add(item); return [...d].filter((i) => packState(cfg, portals).items.includes(i) || /\sprofile$/.test(i)).join(','); }; // a portal's tick outlives its listing
+  // The apply-by nudge: how ready you are, and whether this listing's portal is set up.
+  const applyReady = (r, cfg, portals = []) => `${packLabel(cfg, portals)}${r.applyVia && !tickSet(cfg.packDone).has(portalItem(r.applyVia)) ? ` · ${r.applyVia} profile not ready` : ''}`;
   const addDaysYmd = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); return ymdLocal(new Date(y, m - 1, d + n)); };
   // Approved somewhere: the moving list, what's next on it, moving day and when the entry
   // condition report is due (moving day plus your state's days). null otherwise.
@@ -3188,15 +3194,26 @@
 
   // Enquiry message from a template: {address} {price} {available} {inspection} {link} {questions}.
   const ENQUIRY_DEFAULT = 'Hi, I\'m interested in {address} ({price}). Is it still available{available}? {inspection}Thanks.';
-  const enquiryText = (r, template, amenities = '') => String(template || ENQUIRY_DEFAULT)
+  // Your inspection times (Settings) as a sentence for {mytimes}: "I can inspect Sat 9am–1pm, Sun, or weekdays after 5:30pm."
+  const clock12 = (m) => { const h = Math.floor(m / 60) % 24, mm = m % 60; return `${h % 12 || 12}${mm ? `:${String(mm).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'}`; };
+  const freeTimesText = (v) => {
+    const slots = parseFreeTimes(v);
+    if (!slots?.length) return '';
+    const days = (set) => { const d = [...set].sort(); return d.join() === '1,2,3,4,5' ? 'weekdays' : d.join() === '0,6' ? 'weekends' : d.map((x) => DAY_NAMES[x].charAt(0).toUpperCase() + DAY_NAMES[x].slice(1, 3)).join('/'); };
+    const parts = slots.map(({ days: ds, from, to }) => `${days(ds)}${from <= 0 && to >= 1440 ? '' : from <= 0 ? ` before ${clock12(to)}` : to >= 1440 ? ` after ${clock12(from)}` : ` ${clock12(from)}–${clock12(to)}`}`);
+    return `I can inspect ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}` : parts[0]}.`;
+  };
+  // A by-appointment listing: ask for a viewing at your times.
+  const VIEWING_TEMPLATE = "Hi, could I arrange a viewing of {address} ({price})? {mytimes} Thanks.";
+  const enquiryText = (r, template, amenities = '', free = '') => String(template || ENQUIRY_DEFAULT)
     .replace(/\{address\}/g, r.address || 'this property').replace(/\{price\}/g, r.price || 'price on request')
     .replace(/\{available\}/g, () => {
       const a = String(r.available && r.available !== '-' ? r.available : '').replace(/^available\s*(from\s*)?/i, '').trim();
       return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
     })
     .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? ')
-    .replace(/\{link\}/g, r.url || '').replace(/\{questions\}/g, () => askList(r, amenities, { open: true }).join(' '))
-    .replace(/\s+\n/g, '\n').trim();
+    .replace(/\{link\}/g, r.url || '').replace(/\{questions\}/g, () => askList(r, amenities, { open: true }).join(' ')).replace(/\{mytimes\}/g, () => freeTimesText(free))
+    .replace(/ {2,}/g, ' ').replace(/\s+\n/g, '\n').trim(); // an empty placeholder leaves no double space
 
   // One listing as plain text for a message.
   // "Available 12 Oct · 2 bed, 1 bath, ? car · move-in $3,300": shared by Copy and Print.
@@ -3438,7 +3455,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, byNext, sinceChanges, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3512,6 +3529,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     --rf-err:#c00;--rf-tag:#eee;--rf-up:#b34700;--rf-star-fg:#8a6100}
   @media (prefers-color-scheme: dark){ :root:not([data-rf-theme=light]) ${RF_ROOTS}{${DARK_TOKENS}} }
   :root[data-rf-theme=dark] ${RF_ROOTS}{${DARK_TOKENS};color-scheme:dark} :root[data-rf-theme=light] ${RF_ROOTS}{color-scheme:light}
+  #rf-launch .rf-launch-due{color:#fde68a}
   #rf-launch{position:fixed;right:20px;bottom:20px;z-index:2147483000;padding:11px 16px;border:0;border-radius:999px;
     background:var(--rf-accent);color:#fff;font:600 13px/1 system-ui,-apple-system,sans-serif;cursor:pointer;
     box-shadow:0 4px 16px rgba(0,0,0,.28)}
@@ -3893,6 +3911,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.launchN = n;
     const star = marks.counts().starred;
     ui.launch.textContent = `Availability Filter${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
+    // Shortlisted listings that need something from you (a deadline, a follow-up, did you inspect?)
+    // and your own notice date: named on the launcher, so they're seen without opening the drawer.
+    const todo = (star ? marks.shortlist().filter((r) => needsAction(r) || needsFollowUp(r)).length : 0) + (noticeDue(cfg) ? 1 : 0);
+    if (todo) ui.launch.append(' · ', Object.assign(document.createElement('span'), { className: 'rf-launch-due', textContent: `● ${todo} to do` }));
   };
   const currentKey = () => (isSearchPage(location.href) ? searchKey(location.href) : null);
 
@@ -4758,7 +4780,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     }
     if (b.dataset.act === 'enq') {
       const r = rowOf(id);
-      if (r) copyText(enquiryText(r, cfg.enquiry, cfg.amenities)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
+      if (r) copyText(enquiryText(r, cfg.enquiry, cfg.amenities, cfg.inspectFree)).then((ok) => setStatus(ok ? 'Enquiry copied: paste it into the agent\'s contact form.' : 'Clipboard blocked.', !ok));
+      return;
+    }
+    if (b.dataset.act === 'viewing') {
+      const r = rowOf(id);
+      if (r) copyText(enquiryText(r, VIEWING_TEMPLATE, cfg.amenities, cfg.inspectFree)).then((ok) => setStatus(ok ? `Viewing request copied${freeTimesText(cfg.inspectFree) ? ', with your inspection times' : ' (set My inspection times under More filters to include them)'}.` : 'Clipboard blocked.', !ok));
       return;
     }
     if (b.dataset.act === 'copy') {
@@ -5421,7 +5448,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const here = currentKey();
     ui.saved.querySelector('.rf-saved-list').innerHTML = entries.map(([k, e]) => {
       const r = ui.savedResult.get(k);
-      const found = r?.error ? ' · <span class="rf-warn-t">couldn\'t be read</span>' : r ? ` · <strong>${r.added} new</strong>${r.gone ? `, ${r.gone} gone` : ''}` : '';
+      const found = r?.error ? ' · <span class="rf-warn-t">couldn\'t be read</span>' : r ? ` · <strong>${r.added} new</strong>${r.match != null ? ` (${r.match} match)` : ''}${r.gone ? `, ${r.gone} gone` : ''}` : '';
       return `<li><a href="${esc(safeUrl(k))}">${esc(searchLabel(k))}</a>${k === here ? ' <span class="rf-tag">this search</span>' : ''}
         <button type="button" class="rf-chip rf-pin" data-saved-pin="${esc(k)}" aria-pressed="${!!e.pin}" title="${e.pin ? 'Pinned: kept when you open other searches' : `Keep this one when more than ${SNAP_MAX} searches are opened`}">${e.pin ? 'Pinned' : 'Pin'}</button>
         <div class="rf-meta">${(e.ids || e.rows || []).length} listings · checked ${esc(ago(Date.now() - e.at))}${found}</div>${trendText(e.trend) ? `<div class="rf-meta rf-trend">${esc(trendText(e.trend))}</div>` : ''}</li>`;
@@ -5459,14 +5486,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
           continue;
         }
         const ids = new Set(res.rows.map((r) => r.id));
-        const found = { added: res.rows.filter((r) => !before.has(r.id)).length, gone: [...before].filter((id) => !ids.has(id)).length };
+        const added = res.rows.filter((r) => !before.has(r.id));
+        // How many of the new ones get past the filters: the search's own preset if it has one, else yours.
+        const bound = presets.forSearch(key), fcfg = { ...cfg, ...(bound ? bound.cfg : {}) };
+        let match = null;
+        if (added.length && activeFilters(fcfg).length) {
+          const copies = marks.decorate(added.map((r) => ({ ...r }))), anchor = parseAnchor(fcfg.anchor), places = parsePlaces(fcfg.places);
+          for (const r of copies) setDistances(r, fcfg, anchor, places);
+          match = filterRows(copies, fcfg).length;
+        }
+        const found = { added: added.length, gone: [...before].filter((id) => !ids.has(id)).length, match, by: bound ? `its preset ${bound.name}` : 'your filters' };
         if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
         store.set(key, res.rows, res.truncated);
         const snap = snaps.save(key, res.rows, res.truncated);
         if (key === currentKey()) adopt(key, res.rows, res.truncated, '', snap, true);
         else learn(res.rows, true, true);
         ui.savedResult.set(key, found);
-        out.push(`${label}: ${found.added} new${found.gone ? `, ${found.gone} gone` : ''}`);
+        out.push(`${label}: ${found.added} new${found.match != null ? ` (${found.match} match ${found.by})` : ''}${found.gone ? `, ${found.gone} gone` : ''}`);
         if (i < keys.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
       }
       setStatus(`Checked ${plural(keys.length, 'saved search', 'es')}. ${out.join(' · ')}.`);
@@ -5483,6 +5519,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function renderShortlist() {
     const all = marks.shortlist();
     const rows = shortlistRows(all);
+    ui.portals = packPortals(all);
+    setLaunchCount(ui.launchN ?? null); // its to-do count follows the statuses and your notice settings
     renderTicks(all);
     ui.slFold?.(ui.slFolded ?? true); // on a phone: folded until you open it
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
@@ -5536,8 +5574,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       const on = done.includes(i);
       return `<button type="button" class="rf-chip" ${attr}="${esc(i)}" aria-pressed="${on}">${on ? '✓ ' : ''}${esc(i)}</button>`;
     }).join('')}</div>`;
-    const { items, done } = plan || packState(cfg);
-    const head = plan ? `Moving list ${done.length}/${items.length}${plan.next ? ` · next: ${plan.next}` : ''}${plan.moveDate ? ` · moving ${shortDate(plan.moveDate)}` : ''}` : packLabel(cfg).replace(/^Pack:/, 'Application pack:');
+    const { items, done } = plan || packState(cfg, packPortals(all));
+    const head = plan ? `Moving list ${done.length}/${items.length}${plan.next ? ` · next: ${plan.next}` : ''}${plan.moveDate ? ` · moving ${shortDate(plan.moveDate)}` : ''}` : packLabel(cfg, packPortals(all)).replace(/^Pack:/, 'Application pack:');
     const open = ui.ticksOpen ?? false;
     box.innerHTML = `<details${open ? ' open' : ''}><summary>${esc(head)}</summary>${plan ? chips(items, done, 'data-mv', 'Moving list') : chips(items, done, 'data-pack', 'Application pack')}<button type="button" class="rf-undo" data-edit-list="${plan ? 'movingList' : 'packList'}">Edit this list</button></details>`;
     box.firstChild.addEventListener('toggle', (e) => { ui.ticksOpen = e.currentTarget.open; });
@@ -5552,7 +5590,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       const plan = pack ? null : movePlan(marks.shortlist(), cfg);
       if (!pack && !plan) return;
       ui.ticksOpen = true; // before the redraw applyCfg makes
-      ui.applyCfg(pack ? { ...cfg, packDone: packToggle(cfg, item) } : { ...cfg, moveDone: moveToggle(cfg, plan, item) });
+      ui.applyCfg(pack ? { ...cfg, packDone: packToggle(cfg, item, packPortals(marks.shortlist())) } : { ...cfg, moveDone: moveToggle(cfg, plan, item) });
       if (!cache) renderShortlist(); // with results, applying the settings has redrawn the Shortlist already
       ui.slBar.querySelector(`[data-${pack ? 'pack' : 'mv'}="${CSS.escape(item)}"]`)?.focus();
     });
@@ -5918,7 +5956,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       ${r.buildingN || r.alsoListed?.length ? `<div class="rf-group rf-sec">${r.buildingN ? `<button type="button" class="rf-chip" data-act="bldg" title="Show only listings at ${esc(r.buildingAddr)}">${r.buildingN} in this building</button>` : ''}${r.alsoListed?.length
         ? ` <span class="rf-meta">Also listed ${r.alsoListed.map((x) => `${x.agency ? `by ${esc(x.agency)} ` : ''}${x.price ? `at ${esc(x.price)}` : ''}`).join('; ')}</span>` : ''}</div>` : ''}
       ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
-      ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? ${esc(packLabel(cfg))}. <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
+      ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? ${esc(applyReady(r, cfg, ui.portals || []))}. <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => r.checks?.[k]).length}/${checks.length}${asks.length ? ` · Asked ${asks.filter((x) => x.a).length}/${asks.length}` : ''}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];
@@ -5935,6 +5973,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
+          ${r.byAppt ? '<button data-act="viewing" title="Inspections are by appointment: copy a request for a viewing, with your inspection times">Ask for a viewing</button>' : ''}
           ${am.some((t) => t[1]) || wt.some((t) => t[1]) ? '<button data-act="whytags" aria-expanded="false">Why these tags?</button>' : ''}
           ${am.some((t) => t[3]) || wt.some((t) => t[3]) ? '<button data-act="case" title="A wrong tag? Copy the phrases each tag was read from, in the unit-test table format, for a bug report or a fix">Report a wrong tag…</button>' : ''}
           ${r.hidden ? `<span class="rf-meta">Why hidden?</span>${HIDE_REASONS.map((x) => `<button data-act="why" data-r="${x}" aria-pressed="${r.hideReason === x}">${reasonLabel(x)}</button>`).join('')}` : ''}
@@ -6451,7 +6490,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     lbarTick(!!nx);
     // Applications close soon and you haven't applied: say so above the fold, with a one-tap fix.
     const asks = askItems(r, cfg.amenities);
-    const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))} · ${esc(packLabel(cfg))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
+    const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))} · ${esc(applyReady(r, cfg, packPortals(sl)))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
     return `${due}${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks"><span class="rf-lbar-lab" aria-hidden="true">My rating</span>${ratingHtml(r, 'data-l="rt"')}</div>
       ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div>${asks.length ? `<div class="rf-lbar-info rf-lbar-ask"><span class="rf-lbar-lab">Ask the agent (tap once answered)</span><div class="rf-lbar-checks" role="group" aria-label="What to ask the agent">${asks.map((x) => qaBtn(x, 'data-l="qa"')).join('')}</div></div>` : ''}</details>`;

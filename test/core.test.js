@@ -699,6 +699,18 @@ test('application pack: ticks by name, a label for the apply nudges, stale ticks
   assert.equal(core.packState(core.DEFAULT_CFG).items.length, 5, 'a default pack');
 });
 
+test('application pack: a portal a shortlisted listing names becomes a profile to set up', () => {
+  const rows = [{ id: '1', applyVia: '2Apply' }, { id: '2', applyVia: 'Snug', appStatus: 'declined' }, { id: '3', applyVia: '2Apply' }, { id: '4' }];
+  const portals = core.packPortals(rows);
+  assert.deepEqual(portals, ['2Apply'], 'once each; not for dead ends');
+  const cfg = { ...core.DEFAULT_CFG, packList: 'ID, Payslips' };
+  assert.deepEqual(core.packState(cfg, portals).items, ['ID', 'Payslips', '2Apply profile']);
+  assert.equal(core.applyReady(rows[0], cfg, portals), 'Pack: 0 of 3 ready · 2Apply profile not ready');
+  const c2 = { ...cfg, packDone: core.packToggle(cfg, '2Apply profile', portals) };
+  assert.equal(core.applyReady(rows[0], c2, portals), 'Pack: 1 of 3 ready');
+  assert.equal(core.packToggle(c2, 'ID', []), '2Apply profile,ID', 'a portal tick outlives its listing');
+});
+
 test('moving plan: once approved, a moving list per listing, moving day and condition report in the calendar', () => {
   const won = { id: '146500001', appStatus: 'approved', address: '1 New St, Bondi' };
   const rows = [{ id: '2', appStatus: 'applied' }, won];
@@ -788,6 +800,14 @@ test('agent answers: recorded per question, left out of {questions} once answere
   const back = core.marksStore(require('./helpers').memStorage(), () => 1e12);
   back.importJson(st.exportData());
   assert.deepEqual(back.shortlist()[0].answers, sl.answers, 'backed up and restored');
+});
+
+test('{mytimes}: your inspection times as a sentence; nothing without them', () => {
+  assert.equal(core.freeTimesText('Sat 9-13, Sun, weekdays 17:30-'), 'I can inspect Sat 9am–1pm, Sun or weekdays after 5:30pm.');
+  assert.equal(core.freeTimesText('weekends'), 'I can inspect weekends.');
+  assert.equal(core.freeTimesText(''), '');
+  assert.equal(core.enquiryText({ address: '1 A St', price: '$600' }, 'Hi. {mytimes} Thanks.', '', ''), 'Hi. Thanks.', 'an empty one leaves no gap');
+  assert.equal(core.enquiryText({ address: '1 A St', price: '$600' }, 'Hi. {mytimes}', '', 'Sat 9-12'), 'Hi. I can inspect Sat 9am–12pm.');
 });
 
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {

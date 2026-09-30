@@ -829,11 +829,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-run'); await waitStatus(page, /listings match/);
     await page.waitForFunction(() => document.querySelectorAll('.rf-saved-list li').length === 2);
     assert.match(await page.textContent('.rf-saved-list'), /this search/);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-priceMax', '800'); await page.dispatchEvent('#rf-priceMax', 'change');
     await page.click('.rf-saved summary');
     await page.click('[data-saved-check]');
     await waitStatus(page, /Checked 2 saved searches/, 30000);
     const st = await status(page);
-    assert.match(st, /Manly NSW 2095: [1-9]\d* new/, 'all listings new for the empty snapshot');
+    assert.match(st, /Manly NSW 2095: [1-9]\d* new \(\d+ match your filters\)/, 'all listings new for the empty snapshot, and how many get past the filters');
     assert.match(st, /Bondi[^:]*: 0 new/, 'current search unchanged');
     assert.match(await page.textContent('.rf-saved-list'), /\d+ new/);
     // Opting out mid-check stores nothing more.
@@ -2187,6 +2189,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-view=shortlist]');
     await page.selectOption('.rf-sl-filter', '!');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101'], 'only the close deadline needs action');
+    const launchText = await page.textContent('#rf-launch'); assert.match(launchText, /· ● 2 to do$/, `the launcher names it: the deadline and your notice date (${launchText})`);
     assert.match(await page.textContent('.rf-item .rf-nudge'), /Applications close Fri,? 25 Sept?: apply\?/);
     assert.match(await page.textContent('.rf-item'), /Apply by Fri,? 25 Sept?/);
     // The application pack: tick what's ready; the apply nudge counts it.
