@@ -710,7 +710,7 @@
           if (typeof e.x === 'number' && !(seenHere > e.x)) cur.x = e.x; // seen live here since: not gone
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
-          if (DECLINE_REASONS.includes(e.dr)) cur.dr = e.dr;
+          if (cur.as === 'declined' && DECLINE_REASONS.includes(e.dr)) cur.dr = e.dr; else if (cur.as !== 'declined') delete cur.dr;
           if (Number.isInteger(e.rt) && e.rt >= 1 && e.rt <= 5) cur.rt = e.rt;
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           const qa = cleanQa(e.qa); if (Object.keys(qa).length) cur.qa = { ...cleanQa(cur.qa), ...qa };
@@ -1230,7 +1230,8 @@
     // "$800 pw / $3,466 pcm" and "$600 per week (a month free)" stay weekly. A range
     // ("$2,600 - $2,800 per month") takes the period after its second figure.
     const parts = s.slice(m.index + m[0].length).split('$');
-    const tail = /^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0];
+    // A time ("open Sat 1 pm") isn't a period: taken out before "pm" can read as per month.
+    const tail = (/^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0]).replace(/\b\d{1,2}(?:[:.]\d\d)?\s*[ap]\.?m\b\.?/gi, ' ');
     const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
     if (!weekly) {
       if (/\b(per\s*(?:calendar\s*)?month|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
@@ -2794,10 +2795,11 @@
     const end = dayNum(new Date(`${leaseEnd}T00:00:00`)), start = Math.max(dayNum(r.avail), dayNum(now));
     if (end < dayNum(now)) return null; // your lease already ended: nothing to fit
     const overlap = Math.max(0, end - start + 1), gap = Math.max(0, start - end - 1);
-    return { overlap, gap, cost: overlap && Number.isFinite(r.priceNum) ? Math.round((overlap * r.priceNum) / 7) : 0 };
+    // An overlap at an unknown rent has an unknown cost (null), not a free one.
+    return { overlap, gap, cost: !overlap ? 0 : Number.isFinite(r.priceNum) ? Math.round((overlap * r.priceNum) / 7) : null };
   };
   const fitLabel = (f) => (!f ? '' : f.overlap ? `${plural(f.overlap, 'day')} overlap${f.cost ? ` ≈ ${money(f.cost)}` : ''}` : f.gap ? `${plural(f.gap, 'night')} gap` : 'starts right after your lease');
-  const fitKey = (f) => (!f ? Infinity : f.gap ? 1e9 + f.gap : f.cost + f.overlap / 100);
+  const fitKey = (f) => (!f ? Infinity : f.gap ? 1e9 + f.gap : f.cost == null ? 5e8 + f.overlap : f.cost + f.overlap / 100); // unknown cost after every known one
   // Cash on day one: the move-in cost plus any rent paid twice while your lease overlaps.
   // Your lease's last day: the date you set, or on a periodic (month-to-month) lease, your notice
   // period from the day you gave notice (or from today, if you haven't yet). '' when unknown.
@@ -3276,13 +3278,13 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
   // A by-appointment listing: ask for a viewing at your times.
   const VIEWING_TEMPLATE = "Hi, could I arrange a viewing of {address} ({price})? {mytimes} Thanks.";
   const enquiryText = (r, template, amenities = '', free = '') => String(template || ENQUIRY_DEFAULT)
-    .replace(/\{address\}/g, r.address || 'this property').replace(/\{price\}/g, r.price || 'price on request')
+    .replace(/\{address\}/g, () => r.address || 'this property').replace(/\{price\}/g, () => r.price || 'price on request') // functions: a $ in the text isn't a pattern
     .replace(/\{available\}/g, () => {
       const a = String(r.available && r.available !== '-' ? r.available : '').replace(/^available\s*(from\s*)?/i, '').trim();
       return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
     })
-    .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? ')
-    .replace(/\{link\}/g, r.url || '').replace(/\{questions\}/g, () => askList(r, amenities, { open: true }).join(' ')).replace(/\{mytimes\}/g, () => freeTimesText(free))
+    .replace(/\{inspection\}/g, () => (r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? '))
+    .replace(/\{link\}/g, () => r.url || '').replace(/\{questions\}/g, () => askList(r, amenities, { open: true }).join(' ')).replace(/\{mytimes\}/g, () => freeTimesText(free))
     .replace(/ {2,}/g, ' ').replace(/\s+\n/g, '\n').trim(); // an empty placeholder leaves no double space
 
   // One listing as plain text for a message.
@@ -4015,8 +4017,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const bootAt = Date.now();
   // Reading window.localStorage/sessionStorage itself throws when site data is blocked;
   // every store then runs on an inert storage and the tool works without persistence.
-  const nullStorage = { length: 0, key: () => null, getItem: () => null, setItem() {}, removeItem() {} };
-  const storageOr = (name) => { try { return window[name] || nullStorage; } catch { return nullStorage; } };
+  // In memory, one per name: this page keeps what you do, it just isn't saved.
+  const memStore = () => {
+    const m = new Map();
+    return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, clear: () => m.clear() };
+  };
+  const memStores = {};
+  const storageOr = (name) => { try { return window[name] || (memStores[name] ||= memStore()); } catch { return (memStores[name] ||= memStore()); } };
   const store = rowStore(storageOr('sessionStorage'));
   const snaps = snapshotStore(storageOr('localStorage'));
   let gone = []; // rows from the baseline that are no longer listed (shown when cfg.showGone)
@@ -4882,7 +4889,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     // A star changes only its own listing (unless a filter drops it); a hide, its own and its
     // building's ("N in this building").
     // On the Shortlist a star changes others too (the agency record, the pack's portals): all redraw.
-    refreshMarks(act === 's' && ui.view !== 'shortlist' ? [id] : act === 'h' ? withMates(id) : null);
+    // A star with an application status also changes the agency's record on its other listings.
+    const sl = ui.view === 'shortlist', row = rowById(id);
+    refreshMarks(sl ? null : act === 's' && !row?.appStatus ? [id] : act === 'h' ? withMates(id) : null); // on the Shortlist, the pack's portals too
     // Re-render replaced the button: put focus back (or on the next item if this one left the list).
     const q = (i) => itemEl(i, `[data-act="${act}"]`);
     (q(id) || (next && q(next)) || ui.list).focus?.();
@@ -5159,7 +5168,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       clearTimeout(t);
       scheduleAnnotate();
       if (e?.target === ui.annotateBox && cfg.annotate) ensureVisiblePage();
-      if (!cache) return;
+      if (!cache) { if (ui.view === 'shortlist') renderShortlist(); return; } // no search: the Shortlist still follows settings
       if (e?.type === 'input') t = setTimeout(() => { t = null; renderNow(true); }, INPUT_DEBOUNCE_MS); // debounce typing
       else renderNow(typed(e?.target)); // re-filter without refetching
     };
@@ -5455,7 +5464,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.panel.classList.toggle('rf-wide', sl && !!ui.compare);
     if (sl && ui.slSince == null) { // this page's first Shortlist visit: changes since the last one (an hour or more ago) are named
       const last = +cfg.slSeenAt || 0;
-      ui.slSince = last && Date.now() - last > HOUR_MS ? last : 0; // back within the hour, or a first visit: nothing to name
+      ui.slSince = last && Date.now() - last > HOUR_MS ? last : 0; // back within the hour, or a first visit: no "since" line
+      ui.slPrev = last; // the Changed since last visit filter still compares with the last visit
       if (Date.now() - last > HOUR_MS) { // stored quietly: nothing to redraw
         cfg = { ...cfg, slSeenAt: String(Date.now()) };
         cfgBase = { ...cfgBase, slSeenAt: cfg.slSeenAt };
@@ -5477,7 +5487,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // fresh objects once a minute).
   const shortlistRows = (all = marks.shortlist()) => {
     const f = ui.slFilter.value, q = ui.slQuery.value;
-    const changed = f === '~' ? sinceChanges(all, ui.slSince ?? cfg.slSeenAt).ids : null;
+    const changed = f === '~' ? sinceChanges(all, ui.slSince || ui.slPrev || +cfg.slSeenAt || Date.now()).ids : null;
     const kept = all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : f === '~' ? changed.has(r.id) : r.appStatus === f)) && textMatch(r, q));
     const rows = cfg.slSort === 'added' ? kept : byNext(kept);
     const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places), end = leaseEndOf(cfg), extra = num(cfg.moveCosts) || 0, rentNow = num(cfg.rentNow) || 0;
@@ -5752,9 +5762,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   // `only`: the listings whose marks changed, when nothing else on screen can (a star, rating,
   // checklist tick): the list then rebuilds just those, if its order is unchanged.
+  // A listing and those whose markup names it: the same building ("N in this building") and the
+  // same place listed twice ("Also listed by…").
   const withMates = (id) => {
-    const k = buildingKey(rowById(id)?.address);
-    return k && cache ? [id, ...cache.filter((r) => r.id !== id && buildingKey(r.address) === k).map((r) => r.id)] : [id];
+    const a = rowById(id)?.address, k = buildingKey(a), ak = addressKey(a);
+    return cache && (k || ak) ? [id, ...cache.filter((r) => r.id !== id && ((k && buildingKey(r.address) === k) || (ak && addressKey(r.address) === ak))).map((r) => r.id)] : [id];
   };
   function refreshMarks(only = null) {
     ui.onlyIds = only ? new Set(only) : null;
@@ -6599,7 +6611,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
           if (BOT_KINDS.has(kind)) tripPause(botCheck(`listing page: ${kind}`));
           return kind === 'ok' ? html : '';
         })
-        .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok') rawListingSample = out.listing; if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; renderListingBar(); } } })
+        .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok') rawListingSample = out.listing; if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; if (marks.shortlist().some((x) => x.id === id)) learn([row], true, false, false); renderListingBar(); } } })
         .catch(() => {}).finally(() => { if (bar._fetching === id) bar._fetching = null; if (bar.dataset.id !== id && bar._row?.partial) renderListingBar(); });
     }
   }
@@ -7057,6 +7069,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
             return;
           }
           ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
+          if (document.getElementById('rf-lbar')) renderListingBar(); // its checklist, deadline and notice follow too
         }
       })));
       step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });

@@ -747,3 +747,11 @@ test('marksStore: writes reuse untouched entries\' JSON, and what is stored is e
   assert.equal(c.note(rows[1].id), 'from the other tab');
   assert.equal(c.shortlist()[0].appStatus, 'approved');
 });
+
+test('restore: a decline reason comes in only with a declined status', () => {
+  const st = core.marksStore(mem(), () => 1e12);
+  const r = row('146500071');
+  st.importJson({ app: 'rea-enhancement', kind: 'marks', v: 1, m: { [r.id]: { s: 1, st: 1e12, as: 'applied', ast: 1e12, dr: 'income', d: { u: r.url, a: 'x' } } } });
+  st.setStatus(r.id, 'declined');
+  assert.equal(st.shortlist()[0].declineReason, '', 'no old reason from the backup');
+});

@@ -33,7 +33,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   // Page routes are consulted before this context-wide one.
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (opts) => {
-    const c = await newContext(opts);
+    const c = await newContext({ timezoneId: 'Australia/Sydney', ...opts }); // FIXED is 10am Sydney: dates asserted as a Sydney renter sees them, whatever TZ the machine is in
     const id = blockOf.getStore();
     if (id != null) (opened.get(id) || opened.set(id, []).get(id)).push(c); // closed if the block fails, before a retry
     await c.route('**/*', (r) => (process.env.E2E_STRAY && console.log(`stray: ${r.request().url()}`), r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stray</title>' }))); // 200, not 204: a 204 cancels a popup's navigation

@@ -30,11 +30,11 @@ test('lint catches header, changelog, privacy, storage and dynamic-code violatio
   const cases = [
     [(s) => s.replace('// @grant        none', '// @grant        GM_xmlhttpRequest'), /@grant must stay "none"/],
     [(s) => s.replace(/(\/\/ @version\s+)\S+/, '$19.9.9'), /CHANGELOG\.md top entry/],
-    [(s) => s.replace('const nullStorage', "const leak = 'https://evil.example.com/x';\n  const nullStorage"), /URL outside realestate\.com\.au: https:\/\/evil\.example\.com\/x/],
-    [(s) => s.replace('const nullStorage', "const k = 'rea-avail-filter/stray';\n  const nullStorage"), /storage key literal/],
-    [(s) => s.replace('const nullStorage', "localStorage.setItem('x', 1);\n  const nullStorage"), /literal key/],
-    [(s) => s.replace('const nullStorage', "eval('1');\n  const nullStorage"), /dynamic code/],
-    [(s) => s.replace('const nullStorage', "new WebSocket('wss://www.realestate.com.au');\n  const nullStorage"), /WebSocket is not used/],
+    [(s) => s.replace('const memStores', "const leak = 'https://evil.example.com/x';\n  const memStores"), /URL outside realestate\.com\.au: https:\/\/evil\.example\.com\/x/],
+    [(s) => s.replace('const memStores', "const k = 'rea-avail-filter/stray';\n  const memStores"), /storage key literal/],
+    [(s) => s.replace('const memStores', "localStorage.setItem('x', 1);\n  const memStores"), /literal key/],
+    [(s) => s.replace('const memStores', "eval('1');\n  const memStores"), /dynamic code/],
+    [(s) => s.replace('const memStores', "new WebSocket('wss://www.realestate.com.au');\n  const memStores"), /WebSocket is not used/],
     [(s) => s.replace('\n  function build() {', `\n  function build() {\n${'    void 0;\n'.repeat(200)}`), /build\(\) is \d+ lines \(budget/],
   ];
   for (const [fn, re] of cases) {

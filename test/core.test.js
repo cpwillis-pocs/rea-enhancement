@@ -857,6 +857,21 @@ test('Best match: the move-in median is the whole search, so hiding one listing 
   for (const [id, sc] of fewer) assert.equal(sc, all.find(([i]) => i === id)[1], `listing ${id} keeps its score`);
 });
 
+test('post-2.35.1 audit: times in a price, $ in listing text, overlap at an unknown rent', () => {
+  assert.equal(core.parsePrice('$650, open Sat 1 pm'), 650, 'a time is not per month');
+  assert.equal(core.parsePrice('$650 - inspect 12 pm Sat'), 650);
+  assert.equal(core.parsePrice('$2,600 pm'), 600, 'per month still read');
+  assert.equal(core.enquiryText({ address: 'A $& B', price: "$700 $'" }, '{address} / {price}'), "A $& B / $700 $'");
+  const now = new Date(2026, 8, 23);
+  const rows = [
+    { id: 'unpriced', url: 'a', avail: new Date(2026, 8, 25) },
+    { id: 'priced', url: 'b', avail: new Date(2026, 9, 14), priceNum: 700 },
+  ];
+  const out = core.applyFilters(rows, { ...core.DEFAULT_CFG, leaseEnd: '2026-10-16', sort: 'fit' }, now);
+  assert.deepEqual(out.map((r) => r.id), ['priced', 'unpriced'], 'an overlap at an unknown rent is not free');
+  assert.equal(core.fitLabel(out[1].fit), '22 days overlap');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };
