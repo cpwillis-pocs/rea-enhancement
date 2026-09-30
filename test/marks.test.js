@@ -684,3 +684,17 @@ test('exports leave an unrated listing blank, not 0', () => {
   assert.equal(a[i], '');
   assert.equal(b[i], '4');
 });
+
+test('marksStore: shortlist() reused while marks and the minute are unchanged, fresh after a write', () => {
+  const t = 1e12;
+  const a = core.marksStore(mem(), () => t);
+  const r1 = row('146500020');
+  a.toggle(r1.id, 's', r1);
+  const one = a.shortlist(), two = a.shortlist();
+  assert.notEqual(one, two, 'a copy each time: callers may sort it');
+  assert.equal(one[0], two[0], 'same rows');
+  one.pop();
+  assert.equal(a.shortlist().length, 1, 'a caller changing its copy does not change the next');
+  a.setStatus(r1.id, 'applied');
+  assert.equal(a.shortlist()[0].appStatus, 'applied', 'a write gives a fresh list');
+});

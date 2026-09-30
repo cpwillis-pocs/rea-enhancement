@@ -403,6 +403,7 @@
     const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp', 'sq', 'sqt'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     const rowMemo = new Map();
+    let listMemo = null; // the whole list, for the stored string it was read from
     const shortlistRow = (id, e) => {
       // Hand-edited or half-written summaries: text fields must be strings, numbers stay numbers.
       const d = Object.fromEntries(Object.entries(e.d).map(([k, v]) => [k, SUM_KEEP.includes(k) ? v
@@ -610,6 +611,8 @@
       shortlist() {
         const { m } = load();
         const minute = Math.floor(now() / 60000), seen = new Set();
+        // Same stored marks in the same minute: the same list (a render asks two or three times).
+        if (listMemo && raw != null && listMemo.raw === raw && listMemo.minute === minute) return listMemo.out.slice();
         const out = Object.entries(m).filter(([, e]) => e.s && e.d?.u)
           .sort(([, a], [, b]) => (b.st || 0) - (a.st || 0))
           .map(([id, e]) => {
@@ -621,7 +624,8 @@
             return row;
           });
         for (const id of rowMemo.keys()) if (!seen.has(id)) rowMemo.delete(id);
-        return out;
+        listMemo = raw != null ? { raw, minute, out } : null;
+        return out.slice();
       },
       // Backup/restore of what the user chose (shortlist, hidden, notes); sighting history is not exported.
       exportData() {
@@ -4991,11 +4995,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     // Side drawer: the status line (count, Undo, "Why?") sticks under the header, and once the
     // filters have scrolled away the header offers a way back to them.
     const head = panel.querySelector('.rf-head'), toFilters = panel.querySelector('.rf-tofilters');
+    // Every height is read before any is written: each write re-styles the whole drawer (its
+    // listings inherit the variables), so a read after it would force that at once, per variable.
+    const tabs = panel.querySelector('.rf-tabs');
     ui.syncSticky = () => {
-      panel.style.setProperty('--rf-head-h', `${head.offsetHeight}px`);
-      panel.style.setProperty('--rf-status-h', `${ui.status.offsetHeight}px`);
-      const tabs = panel.querySelector('.rf-tabs');
-      panel.style.setProperty('--rf-tabs-h', `${tabs.offsetHeight}px`);
+      const hs = [['--rf-head-h', head], ['--rf-status-h', ui.status], ['--rf-tabs-h', tabs]].map(([k, el]) => [k, `${el.offsetHeight}px`]);
+      for (const [k, v] of hs) if (panel.style.getPropertyValue(k) !== v) panel.style.setProperty(k, v);
       const top = ui.view === 'shortlist' ? ui.slBar : ui.controls;
       toFilters.hidden = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
     };
@@ -5378,7 +5383,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     const won = nextSteps(all, cfg), due = noticeDue(cfg);
     if (won || due) { // your own lease: tell the landlord in time
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: "I've given notice" });
-      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); ui.slFilter.focus(); }, { once: true }); // the button goes with the redraw: focus somewhere that stays
+      b.addEventListener('click', () => { ui.applyCfg({ ...cfg, noticeGiven: ymdLocal(new Date()) }); if (!cache) renderShortlist(); setStatus('Noted: notice given. The calendar export takes its reminder out.'); ui.slFilter.focus(); }, { once: true }); // the button goes with the redraw: focus somewhere that stays
       const addr = won ? String(won.r.address || 'a listing').split(',')[0] : '';
       const notice = due ? (due.days < 0 ? `Your notice date (${shortDate(due.by)}) has passed.` : `Give notice by ${shortDate(due.by)}${due.days ? ` (${plural(due.days, 'day')})` : ' (today)'} for your lease ending ${shortDate(cfg.leaseEnd)}.`)
         : won?.by ? `Give notice by ${shortDate(won.by)}.` : won?.days ? `Give ${won.days} days' notice when you're ready.` : won ? 'Set your notice period in Settings for its date.' : '';
@@ -5412,9 +5417,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       const pack = b.dataset.pack != null, item = pack ? b.dataset.pack : b.dataset.mv;
       const plan = pack ? null : movePlan(marks.shortlist(), cfg);
       if (!pack && !plan) return;
+      ui.ticksOpen = true; // before the redraw applyCfg makes
       ui.applyCfg(pack ? { ...cfg, packDone: packToggle(cfg, item) } : { ...cfg, moveDone: moveToggle(cfg, plan, item) });
-      ui.ticksOpen = true;
-      renderShortlist();
+      if (!cache) renderShortlist(); // with results, applying the settings has redrawn the Shortlist already
       ui.slBar.querySelector(`[data-${pack ? 'pack' : 'mv'}="${CSS.escape(item)}"]`)?.focus();
     });
   }
@@ -5879,7 +5884,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   function adopt(key, rows, trunc, note, snap = null, observe = false, clipped = !observe) {
     textClipped = clipped; // before the first render reads it
     learn(rows, observe, observe); // adopt observes only fresh full crawls
-    if (snap) queueMicrotask(renderSaved);
+    // A task later, not a microtask: reading the list writes a deferred snapshot save (snaps.save's
+    // `later`), which would then land in this task after all instead of after the results paint.
+    if (snap) setTimeout(renderSaved, 0);
     scheduleAnnotate();
     fillTypes(rows);
     cache = rows;
