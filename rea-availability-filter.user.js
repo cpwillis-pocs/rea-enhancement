@@ -2062,11 +2062,11 @@
     { key: 'income', section: 'Your move', kind: 'int', def: '', min: 0, max: 99999999, step: 1000, label: 'Household income, $ a year before tax (optional)', placeholder: 'eg 120000', name: 'income',
       help: () => `Shows rent as a share of income (over ${RENT_STRESS_PCT}% is flagged) and sets Best match's budget when no max rent is set. Stays in this browser.` },
     { key: 'icsAlarm', section: 'Reminders & templates', kind: 'select', def: '60', label: 'Calendar reminder', help: 'Some calendar apps ignore reminders in imported files.', options: [['0', 'None'], ['30', '30 min before'], ['60', '1 hour before'], ['120', '2 hours before']], name: 'calendar reminder' },
-    { key: 'checklist', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
-    { key: 'packList', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 300, label: 'Application pack (comma-separated)', placeholder: () => PACK_DEFAULT, name: 'application pack',
+    { key: 'checklist', section: 'Reminders & templates', kind: 'textarea', rows: 2, def: '', maxLength: 400, label: 'Inspection checklist (comma-separated)', placeholder: () => CHECKLIST_DEFAULT, name: 'checklist' },
+    { key: 'packList', section: 'Reminders & templates', kind: 'textarea', rows: 2, def: '', maxLength: 300, label: 'Application pack (comma-separated)', placeholder: () => PACK_DEFAULT, name: 'application pack',
       help: 'What agents usually ask for when you apply. Tick what you have ready on the Shortlist; the apply reminders say how much is. Names only: no documents are stored.' },
-    { key: 'movingList', section: 'Reminders & templates', kind: 'text', def: '', maxLength: 400, label: 'Moving list (comma-separated)', placeholder: () => MOVING_DEFAULT, name: 'moving list' },
-    { key: 'enquiry', section: 'Reminders & templates', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => ENQUIRY_DEFAULT, name: 'enquiry template',
+    { key: 'movingList', section: 'Reminders & templates', kind: 'textarea', rows: 2, def: '', maxLength: 400, label: 'Moving list (comma-separated)', placeholder: () => MOVING_DEFAULT, name: 'moving list' },
+    { key: 'enquiry', section: 'Reminders & templates', kind: 'textarea', def: '', maxLength: 600, rows: 3, label: 'Enquiry message (Copy enquiry)', placeholder: () => `eg ${enquiryText({ address: '10 Example St, Bondi', price: '$650 per week', available: 'Available now', inspections: [{ label: 'Sat 11 Oct, 10:00am' }] }, '')}`, name: 'enquiry template',
       help: 'Placeholders: {address} {price} {available} {inspection} {link}, and {questions} for what to ask (heads-ups, features you filter on it doesn\'t mention). Keep personal details out: this is stored in your browser on REA\'s site.' },
     { key: 'remember', section: 'Your data', kind: 'check', def: true, label: 'Remember results between visits', backup: false }, // a backup made with it off mustn't delete remembered searches
     { key: 'remindSaved', section: 'Your data', kind: 'check', def: true, label: 'Remind me to check saved searches (at most daily)', backup: false, after: 'storage' },
@@ -3527,11 +3527,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   .rf-more{display:grid;gap:10px}
   .rf-more:not([open]){display:block} /* a closed section leaves no gap */
   .rf-controls textarea{resize:vertical}
-  .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1;min-width:0} .rf-controls .rf-sort select{flex:1;min-width:0}
+  .rf-controls .rf-row{flex-wrap:wrap} .rf-controls .rf-sort{flex:1;min-width:0} .rf-controls .rf-sort select{flex:1;min-width:11em}
   .rf-more summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)}
   .rf-more>label,.rf-more>.rf-grid3{margin-top:8px}
   .rf-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .rf-controls .rf-sort{display:flex;align-items:center;gap:6px}
+  #rf-panel:not(:has(#rf-inspectWhen option[value="mine"]:checked)) label:has(>#rf-inspectFree){display:none} /* asked for once "At my times" is picked */
   .rf-controls .rf-sort select{width:auto}
   .rf-type{font-weight:400;color:var(--rf-soft);font-size:12px}
   .rf-controls .rf-check{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;text-transform:none;
@@ -3905,7 +3906,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     <div class="rf-head">
       <h2>Availability Filter</h2>
       <button type="button" class="rf-tofilters" hidden title="Back up to the filters (f)">↑ Filters</button>
-      <button class="rf-clear" title="Reset all filters">Clear</button>
+      <button class="rf-clear" title="Reset all filters (your settings, places and times stay)">Reset</button>
       <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
       <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
       <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
@@ -3976,7 +3977,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
           <span class="rf-label">Type</span><input type="hidden" id="rf-type"><span class="rf-types-list"><span class="rf-meta">Search to see the types</span></span>
         </div>
         <div class="rf-amen rf-amen-req" role="group" aria-label="Amenities: click to require, again to exclude, again to clear">
-          <input type="hidden" id="rf-amenities"><span class="rf-label">Features</span>
+          <input type="hidden" id="rf-amenities"><span class="rf-label">Features</span><small class="rf-set-help">Tap once to require, again to exclude, again to clear.</small>
           ${AMENITIES.map((a) => `<button type="button" class="rf-chip" data-amen="${a.id}">${a.label}</button>`).join('')}
         </div>
         <label>Keywords<input type="text" id="rf-keyword" placeholder='eg pool|balcony -studio "north facing"' title="All words must appear; -word must not; a|b means either; accents don't matter"></label>
@@ -4003,22 +4004,24 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
           <option value="">Any time</option><option value="weekend">Weekends</option><option value="evening">After 5pm</option><option value="either">Weekends or after 5pm</option><option value="mine">At my times…</option></select></label>
         <label title="Days and times you can get to an inspection, in the listing's local time. Used by Inspections I can make: At my times">My inspection times<input type="text" id="rf-inspectFree" placeholder="eg Sat 9-13, Sun, weekdays 17:30-" spellcheck="false"></label>
         <h3 class="rf-sect">Show only</h3>
-        <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
-        <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
-        <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
+        <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
         <label class="rf-check"><input type="checkbox" id="rf-newOnly">New since last visit only</label>
         <label class="rf-check"><input type="checkbox" id="rf-changedOnly">Price, date or details changed recently</label>
         <label class="rf-check"><input type="checkbox" id="rf-unopenedOnly">Not opened yet</label>
         <label class="rf-check" title="Listings you haven't gone past with j, marked with r, shortlisted, hidden or noted"><input type="checkbox" id="rf-unreviewedOnly">Not reviewed yet</label>
-        <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
-        <label class="rf-check"><input type="checkbox" id="rf-onlyStarred">Shortlisted only <span class="rf-n" data-count="starred"></span></label>
-        <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
+        <label class="rf-check" title="Listed over 3 weeks ago: rent may be negotiable"><input type="checkbox" id="rf-staleOnly">Only listed 3+ weeks ago (may negotiate)</label>
+        <label class="rf-check"><input type="checkbox" id="rf-hideNoImage">Has a photo</label>
         <label class="rf-check"><input type="checkbox" id="rf-floorplanOnly">Has a floorplan</label>
+        <h3 class="rf-sect">Also show or hide</h3>
+        <label class="rf-check" title="Deposit taken, under application or leased, going by the headline and description"><input type="checkbox" id="rf-hideTaken">Hide listings already taken</label>
+        <label class="rf-check"><input type="checkbox" id="rf-showHidden">Show hidden listings <span class="rf-n" data-count="hidden"></span></label>
+        <label class="rf-check"><input type="checkbox" id="rf-showGone">Show listings no longer listed</label>
         <div class="rf-agencies" hidden><span class="rf-label">Hidden agencies / suburbs</span><span class="rf-ag-list"></span></div>
       </details>
       <details class="rf-more rf-settings">
         <summary>Settings</summary>
         ${settingsHtml({ storage: `<div class="rf-meta rf-storage"><span class="rf-storage-n"></span>
+          <button type="button" class="rf-btn sec" data-backup-here>Backup</button><button type="button" class="rf-btn sec" data-restore-here>Restore</button>
           <button type="button" class="rf-btn sec" data-report title="Diagnostics for a bug report: fields found, recent errors and one listing's structure (no listing text, names or addresses)">Copy report</button>
           <button type="button" class="rf-btn sec" data-forget title="Remove everything this script stored in this browser (not REA's own data)">Delete all my data</button></div>` })}
       </details>
@@ -4353,6 +4356,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       + (per.length ? ` Remembered: ${per.join(' · ')}.` : '');
   };
   ui.paintStorage = () => { if (panel.querySelector('.rf-settings').open) paintStorage(); };
+  // The same Backup and Restore as the Shortlist's More menu, beside "Last backup".
+  panel.querySelector('[data-backup-here]').addEventListener('click', () => ui.slBar.querySelector('[data-sl=backup]').click());
+  panel.querySelector('[data-restore-here]').addEventListener('click', () => ui.slFile.click());
   panel.querySelector('.rf-settings').addEventListener('toggle', (e) => { if (e.currentTarget.open) paintStorage(); });
   panel.querySelector('[data-forget]').addEventListener('click', async (e) => {
     if (!await askInline(e.currentTarget.parentElement, 'Delete your shortlist, notes, hidden listings, presets, remembered searches and settings from this browser? Download a Backup first if you might want them back.',
@@ -5239,6 +5245,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
 
   // Where you were in each tab (and for which search + filters), so switching tabs keeps it.
   const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify(cfg)}`);
+  // Settings live on Results: switch there, open them and go to one field (from the Shortlist's
+  // "set your notice period", or a tick list's "Edit this list").
+  function openSetting(key) {
+    if (ui.view !== 'results') setView('results');
+    ui.fold?.(false);
+    const det = ui.panel.querySelector('.rf-settings');
+    det.open = true;
+    const el = ui.panel.querySelector(`#rf-${key}`);
+    el?.scrollIntoView({ block: 'center' });
+    el?.focus({ preventScroll: true });
+  }
   function setView(view) {
     ui.closePeek?.();
     const place = (ui.place ||= {});
@@ -5422,10 +5439,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       const addr = won ? String(won.r.address || 'a listing').split(',')[0] : '';
       const notice = due ? (due.days < 0 ? `Your notice date (${shortDate(due.by)}) has passed.` : `Give notice by ${shortDate(due.by)}${due.days ? ` (${plural(due.days, 'day')})` : ' (today)'} for your lease ending ${shortDate(cfg.leaseEnd)}.`)
         : won?.by ? `Give notice by ${shortDate(won.by)}.` : won?.days ? `Give ${won.days} days' notice when you're ready.` : won ? 'Set your notice period in Settings for its date.' : '';
-      ui.status.append(` ${won ? `Approved for ${addr}. ` : ''}${notice}${won?.pending ? ` ${plural(won.pending, 'other application')} still waiting.` : ''} `, b);
-    } else {
-      const plan = movePlan(all, cfg); // notice handled: the moving list leads
-      if (plan?.next) ui.status.append(` Approved for ${String(plan.r.address || 'a listing').split(',')[0]}. Next on your moving list: ${plan.next}${plan.moveDate ? ` (moving ${shortDate(plan.moveDate)})` : ''}.`);
+      const toSet = won && !won.by && !won.days && !due ? Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: 'Open Settings' }) : null;
+      toSet?.addEventListener('click', () => openSetting(cfg.leaseEnd ? 'noticeDays' : 'leaseEnd'));
+      ui.status.append(` ${won ? `Approved for ${addr}. ` : ''}${notice}${won?.pending ? ` ${plural(won.pending, 'other application')} still waiting.` : ''} `, ...(toSet ? [toSet, ' '] : []), b);
     }
   }
 
@@ -5440,13 +5456,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       return `<button type="button" class="rf-chip" ${attr}="${esc(i)}" aria-pressed="${on}">${on ? '✓ ' : ''}${esc(i)}</button>`;
     }).join('')}</div>`;
     const { items, done } = plan || packState(cfg);
-    const head = plan ? `Moving list ${done.length}/${items.length}${plan.moveDate ? ` · moving ${shortDate(plan.moveDate)}` : ''}` : packLabel(cfg).replace(/^Pack:/, 'Application pack:');
+    const head = plan ? `Moving list ${done.length}/${items.length}${plan.next ? ` · next: ${plan.next}` : ''}${plan.moveDate ? ` · moving ${shortDate(plan.moveDate)}` : ''}` : packLabel(cfg).replace(/^Pack:/, 'Application pack:');
     const open = ui.ticksOpen ?? false;
-    box.innerHTML = `<details${open ? ' open' : ''}><summary>${esc(head)}</summary>${plan ? chips(items, done, 'data-mv', 'Moving list') : chips(items, done, 'data-pack', 'Application pack')}</details>`;
+    box.innerHTML = `<details${open ? ' open' : ''}><summary>${esc(head)}</summary>${plan ? chips(items, done, 'data-mv', 'Moving list') : chips(items, done, 'data-pack', 'Application pack')}<button type="button" class="rf-undo" data-edit-list="${plan ? 'movingList' : 'packList'}">Edit this list</button></details>`;
     box.firstChild.addEventListener('toggle', (e) => { ui.ticksOpen = e.currentTarget.open; });
   }
   function wireTicks() {
     ui.slBar.querySelector('.rf-sl-ticks').addEventListener('click', (e) => {
+      const ed = e.target.closest('[data-edit-list]');
+      if (ed) return openSetting(ed.dataset.editList);
       const b = e.target.closest('[data-pack],[data-mv]');
       if (!b) return;
       const pack = b.dataset.pack != null, item = pack ? b.dataset.pack : b.dataset.mv;
@@ -5832,7 +5850,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
         <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
         <button data-act="h" title="${r.resurfaced ? 'Still not for you at this price: hide again' : r.hidden ? 'Unhide' : 'Hide this listing'}">${hideWord(r)}</button>
         <button data-act="n" title="${r.note ? 'Edit note' : 'Add a note'}" aria-label="${r.note ? 'Edit note' : 'Add note'}">Note</button>
-        <button data-act="copy" title="Copy a text summary of this listing" aria-label="Copy summary">Copy</button>
+        <button data-act="copy" title="Copy a text summary of this listing">Copy details</button>
         ${sl ? `<label class="rf-cmp"><input type="checkbox" data-cmp="${esc(r.id)}"${ui.cmpSel?.has(r.id) ? ' checked' : ''}>Compare</label>` : ''}
         ${`<details class="rf-acts-more"><summary aria-label="More actions" title="More actions">⋯</summary><div>
           <button data-act="enq" title="Copy an enquiry message for the agent (template in Settings)">Copy enquiry</button>
@@ -6170,7 +6188,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     const fresh = isFresh(r) ? '<span class="rf-b-new">New</span>' : '';
     const moved = r.prevPrice ? `<span class="rf-b-${priceDir(r)}">Was ${esc(r.prevPrice)}</span>` : '';
     const availMoved = r.prevAvail ? `<span title="Availability date changed">Avail was ${esc(r.prevAvail)}</span>` : '';
-    const pets = r.amen?.pets === 'yes' ? '<span class="rf-b-pets">Pets OK</span>' : '';
+    const pets = r.amen?.pets === 'yes' ? `<span class="rf-b-pets">${esc(amenDetail('pets', r.text) || 'Pets OK')}</span>` : ''; // the drawer's wording
     const km = r.km != null ? `<span>${esc(kmLabel(r).replace(' away', ''))}</span>` : '';
     const taken = r.taken ? `<span class="rf-b-taken">${esc(TAKEN_LABELS[r.taken])}</span>` : '';
     return star + taken + fresh + avail + availMoved + moved + pets + km + insp + ppb;
@@ -6301,7 +6319,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       ${r.starred ? `<select data-l="as" aria-label="Application status">${statusOptions(r.appStatus)}</select>` : ''}
       <button type="button" data-l="n">${r.note ? 'Edit note' : 'Note'}</button>
       <button type="button" data-l="h" aria-pressed="${r.hidden && !r.resurfaced}">${hideWord(r)}</button>
-      <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">–</button>
+      <button type="button" data-l="min" aria-expanded="true" aria-label="Minimise listing tools" title="Minimise">▾</button>
       ${r.note ? `<div class="rf-lbar-note">${esc(r.note)}</div>` : ''}${info ? `<div class="rf-lbar-info">${esc(info)}</div>` : ''}${r.starred ? lbarDetails(r, bar._details) : ''}`;
     if (!r.starred || small) lbarTick(false); // no next stop shown: stop the minute redraws
     if (focusSel) bar.querySelector(focusSel)?.focus();

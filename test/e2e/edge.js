@@ -1368,7 +1368,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.ok(await p.isVisible('.rf-tofilters'), '↑ Filters offered once they scrolled away');
     const before = await p.$eval('#rf-panel', (el) => el.scrollTop);
     await p.click('[data-view=shortlist]'); await p.click('[data-view=results]');
-    assert.ok(Math.abs(await p.$eval('#rf-panel', (el) => el.scrollTop) - before) < 5, 'tab switch keeps the place');
+    { const after = await p.$eval('#rf-panel', (el) => el.scrollTop); assert.ok(Math.abs(after - before) < 5, `tab switch keeps the place (${before} -> ${after})`); }
     await p.click('.rf-tofilters');
     assert.equal(await p.$eval('#rf-panel', (el) => el.scrollTop), 0);
     assert.equal(await p.evaluate(() => document.activeElement.id), 'rf-from');
@@ -2151,8 +2151,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-more summary');
     await page.selectOption('#rf-inspectWhen', 'weekend');
     const weekend = await count(page);
-    await page.fill('#rf-inspectFree', 'weekends'); await page.dispatchEvent('#rf-inspectFree', 'change');
+    assert.equal(await page.isVisible('#rf-inspectFree'), false, 'your times are asked for once At my times is picked');
     await page.selectOption('#rf-inspectWhen', 'mine');
+    await page.fill('#rf-inspectFree', 'weekends'); await page.dispatchEvent('#rf-inspectFree', 'change');
     await page.waitForFunction((n) => document.querySelectorAll('.rf-item').length === n, weekend);
     assert.ok(await page.$$eval('.rf-achip', (cs) => cs.some((c) => /Inspect at my times/.test(c.textContent))), 'chip shown');
     await page.fill('#rf-inspectFree', 'whenever'); await page.dispatchEvent('#rf-inspectFree', 'change');
@@ -2195,6 +2196,11 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.getAttribute('.rf-sl-ticks [data-pack="Payslips"]', 'aria-pressed'), 'true');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.pack), 'Payslips', 'focus stays on the chip');
     assert.match(await page.textContent('.rf-item .rf-nudge'), /apply\? Pack: 1 of 5 ready\./);
+    await page.click('.rf-sl-ticks [data-edit-list]'); // the list itself is in Settings, on Results
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'rf-packList');
+    assert.ok(await page.$('.rf-settings[open]'));
+    assert.ok(await page.isVisible('[data-backup-here]'), 'Backup beside Last backup');
+    await page.click('[data-view=shortlist]');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]);
     const ics = fs.readFileSync(await dl.path(), 'utf8');
     assert.match(ics, /UID:146500101-ab@rea-enhancement\r\n[\s\S]*?DTSTART;VALUE=DATE:20260925/);
@@ -2209,9 +2215,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await waitStatus(page, /^Noted: notice given/);
     assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).noticeGiven, '2026-09-23');
     // Notice given: the moving list takes the pack's place, and its next item leads.
-    assert.match(await page.textContent('.rf-sl-ticks summary'), /^Moving list 0\/7$/);
+    assert.match(await page.textContent('.rf-sl-ticks summary'), /^Moving list 0\/7 · next: Book removalists$/);
     await page.click('.rf-sl-ticks [data-mv="Book removalists"]');
-    await waitStatus(page, /Approved for 2 Hall St\. Next on your moving list: Connect power and gas\./);
+    await page.waitForFunction(() => /^Moving list 1\/7 · next: Connect power and gas$/.test(document.querySelector('.rf-sl-ticks summary')?.textContent));
     assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).moveDone, '146500102|Book removalists');
     await page.click('.rf-item .rf-nudge [data-na=applied]');
     assert.equal((await marks(page))['146500101'].as, 'applied');
