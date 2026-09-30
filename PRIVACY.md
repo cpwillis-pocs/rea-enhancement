@@ -9,7 +9,7 @@ Everything is in your browser, under keys starting `rea-avail-filter/`. The full
 | What | Where | How long |
 |---|---|---|
 | Settings, filters, presets | localStorage | Until you change or delete them |
-| Your marks: shortlist, hidden, notes, application status, checklist, reviewed | localStorage | Unmarked listings are dropped 90 days after last seen; at most 5000 listings |
+| Your marks: shortlist, hidden, notes, application status, checklist, the agent's answers (fine or a problem, per question), reviewed | localStorage | Unmarked listings are dropped 90 days after last seen; at most 5000 listings |
 | Sighting history (price and date changes, relists) | localStorage | Same as marks |
 | Remembered searches (slim rows for "new since last visit") | localStorage | The 3 most recent, pinned kept first |
 | Results cache, place in the list | sessionStorage | This tab only; cleared when it closes |

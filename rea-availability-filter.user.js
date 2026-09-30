@@ -320,12 +320,14 @@
     return out;
   };
   const recordText = (v) => (v ? `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined` : ''}` : '');
-  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'as', 'ast', 'ck', 'rv', 'rt']; // user choices a bulk action can change
+  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'as', 'ast', 'ck', 'qa', 'rv', 'rt']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const PRUNE_EVERY = 20;
   const keep = (e) => e.s || e.h || e.n || e.as;
   // Inspection checklist answers: { label: 'y' | 'n' }, labels clipped, at most CHECK_MAX of them.
   const CHECK_MAX = 12;
+  // The agent's answers to What to ask: question id ("w:water", "a:pets", "avail") -> y (fine) / n (a problem).
+  const cleanQa = (o) => (isObj(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => /^(?:[wa]:[a-z]{2,12}|avail)$/.test(k) && (v === 'y' || v === 'n')).slice(0, 40)) : {});
   const cleanChecks = (o) => (isObj(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => k && (v === 'y' || v === 'n')).slice(0, CHECK_MAX).map(([k, v]) => [clip(k, 30), v])) : {});
   // Address identity for relist detection: needs a street number, ignores case/punctuation.
   // Needs a street number in the street part ("Address available on request, Bondi NSW 2026" has
@@ -442,7 +444,7 @@
         beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
         ...moveIn(d.bo, priceNum), agency: d.ag || '',
         starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
-        gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
+        gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), answers: cleanQa(e.qa), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
         // The latest inspection that has already happened (the display list drops past ones).
         lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
         inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
@@ -565,6 +567,7 @@
           r.cheaperBy = r.hidden && typeof e?.hp === 'number' && typeof e.p === 'number' && e.p < e.hp ? e.hp - e.p : 0;
           r.resurfaced = resurfacedEntry(e); // hidden for its price, and it dropped
           r.checks = cleanChecks(e?.ck);
+          r.answers = cleanQa(e?.qa);
           // "New" is per search (see snapshotStore); here only REA's own listed date counts.
           r.isNew = r.listed instanceof Date && t - r.listed < NEW_MS;
           r.prevPrice = e && e.pp != null && e.pp !== e.p && e.pt && t - e.pt < PRICE_CHANGE_MS ? e.pps || `$${e.pp}` : '';
@@ -606,6 +609,16 @@
           const ck = cleanChecks(e.ck), next = !ck[k] ? 'y' : ck[k] === 'y' ? 'n' : '';
           if (next) ck[k] = next; else delete ck[k];
           if (Object.keys(ck).length) e.ck = ck; else delete e.ck;
+          return next;
+        });
+      },
+      // Cycle an answer to a What to ask question: unasked -> fine -> a problem -> unasked.
+      cycleAnswer(id, qid) {
+        if (!/^(?:[wa]:[a-z]{2,12}|avail)$/.test(qid)) return '';
+        return edit(id, (e) => {
+          const qa = cleanQa(e.qa), next = !qa[qid] ? 'y' : qa[qid] === 'y' ? 'n' : '';
+          if (next) qa[qid] = next; else delete qa[qid];
+          if (Object.keys(qa).length) e.qa = qa; else delete e.qa;
           return next;
         });
       },
@@ -663,7 +676,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, o: e.o, nd: e.nd, li: e.li, ic: e.ic, ht: e.ht, hp: e.hp, rv: e.rv, rt: e.rt, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, qa: e.qa, o: e.o, nd: e.nd, li: e.li, ic: e.ic, ht: e.ht, hp: e.hp, rv: e.rv, rt: e.rt, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -687,6 +700,7 @@
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
           if (Number.isInteger(e.rt) && e.rt >= 1 && e.rt <= 5) cur.rt = e.rt;
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
+          const qa = cleanQa(e.qa); if (Object.keys(qa).length) cur.qa = { ...cleanQa(cur.qa), ...qa };
           if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
           for (const k of ['nd', 'li', 'rv']) if (typeof e[k] === 'number') cur[k] = Math.max(cur[k] || 0, e[k]);
           if (e.h && typeof e.ht === 'number') { cur.ht = e.ht; if (typeof e.hp === 'number') cur.hp = e.hp; }
@@ -1760,11 +1774,18 @@
   const AMEN_ASK = { pets: 'Are pets allowed?', furnished: 'Is it furnished?', laundry: 'Is the laundry inside the home?', outdoor: 'Is there a balcony, courtyard or yard?',
     robes: 'Are there built-in robes?', stepfree: 'Is there step-free access?', watereff: 'Is the home water efficient?', gas: 'Is the cooking gas?', parking: 'Is the parking secure?' };
   // A listing-page stand-in not read yet (`partial`) knows nothing: only its heads-ups are asked.
-  const askList = (r, amenities = '') => r.partial ? watchList(r).map((w) => w.ask) : [
-    ...watchList(r).map((w) => w.ask),
-    ...Object.keys(parseAmenCfg(amenities)).filter((id) => r.amen?.[id] == null).map((id) => AMEN_ASK[id] || `Does it have ${AMEN_BY_ID.get(id).label.toLowerCase()}?`),
-    ...(!r.avail && !r.gone ? ['When is it available?'] : []),
-  ];
+  const askItems = (r, amenities = '') => r.partial ? watchList(r).map((w) => ({ id: `w:${w.id}`, q: w.ask })) : [
+    ...watchList(r).map((w) => ({ id: `w:${w.id}`, q: w.ask })),
+    ...Object.keys(parseAmenCfg(amenities)).filter((id) => r.amen?.[id] == null).map((id) => ({ id: `a:${id}`, q: AMEN_ASK[id] || `Does it have ${AMEN_BY_ID.get(id).label.toLowerCase()}?` })),
+    ...(!r.avail && !r.gone ? [{ id: 'avail', q: 'When is it available?' }] : []),
+  ].map((x) => ({ ...x, a: r.answers?.[x.id] || '' }));
+  // `open`: only what the agent hasn't answered yet (for the enquiry).
+  const askList = (r, amenities = '', { open = false } = {}) => askItems(r, amenities).filter((x) => !open || !x.a).map((x) => x.q);
+  const questionOf = (id) => (id === 'avail' ? 'When is it available?' : id.startsWith('w:') ? WATCH_BY_ID.get(id.slice(2))?.ask
+    : AMEN_ASK[id.slice(2)] || (AMEN_BY_ID.get(id.slice(2)) ? `Does it have ${AMEN_BY_ID.get(id.slice(2)).label.toLowerCase()}?` : '')) || '';
+  const answersText = (r) => Object.entries(r.answers || {}).filter(([id]) => questionOf(id)).map(([id, v]) => `${v === 'y' ? '✓' : '✗'} ${questionOf(id)}`).join('; ');
+  // A question with its answer mark, for Compare, print and the spreadsheet: "✓ Is there…?".
+  const askMarked = (r, amenities = '') => askItems(r, amenities).map((x) => `${x.a === 'y' ? '✓ ' : x.a === 'n' ? '✗ ' : ''}${x.q}`);
 
   // "Why this tag?": the words around the first match, so a wrong tag can be seen for what it
   // read (and turned into a test case). Text is the row's folded text, so quotes are lowercase.
@@ -2767,13 +2788,13 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['vsNow', 'vs_current_rent'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['applyBy', 'apply_by'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['hideReason', 'hide_reason'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['answersText', 'agent_answers'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const cellValue = (r, k) => {
     const v = k === 'availDate' ? r.avail : k === 'amenList' ? amenityTags(r).join('; ') : k === 'watchList' ? watchTags(r).join('; ')
-      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : k === 'rating' ? r.rating || '' : k === 'cashToMove' ? cashToMove(r) ?? '' : k === 'vsNow' ? vsNow(r) ?? '' : r[k];
+      : k === 'takenText' ? TAKEN_LABELS[r.taken] || '' : k === 'appDate' ? (r.appAt ? new Date(r.appAt) : '') : k === 'checksText' ? Object.entries(r.checks || {}).map(([c, v]) => `${v === 'y' ? '✓' : '✗'} ${c}`).join('; ') : k === 'leaseText' ? leaseText(r.lease) : k === 'fitText' ? fitLabel(r.fit) : k === 'priceHistoryText' ? historyText(r) : k === 'relistedText' ? (r.relisted ? r.relisted.price || 'yes' : '') : k === 'perSqmVal' ? perSqm(r) : k === 'rating' ? r.rating || '' : k === 'cashToMove' ? cashToMove(r) ?? '' : k === 'vsNow' ? vsNow(r) ?? '' : k === 'answersText' ? answersText(r) : r[k];
     if (v instanceof Date) return isNaN(v) ? '' : ymdLocal(v);
     if (typeof v === 'number') return isFinite(v) ? String(v) : '';
     if (typeof v === 'boolean') return v ? 'yes' : '';
@@ -3174,7 +3195,7 @@
       return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
     })
     .replace(/\{inspection\}/g, r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? ')
-    .replace(/\{link\}/g, r.url || '').replace(/\{questions\}/g, () => askList(r, amenities).join(' '))
+    .replace(/\{link\}/g, r.url || '').replace(/\{questions\}/g, () => askList(r, amenities, { open: true }).join(' '))
     .replace(/\s+\n/g, '\n').trim();
 
   // One listing as plain text for a message.
@@ -3205,7 +3226,7 @@ ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` :
 <div class="m">${esc(factsLine(r, ' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}${r.rating ? `<div class="m">My rating: ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</div>` : ''}
-${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).length ? `<div class="m">Ask:</div><ul class="q">${askList(r, amenities).map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
+${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).length ? `<div class="m">Ask:</div><ul class="q">${askItems(r, amenities).map((x) => `<li>${x.a === 'y' ? '☑ ' : x.a === 'n' ? '☒ ' : '☐ '}${esc(x.q)}</li>`).join('')}</ul>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
 </div></div>`).join('')}</body></html>`;
 
   // Drift canary: share of rows with each field, tracked as an average over searches. A field
@@ -3373,7 +3394,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     ['Next inspection', (r) => r.inspections?.[0]?.label || '', null],
     ['Amenities', (r) => amenityTags(r).join(', '), null],
     ['Heads-up', (r) => watchTags(r).join(', '), null],
-    ['Ask', (r) => askList(r, cfg.amenities).join(' '), null],
+    ['Ask', (r) => askMarked(r, cfg.amenities).join(' '), null],
     ['Agency', (r) => r.agency || '', null],
     ['Lease', (r) => leaseText(r.lease).replace(/^Lease /, ''), null],
     ['Your lease', (r) => fitLabel(r.fit), (r) => fitKey(r.fit), 'min'],
@@ -3726,7 +3747,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   @media (pointer: coarse){ #rf-lbar:not(.rf-lbar-min){padding-right:52px} #rf-lbar:not(.rf-lbar-min)>[data-l=min]{min-width:44px;min-height:44px;top:0;right:0} }
   #rf-lbar .rf-lbar-due{flex-basis:100%;font-weight:700;color:var(--rf-err)}
   #rf-lbar .rf-lbar-lab{font-size:12px;color:var(--rf-muted);margin-right:6px}
-  #rf-lbar .rf-lbar-ask ul{margin:2px 0 0;padding-left:18px;white-space:normal}
+  #rf-lbar .rf-lbar-ask .rf-lbar-checks button{text-align:left;white-space:normal} .rf-asks .rf-chip{text-align:left;white-space:normal}
+  #rf-lbar [data-qa][data-state=yes],.rf-asks [data-state=yes]{border-color:var(--rf-accent);color:var(--rf-accent-fg)} #rf-lbar [data-qa][data-state=no],.rf-asks [data-state=no]{border-color:var(--rf-err);color:var(--rf-err)}
   #rf-lbar .rf-lbar-more summary::before{content:'▸ '} #rf-lbar .rf-lbar-more[open] summary::before{content:'▾ '}
   #rf-lbar .rf-lbar-more summary{list-style:none} #rf-lbar .rf-lbar-more summary::-webkit-details-marker{display:none}
   #rf-lbar{left:16px;bottom:16px;padding:8px;max-width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
@@ -4645,6 +4667,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     if (week) return ui.pickWeek?.(week);
     const plan = e.target.closest('[data-plan-ics]');
     if (plan) return ui.planIcs?.(plan);
+    const qa = e.target.closest('.rf-item [data-qa]');
+    if (qa) {
+      const id = qa.closest('.rf-item').dataset.id, q = qa.dataset.qa;
+      marks.cycleAnswer(id, q);
+      refreshMarks([id]);
+      itemEl(id, `[data-qa="${CSS.escape(q)}"]`)?.focus();
+      return;
+    }
     const ck = e.target.closest('[data-ck]');
     if (ck) {
       const id = ck.closest('.rf-item').dataset.id, label = ck.dataset.ck;
@@ -5858,7 +5888,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       const kq = cfg.keyword.trim() ? keywordEvidence(r.text, cfg.keyword) : '';
       const name = [r.price, r.address, r.available && r.available !== '-' ? `available ${r.available.replace(/^available\s*/i, '')}` : ''].filter(Boolean).join(', ');
       const { am, wt } = tagItemsOf(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
-      const na = sl ? needsAction(r, now) : '';
+      const na = sl ? needsAction(r, now) : '', asks = r.starred && sl ? askItems(r, cfg.amenities) : [];
       return `
       <div tabindex="-1" role="article" aria-posinset="0" aria-setsize="0" aria-label="${esc(`0 of 0: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}${sl && r.appStatus === 'approved' ? ' rf-approved' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener" aria-label="${esc(`${name} (opens the listing)`)}">
@@ -5890,10 +5920,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
       ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? ${esc(packLabel(cfg))}. <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
-      ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => r.checks?.[k]).length}/${checks.length}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
+      ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => r.checks?.[k]).length}/${checks.length}${asks.length ? ` · Asked ${asks.filter((x) => x.a).length}/${asks.length}` : ''}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => {
         const v = r.checks?.[k];
         return checkBtn(k, v, 'class="rf-chip"');
-      }).join('')}</div></details>` : ''}
+      }).join('')}</div>${asks.length ? `<div class="rf-checks rf-asks" role="group" aria-label="What to ask the agent (tap once the agent answers: fine, then a problem)">${asks.map((x) => qaBtn(x, 'class="rf-chip"')).join('')}</div>` : ''}</details>` : ''}
       ${r.starred && sl ? `<div class="rf-app"><span class="rf-meta" aria-hidden="true">My rating</span> ${ratingHtml(r, 'data-act="rate"')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
@@ -6392,7 +6422,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   // While there is a next stop, redraw the bar each minute (and on coming back to the tab), so
   // "leave by" and the next listing stay current while you stand in an inspection.
   // Put focus back on the same control after a redraw: checklist items and stars share data-l.
-  const lbarFocusSel = (el) => (el.dataset.ck ? `[data-ck="${CSS.escape(el.dataset.ck)}"]`
+  const lbarFocusSel = (el) => (el.dataset.ck ? `[data-ck="${CSS.escape(el.dataset.ck)}"]` : el.dataset.qa ? `[data-qa="${CSS.escape(el.dataset.qa)}"]`
     : el.dataset.v ? `[data-l="${CSS.escape(el.dataset.l)}"][data-v="${CSS.escape(el.dataset.v)}"]`
       : el.tagName === 'SUMMARY' ? '.rf-lbar-more > summary' : el.dataset.l ? `[data-l="${CSS.escape(el.dataset.l)}"]` : null);
   let lbarTimer = 0;
@@ -6420,11 +6450,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     const next = nx ? `<div class="rf-lbar-info rf-lbar-next">Next: <a href="${esc(safeUrl(nx.r.url))}">${esc(clockAt(nx.at))} ${esc(String(nx.r.address || '').split(',')[0])}</a>${nx.km != null ? ` · ${nx.km} km` : ''}${leave}</div>` : '';
     lbarTick(!!nx);
     // Applications close soon and you haven't applied: say so above the fold, with a one-tap fix.
-    const asks = askList(r, cfg.amenities);
+    const asks = askItems(r, cfg.amenities);
     const due = needsAction(r) === 'applyby' ? `<div class="rf-lbar-info rf-lbar-due">${esc(applyByLabel(r.applyBy))} · ${esc(packLabel(cfg))}: <button type="button" data-l="ap">Mark applied</button></div>` : '';
     return `${due}${next}<details class="rf-lbar-more"${open ? ' open' : ''}><summary>Checklist, rating and details</summary>
       <div class="rf-lbar-checks"><span class="rf-lbar-lab" aria-hidden="true">My rating</span>${ratingHtml(r, 'data-l="rt"')}</div>
-      ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div>${asks.length ? `<div class="rf-lbar-info rf-lbar-ask"><span class="rf-lbar-lab">Ask the agent</span><ul>${asks.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}</details>`;
+      ${facts.length ? `<div class="rf-lbar-info">${esc(facts.join(' · '))}</div>` : ''}<div class="rf-lbar-checks" role="group" aria-label="Inspection checklist">${checks}</div>${asks.length ? `<div class="rf-lbar-info rf-lbar-ask"><span class="rf-lbar-lab">Ask the agent (tap once answered)</span><div class="rf-lbar-checks" role="group" aria-label="What to ask the agent">${asks.map((x) => qaBtn(x, 'data-l="qa"')).join('')}</div></div>` : ''}</details>`;
   }
   // The note is edited in the bar (multi-line, themed, read by screen readers as a labelled
   // field): Enter saves, Shift+Enter is a new line, Esc cancels; focus goes back to Note.
@@ -6470,6 +6500,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       renderListingBar();
       return bar.querySelector(`[data-l="rt"][data-v="${el.dataset.v}"]`)?.focus();
     }
+    else if (k === 'qa') {
+      marks.cycleAnswer(id, el.dataset.qa);
+      renderListingBar();
+      return bar.querySelector(`[data-qa="${CSS.escape(el.dataset.qa)}"]`)?.focus();
+    }
     else if (k === 'ck') {
       marks.cycleCheck(id, el.dataset.ck);
       renderListingBar();
@@ -6487,6 +6522,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   // Your 1-5 rating: five buttons, the current one pressed; pressing it again clears it.
   const ratingHtml = (r, attr) => `<span class="rf-rate" role="group" aria-label="My rating">${[1, 2, 3, 4, 5].map((n) =>
     `<button type="button" ${attr} data-v="${n}" aria-pressed="${r.rating === n}" aria-label="Rate ${n} of 5" title="Rate ${n} of 5 (Shift+${n})">${n <= (r.rating || 0) ? '★' : '☆'}</button>`).join('')}</span>`;
+  // One What to ask question, answered in place: unasked -> ✓ fine -> ✗ a problem.
+  const qaBtn = (x, attrs) => `<button type="button" ${attrs} data-qa="${esc(x.id)}" data-state="${x.a === 'y' ? 'yes' : x.a === 'n' ? 'no' : ''}" aria-label="${esc(x.q)} ${x.a === 'y' ? 'Answered: fine' : x.a === 'n' ? 'Answered: a problem' : 'Not answered'}">${x.a === 'y' ? '✓ ' : x.a === 'n' ? '✗ ' : ''}${esc(x.q)}</button>`;
   // One checklist item: unknown -> ✓ good -> ✗ problem.
   const checkBtn = (k, v, attrs) => `<button type="button" ${attrs} data-ck="${esc(k)}" data-state="${v === 'y' ? 'yes' : v === 'n' ? 'no' : ''}" aria-label="${esc(k)}: ${v === 'y' ? 'good' : v === 'n' ? 'problem' : 'not checked'}">${v === 'y' ? '✓ ' : v === 'n' ? '✗ ' : ''}${esc(k)}</button>`;
   const reasonLabel = (x) => x.charAt(0).toUpperCase() + x.slice(1); // shown capitalised; stored as is (backups carry it)

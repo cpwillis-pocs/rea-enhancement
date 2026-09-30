@@ -2492,7 +2492,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
       if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
       localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ slSeenAt: String(t - 2 * D) }));
       localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
-        146500101: { f: t - 9 * D, l: t, s: 1, st: t - 5 * D, p: 650, pp: 700, pt: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026', p: '$650 per week' } },
+        146500101: { f: t - 9 * D, l: t, s: 1, st: t - 5 * D, p: 650, pp: 700, pt: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026', p: '$650 per week', w: 'water' } },
         146500102: { f: t - 9 * D, l: t, s: 1, st: t - 6 * D, as: 'approved', ast: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', p: '$700 per week' } },
       } }));
     }, [t, D]);
@@ -2505,6 +2505,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-status button:has-text("Show them")');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101']);
     assert.equal(await page.inputValue('.rf-sl-filter'), '~');
+    // Its heads-up is a question to ask; tap once the agent answers.
+    const q = '.rf-item[data-id="146500101"] [data-qa="w:water"]';
+    await page.click('.rf-item[data-id="146500101"] .rf-ck-more summary');
+    await page.click(q);
+    assert.equal((await marks(page))['146500101'].qa['w:water'], 'y');
+    assert.equal(await page.getAttribute(q, 'data-state'), 'yes');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.qa), 'w:water', 'focus kept');
+    assert.match(await page.textContent('.rf-item[data-id="146500101"] .rf-ck-more summary'), /Asked 1\/2/, "answered, counted like the checklist");
     await page.selectOption('.rf-sl-filter', '');
     await page.selectOption('#rf-slSort', 'added');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101', '146500102'], 'Date added: newest shortlisted first');

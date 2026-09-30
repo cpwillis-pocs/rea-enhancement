@@ -683,7 +683,7 @@ test('ask list: heads-ups, unmentioned features you filter on, unknown availabil
   assert.ok(core.WATCHOUTS.every((w) => /\?$/.test(w.ask)), 'every heads-up has a question');
   assert.equal(core.enquiryText(r, 'Hi. {questions}', ''), 'Hi. How is water usage billed, and is the home water efficient? How loud is the road inside with the windows shut? When is it available?');
   assert.doesNotMatch(core.enquiryText(r, ''), /water/, 'the default template leaves them out');
-  assert.match(core.printHtml([r], new Date(), [], 'pets:yes'), /<ul class="q"><li>How is water/);
+  assert.match(core.printHtml([r], new Date(), [], 'pets:yes'), /<ul class="q"><li>☐ How is water/);
   assert.match(core.compareHtml([r, { ...r, id: '2', watch: '' }], { ...core.DEFAULT_CFG }), /<th scope="row">Ask<\/th><td>How is water/);
 });
 
@@ -768,6 +768,26 @@ test("shortlist What's next order and what changed since your last visit", () =>
   assert.equal(ch.text, '1 cheaper, 1 no longer listed, 1 inspection cancelled, 1 date or details changed, 1 closes by tomorrow');
   assert.deepEqual([...ch.ids].sort(), ['a', 'c', 'd', 'e', 'f']);
   assert.equal(core.sinceChanges([{ id: 'b', priceAt: now - 48 * H, priceDir: 'up' }], since, now).text, '', 'older than your last visit');
+});
+
+test('agent answers: recorded per question, left out of {questions} once answered, marked in Compare, print and CSV', () => {
+  const st = core.marksStore(require('./helpers').memStorage(), () => 1e12);
+  const r = { id: '146500041', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500041', address: '1 A St', price: '$600', watch: 'water,road', available: 'Available now', avail: new Date(), inspections: [] };
+  st.toggle(r.id, 's', r);
+  assert.equal(st.cycleAnswer(r.id, 'w:water'), 'y');
+  assert.equal(st.cycleAnswer(r.id, 'w:road'), 'y'); assert.equal(st.cycleAnswer(r.id, 'w:road'), 'n');
+  assert.equal(st.cycleAnswer(r.id, 'bogus key'), '', 'unknown ids refused');
+  const [sl] = st.shortlist();
+  assert.deepEqual(sl.answers, { 'w:water': 'y', 'w:road': 'n' });
+  assert.equal(core.enquiryText(sl, '{questions}'), '', 'answered questions are not asked again');
+  assert.match(core.compareHtml([sl, { ...sl, id: '2', answers: {} }], core.DEFAULT_CFG), /✓ How is water[^<]*✗ How loud/);
+  assert.match(core.printHtml([sl]), /☑ How is water[\s\S]*☒ How loud/);
+  const [head, line] = core.toCsv([sl]).split('\r\n');
+  assert.ok(head.split(',').includes('agent_answers'));
+  assert.match(line, /✓ How is water usage billed/);
+  const back = core.marksStore(require('./helpers').memStorage(), () => 1e12);
+  back.importJson(st.exportData());
+  assert.deepEqual(back.shortlist()[0].answers, sl.answers, 'backed up and restored');
 });
 
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
