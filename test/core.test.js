@@ -810,6 +810,40 @@ test('{mytimes}: your inspection times as a sentence; nothing without them', () 
   assert.equal(core.enquiryText({ address: '1 A St', price: '$600' }, 'Hi. {mytimes}', '', 'Sat 9-12'), 'Hi. I can inspect Sat 9am–12pm.');
 });
 
+test('once approved: bond and rent in advance left to pay until ticked; the condition report room by room', () => {
+  const won = { id: '146500001', appStatus: 'approved', address: '1 New St', beds: 2, baths: 1, bondNum: 2600, priceNum: 650 };
+  let plan = core.movePlan([won], core.DEFAULT_CFG);
+  assert.equal(plan.next, 'Pay the bond');
+  assert.equal(core.owedLabel(plan), 'Left to pay: $3,900 (bond $2,600, rent in advance $1,300)');
+  plan = core.movePlan([won], { ...core.DEFAULT_CFG, moveDone: core.moveToggle(core.DEFAULT_CFG, plan, 'Pay the bond') });
+  assert.equal(core.owedLabel(plan), 'Left to pay: $1,300 (rent in advance $1,300)');
+  assert.equal(core.owedLabel(core.movePlan([{ ...won, bondNum: Infinity, priceNum: NaN }], core.DEFAULT_CFG)), '', 'amounts unknown: nothing claimed');
+  assert.deepEqual(plan.rooms, ['Bedroom 1', 'Bedroom 2', 'Bathroom', 'Kitchen', 'Living', 'Laundry', 'Entry and hall', 'Outside']);
+  const ecrDone = core.ecrToggle(plan, 'Kitchen');
+  assert.equal(ecrDone, '146500001|Kitchen');
+  const p2 = core.movePlan([won], { ...core.DEFAULT_CFG, ecrDone, moveDate: '2026-10-20', ecrDays: '7' });
+  assert.deepEqual(p2.roomsDone, ['Kitchen']);
+  const html = core.ecrPrintHtml(p2, new Date(2026, 9, 1));
+  assert.match(html, /return the report by 2026-10-27/);
+  assert.equal((html.match(/<h2>/g) || []).length, 8);
+  assert.equal(core.movePlan([{ ...won, beds: 0 }], core.DEFAULT_CFG).rooms[0], 'Main room', 'a studio');
+});
+
+test('room to negotiate: facts only, and only when two agree', () => {
+  const now = new Date(2026, 8, 23).getTime(), D = 864e5;
+  const rows = [
+    { id: 'a', agency: 'Harbour', listed: new Date(now - 36 * D), priceDelta: -30 },
+    { id: 'b', agency: 'Harbour', listed: new Date(now - 5 * D), priceDelta: -20 },
+    { id: 'c', agency: 'Harbour', listed: new Date(now - 30 * D), priceDelta: 0 },
+    { id: 'd', agency: 'Other', listed: new Date(now - 40 * D), priceDelta: 0 },
+  ];
+  const drops = core.agencyDrops(rows);
+  assert.equal(core.negotiateFacts(rows[0], drops, now), 'Room to negotiate? listed 5 weeks · dropped $30 · this agency dropped 2 of 3');
+  assert.equal(core.negotiateFacts(rows[2], drops, now), 'Room to negotiate? listed 4 weeks · this agency dropped 2 of 3');
+  assert.equal(core.negotiateFacts(rows[3], drops, now), '', 'one fact alone says nothing');
+  assert.equal(core.negotiateFacts(rows[1], drops, now), 'Room to negotiate? dropped $20 · this agency dropped 2 of 3');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

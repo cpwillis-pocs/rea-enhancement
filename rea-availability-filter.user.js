@@ -2137,7 +2137,7 @@
   ];
   const SETTING_BY_KEY = new Map(SETTINGS.map((x) => [x.key, x]));
   const settingOk = (k, v) => {
-    if (k === 'packDone' || k === 'moveDone') return v.length <= 2000; // ticks: item names, a listing id
+    if (k === 'packDone' || k === 'moveDone' || k === 'ecrDone') return v.length <= 2000; // ticks: item names, a listing id
     const x = SETTING_BY_KEY.get(k);
     if (!x) return true;
     if (x.kind === 'select') return x.options.some(([o]) => o === v);
@@ -2176,7 +2176,7 @@
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', cashMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
-    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false, packDone: '', moveDone: '', slSort: '', slSeenAt: '',
+    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false, packDone: '', moveDone: '', ecrDone: '', slSort: '', slSeenAt: '',
     ...Object.fromEntries(SETTINGS.map((x) => [x.key, x.def])),
   };
 
@@ -2188,7 +2188,7 @@
   const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
   // What a restore would do, shown before anything is merged.
   const SETTING_NAMES = { ...Object.fromEntries(SETTINGS.filter((x) => x.name).map((x) => [x.key, x.name])),
-    places: 'places', inspectFree: 'inspection times', packDone: 'application pack', moveDone: 'moving list', slSort: 'Shortlist order', slSeenAt: 'last Shortlist visit', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
+    places: 'places', inspectFree: 'inspection times', packDone: 'application pack', moveDone: 'moving list', ecrDone: 'condition report', slSort: 'Shortlist order', slSeenAt: 'last Shortlist visit', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
   const backupSummary = (data, cur) => {
     const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
     const c = backupCfg(data?.cfg);
@@ -2215,7 +2215,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', 'packDone', 'moveDone', 'slSort', 'slSeenAt', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', 'packDone', 'moveDone', 'ecrDone', 'slSort', 'slSeenAt', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -2576,6 +2576,31 @@
   // they're taken while still up, and the median days listed. Counts, not a rating; only with
   // two or more agencies, each with AGENCY_MIN+ listings.
   const AGENCY_MIN = 2, AGENCY_ROWS = 10;
+  // Room to negotiate? Facts only, no suggested offer (rent bidding rules differ by state): how long
+  // it's been listed, a price drop, and how often its agency dropped a price in these results.
+  // Shown only when at least two agree.
+  const agencyDrops = (rows) => {
+    const out = new Map();
+    for (const r of rows) {
+      const k = agencyKey(r.agency);
+      if (!k) continue;
+      const g = out.get(k) || { n: 0, dropped: 0 };
+      g.n++;
+      if (r.priceDelta < 0) g.dropped++;
+      out.set(k, g);
+    }
+    return out;
+  };
+  const negotiateFacts = (r, drops = null, now = Date.now()) => {
+    const since = +(r.listed ?? r.firstSeen ?? NaN), weeks = Number.isFinite(since) ? Math.floor((now - since) / (7 * DAY_MS)) : 0;
+    const g = drops?.get(agencyKey(r.agency));
+    const facts = [
+      since && now - since >= STALE_MS ? `listed ${weeks} weeks` : '',
+      r.priceDelta < 0 ? `dropped $${-r.priceDelta}` : '',
+      g && g.n >= 3 && g.dropped / g.n >= 0.25 && !(g.dropped === 1 && r.priceDelta < 0) ? `this agency dropped ${g.dropped} of ${g.n}` : '',
+    ].filter(Boolean);
+    return facts.length >= 2 ? `Room to negotiate? ${facts.join(' · ')}` : '';
+  };
   const agencyPatterns = (rows, now = new Date()) => {
     const groups = new Map();
     for (const r of rows) {
@@ -2888,7 +2913,16 @@
   // approved, your moving list. Ticks are item names; the moving list's are for one listing
   // ("id|item,item"), so moving again starts afresh.
   const PACK_DEFAULT = 'Photo ID, Payslips, Rental ledger, References, Bank statement';
-  const MOVING_DEFAULT = 'Book removalists, Connect power and gas, Connect internet, Redirect mail, Update your address, Book the end-of-lease clean, Hand back the old keys';
+  const MOVING_DEFAULT = 'Pay the bond, Pay rent in advance, Book removalists, Connect power and gas, Connect internet, Redirect mail, Update your address, Book the end-of-lease clean, Hand back the old keys, Claim your old bond back';
+  const PAY_BOND = 'Pay the bond', PAY_ADVANCE = 'Pay rent in advance'; // moving-list items that are money: "left to pay"
+  // The entry condition report, room by room (from the approved listing's bedrooms and bathrooms):
+  // ticked once checked and photographed. What to look at in each room is on its printout.
+  const ECR_ITEMS = ['Walls and ceiling', 'Floors', 'Windows and screens', 'Doors and locks', 'Lights and power points', 'Fixtures and fittings', 'Marks or damage'];
+  const ecrRooms = (r) => {
+    const beds = Math.min(6, Math.max(0, Math.round(+r.beds) || 0)), baths = Math.min(4, Math.max(1, Math.round(+r.baths) || 1));
+    return [...(beds ? Array.from({ length: beds }, (_, i) => (beds > 1 ? `Bedroom ${i + 1}` : 'Bedroom')) : ['Main room']),
+      ...Array.from({ length: baths }, (_, i) => (baths > 1 ? `Bathroom ${i + 1}` : 'Bathroom')), 'Kitchen', 'Living', 'Laundry', 'Entry and hall', 'Outside'];
+  };
   const tickItems = (v, def) => [...new Set(String(v || def).split(/[,\n]/).map((x) => clip(x.replace(/\|/g, '/').trim(), 40)).filter(Boolean))].slice(0, CHECK_MAX); // | separates the listing id in moveDone
   const tickSet = (v) => new Set(String(v || '').split(',').filter(Boolean));
   // `portals`: the apply portals your shortlisted listings name (2Apply, Snug…): each needs its
@@ -2910,8 +2944,28 @@
     const md = String(cfg.moveDone || ''), bar = md.indexOf('|'), forId = md.slice(0, bar), list = bar < 0 ? '' : md.slice(bar + 1);
     const d = forId === won.id ? tickSet(list) : new Set();
     const moveDate = isYmd(cfg.moveDate || '') ? cfg.moveDate : '', days = Math.round(+cfg.ecrDays);
-    return { r: won, items, done: items.filter((i) => d.has(i)), next: items.find((i) => !d.has(i)) || '', moveDate, ecrBy: moveDate && days >= 1 && days <= 30 ? addDaysYmd(moveDate, days) : '' };
+    // Money still to pay: the bond and rent in advance (from the listing), until ticked off.
+    const bond = Number.isFinite(won.bondNum) ? won.bondNum : null, advance = Number.isFinite(won.priceNum) ? ADVANCE_WEEKS * won.priceNum : null;
+    const owed = [[PAY_BOND, bond, 'bond'], [PAY_ADVANCE, advance, 'rent in advance']].filter(([item, amt]) => items.includes(item) && !d.has(item) && amt != null);
+    const rooms = ecrRooms(won), e = String(cfg.ecrDone || ''), eb = e.indexOf('|'), er = e.slice(0, eb) === won.id ? tickSet(e.slice(eb + 1)) : new Set();
+    return { r: won, items, done: items.filter((i) => d.has(i)), next: items.find((i) => !d.has(i)) || '', moveDate, ecrBy: moveDate && days >= 1 && days <= 30 ? addDaysYmd(moveDate, days) : '',
+      owed: owed.map(([, amt, what]) => ({ amt, what })), rooms, roomsDone: rooms.filter((x) => er.has(x)) };
   };
+  const owedLabel = (plan) => (plan.owed.length ? `Left to pay: ${money(plan.owed.reduce((n, x) => n + x.amt, 0))} (${plan.owed.map((x) => `${x.what} ${money(x.amt)}`).join(', ')})` : '');
+  const ecrToggle = (plan, room) => {
+    const d = new Set(plan.roomsDone);
+    if (d.has(room)) d.delete(room); else d.add(room);
+    return d.size ? `${plan.r.id}|${plan.rooms.filter((x) => d.has(x)).join(',')}` : '';
+  };
+  // The condition report as a printable checklist: each room, what to look at, room to write.
+  const ecrPrintHtml = (plan, now = new Date()) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Condition report checklist</title><style>
+body{font:13px/1.45 system-ui,-apple-system,sans-serif;color:#111;background:#fff;margin:24px}h1{font-size:18px;margin:0 0 4px}.sub{color:#555;margin-bottom:12px}
+h2{font-size:14px;margin:16px 0 4px;break-after:avoid}table{width:100%;border-collapse:collapse;break-inside:avoid}td,th{border:1px solid #bbb;padding:4px 6px;text-align:left;vertical-align:top}
+th{background:#f4f4f6;font-weight:600}td.w{width:45%}td.c{width:12%;text-align:center}@media print{body{margin:10mm}}
+</style></head><body><h1>Condition report checklist</h1><div class="sub">${esc(plan.r.address || '')}${plan.ecrBy ? ` · return the report by ${esc(plan.ecrBy)}` : ''} · printed ${esc(now.toLocaleDateString('en-AU'))}</div>
+<p>Before you sign the agent's report, check each item, note anything worn or damaged, and take dated photos: the report is what your bond is judged against.</p>
+${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Condition and notes</th><th>Photo</th><th>Agrees with agent</th></tr>${ECR_ITEMS.map((i) => `<tr><td>${esc(i)}</td><td class="w"></td><td class="c">☐</td><td class="c">☐</td></tr>`).join('')}</table>`).join('')}
+</body></html>`;
   const moveToggle = (cfg, plan, item) => {
     const d = new Set(plan.done);
     if (d.has(item)) d.delete(item); else d.add(item);
@@ -3468,7 +3522,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, DECLINE_REASONS, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, DECLINE_REASONS, agencyDrops, negotiateFacts, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -4083,7 +4137,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
           title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
         <div class="rf-meta rf-places-fb" aria-live="polite"></div>
         <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
-        <input type="hidden" id="rf-building"><input type="hidden" id="rf-packDone"><input type="hidden" id="rf-moveDone"><input type="hidden" id="rf-slSeenAt">
+        <input type="hidden" id="rf-building"><input type="hidden" id="rf-packDone"><input type="hidden" id="rf-moveDone"><input type="hidden" id="rf-ecrDone"><input type="hidden" id="rf-slSeenAt">
         <h3 class="rf-sect">Lease &amp; inspections</h3>
         <div class="rf-grid3">
           <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
@@ -5349,7 +5403,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   // Where you were in each tab (and for which search + filters), so switching tabs keeps it.
   // Shortlist-only settings (ticks, its order, the visit stamp) don't move your place on Results.
-  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify({ ...cfg, packDone: '', moveDone: '', slSort: '', slSeenAt: '' })}`);
+  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify({ ...cfg, packDone: '', moveDone: '', ecrDone: '', slSort: '', slSeenAt: '' })}`);
   // Settings live on Results: switch there, open them and go to one field (from the Shortlist's
   // "set your notice period", or a tick list's "Edit this list").
   function openSetting(key) {
@@ -5591,13 +5645,30 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const { items, done } = plan || packState(cfg, packPortals(all));
     const head = plan ? `Moving list ${done.length}/${items.length}${plan.next ? ` · next: ${plan.next}` : ''}${plan.moveDate ? ` · moving ${shortDate(plan.moveDate)}` : ''}` : packLabel(cfg, packPortals(all)).replace(/^Pack:/, 'Application pack:');
     const open = ui.ticksOpen ?? false;
-    box.innerHTML = `<details${open ? ' open' : ''}><summary>${esc(head)}</summary>${plan ? chips(items, done, 'data-mv', 'Moving list') : chips(items, done, 'data-pack', 'Application pack')}<button type="button" class="rf-undo" data-edit-list="${plan ? 'movingList' : 'packList'}">Edit this list</button></details>`;
+    const owed = plan ? owedLabel(plan) : '';
+    box.innerHTML = `<details${open ? ' open' : ''}><summary>${esc(head)}</summary>${owed ? `<div class="rf-meta">${esc(owed)}</div>` : ''}${plan ? chips(items, done, 'data-mv', 'Moving list') : chips(items, done, 'data-pack', 'Application pack')}<button type="button" class="rf-undo" data-edit-list="${plan ? 'movingList' : 'packList'}">Edit this list</button></details>`
+      + (plan ? `<details class="rf-ecr"${ui.ecrOpen ? ' open' : ''}><summary>${esc(`Condition report ${plan.roomsDone.length}/${plan.rooms.length}${plan.ecrBy ? ` · due ${shortDate(plan.ecrBy)}` : ''}`)}</summary><div class="rf-meta">Tick each room once it's checked and photographed.</div>${chips(plan.rooms, plan.roomsDone, 'data-ecr', 'Condition report rooms')}<button type="button" class="rf-undo" data-ecr-print>Print the checklist</button></details>` : '');
     box.firstChild.addEventListener('toggle', (e) => { ui.ticksOpen = e.currentTarget.open; });
+    box.querySelector('.rf-ecr')?.addEventListener('toggle', (e) => { ui.ecrOpen = e.currentTarget.open; });
   }
   function wireTicks() {
     ui.slBar.querySelector('.rf-sl-ticks').addEventListener('click', (e) => {
       const ed = e.target.closest('[data-edit-list]');
       if (ed) return openSetting(ed.dataset.editList);
+      const plan0 = e.target.closest('[data-ecr],[data-ecr-print]') ? movePlan(marks.shortlist(), cfg) : null;
+      if (plan0 && e.target.closest('[data-ecr-print]')) {
+        const w = window.open('', '_blank');
+        if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
+        w.document.open(); w.document.write(ecrPrintHtml(plan0)); w.document.close();
+        return w.addEventListener('load', () => w.print(), { once: true });
+      }
+      const room = e.target.closest('[data-ecr]')?.dataset.ecr;
+      if (plan0 && room != null) {
+        ui.ecrOpen = true;
+        ui.applyCfg({ ...cfg, ecrDone: ecrToggle(plan0, room) });
+        if (!cache) renderShortlist();
+        return ui.slBar.querySelector(`[data-ecr="${CSS.escape(room)}"]`)?.focus();
+      }
       const b = e.target.closest('[data-pack],[data-mv]');
       if (!b) return;
       const pack = b.dataset.pack != null, item = pack ? b.dataset.pack : b.dataset.mv;
@@ -5934,7 +6005,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
   // Markup per listing, without its place in the list (numberItems sets "12 of 150" afterwards).
   function itemParts(rows) {
-    const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist);
+    const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist), drops = sl ? null : agencyDrops(cache || []);
     return rows.map((r) => ({ id: r.id, html: itemHtml(r) }));
     function itemHtml(r) {
       const kq = cfg.keyword.trim() ? keywordEvidence(r.text, cfg.keyword) : '';
@@ -5955,7 +6026,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
           ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : '', applyByLabel(r.applyBy)].filter(Boolean), ' rf-sec')}
           ${tagsHtml(wt, ' rf-watch rf-sec', 'Mentioned in the listing text: worth asking the agent')}
           ${kq ? `<div class="rf-meta rf-sec rf-kwq">matched: ${esc(kq)}</div>` : ''}
-          ${moneyLine(r, inc, med)}
+          ${moneyLine(r, inc, med)}${metaLine([negotiateFacts(r, drops, now)])}
           ${metaLine([
             r.lastSeen && sl ? `seen ${ago(now - r.lastSeen)}` : '',
             r.inspectCancelled && sl ? `Inspection ${r.inspectCancelled} cancelled` : '',
@@ -6492,7 +6563,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const rec = r.agency ? recordText(agencyRecord(marks.shortlist()).get(agencyKey(r.agency))) : '';
     const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
       cash != null ? `cash to move ${money(cash)}` : '', applyByLabel(r.applyBy), rec ? `${r.agency}: ${rec}` : '', sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',
-      ...watchTags(r), placesLabel(r) || kmLabel(r)].filter(Boolean);
+      ...watchTags(r), placesLabel(r) || kmLabel(r), negotiateFacts(r, cache ? agencyDrops(cache) : null)].filter(Boolean);
     const checks = checklistItems(cfg.checklist).map((k) => {
       const v = r.checks?.[k];
       return checkBtn(k, v, 'data-l="ck"');

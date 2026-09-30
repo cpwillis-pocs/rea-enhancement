@@ -2218,10 +2218,17 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await waitStatus(page, /^Noted: notice given/);
     assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).noticeGiven, '2026-09-23');
     // Notice given: the moving list takes the pack's place, and its next item leads.
-    assert.match(await page.textContent('.rf-sl-ticks summary'), /^Moving list 0\/7 · next: Book removalists$/);
-    await page.click('.rf-sl-ticks [data-mv="Book removalists"]');
-    await page.waitForFunction(() => /^Moving list 1\/7 · next: Connect power and gas$/.test(document.querySelector('.rf-sl-ticks summary')?.textContent));
-    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).moveDone, '146500102|Book removalists');
+    assert.match(await page.textContent('.rf-sl-ticks summary'), /^Moving list 0\/10 · next: Pay the bond$/);
+    assert.equal(await page.$('.rf-sl-ticks > details:first-child > .rf-meta'), null, 'no rent or bond known: nothing claimed as left to pay');
+    await page.click('.rf-sl-ticks [data-mv="Pay the bond"]');
+    await page.waitForFunction(() => /^Moving list 1\/10 · next: Pay rent in advance$/.test(document.querySelector('.rf-sl-ticks summary')?.textContent));
+    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).moveDone, '146500102|Pay the bond');
+    // The condition report, room by room, beside it.
+    await page.click('.rf-ecr summary');
+    await page.click('.rf-ecr [data-ecr="Kitchen"]');
+    assert.match(await page.textContent('.rf-ecr summary'), /^Condition report 1\/\d+/);
+    assert.match((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).ecrDone, /^146500102\|Kitchen$/);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.ecr), 'Kitchen');
     await page.click('.rf-item .rf-nudge [data-na=applied]');
     assert.equal((await marks(page))['146500101'].as, 'applied');
     await page.waitForFunction(() => !document.querySelector('.rf-item .rf-nudge'));
