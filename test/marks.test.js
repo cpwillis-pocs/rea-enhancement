@@ -717,3 +717,28 @@ test('marksStore: shortlist() reused while marks and the minute are unchanged, f
   a.setStatus(r1.id, 'applied');
   assert.equal(a.shortlist()[0].appStatus, 'applied', 'a write gives a fresh list');
 });
+
+test('marksStore: writes reuse untouched entries\' JSON, and what is stored is exactly the data', () => {
+  let t = 1e12;
+  const storage = mem();
+  const a = core.marksStore(storage, () => t);
+  const rows = ['146500061', '146500062', '146500063'].map((id) => row(id));
+  a.observe(rows, { full: true });
+  a.toggle(rows[0].id, 's', rows[0]); t += 1000;
+  a.setStatus(rows[0].id, 'applied'); a.setNote(rows[1].id, 'hi'); a.toggle(rows[2].id, 'h'); a.setRating(rows[0].id, 4);
+  a.cycleCheck(rows[0].id, 'Noise'); a.cycleAnswer(rows[0].id, 'avail'); a.setHideReason(rows[2].id, 'price');
+  const stored = storage.getItem('rea-avail-filter/marks/v1');
+  const parsed = JSON.parse(stored);
+  const b = core.marksStore(storage, () => t);
+  assert.deepEqual(b.exportData(), a.exportData(), 'a fresh reader sees the same');
+  assert.equal(parsed.m[rows[0].id].as, 'applied');
+  assert.equal(parsed.m[rows[1].id].n, 'hi');
+  assert.equal(parsed.m[rows[2].id].hr, 'price');
+  assert.deepEqual(JSON.parse(stored), JSON.parse(JSON.stringify(parsed)), 'valid JSON');
+  // Another tab's write between two of ours: re-read, nothing stale written back.
+  b.setNote(rows[1].id, 'from the other tab');
+  a.setStatus(rows[0].id, 'approved');
+  const c = core.marksStore(storage, () => t);
+  assert.equal(c.note(rows[1].id), 'from the other tab');
+  assert.equal(c.shortlist()[0].appStatus, 'approved');
+});
