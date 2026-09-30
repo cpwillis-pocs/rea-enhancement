@@ -63,7 +63,7 @@ The 2.34.0 audit (its bugs, UI/UX issues and eleven ideas) shipped in 2.35.0 (se
 - A heads-up the agent answered is muted (✓, struck through) or marked (✗); decline reasons show in the Market view's agency table through your record.
 - Tried and dropped: reusing each untouched entry's JSON on a marks write. With 3000 marks a write stayed at about 7–8 ms either way: building and storing the 380K-character string is the cost, not stringifying the entries. The per-entry write cache below stays unbuilt for that reason.
 
-Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
+Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read. (The `SORTS` / `SORT_UNKNOWN` accessors are now one `SORT_SPEC`.) The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
 
 ## Releasing
 

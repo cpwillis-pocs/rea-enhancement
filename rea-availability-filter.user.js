@@ -2220,30 +2220,27 @@
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
   const byPrice = (a, b) => a.priceNum - b.priceNum;
-  const SORTS = {
-    avail: (a, b) => byAvail(a, b) || byPrice(a, b),
-    price: (a, b) => byPrice(a, b) || byAvail(a, b),
-    ppb: (a, b) => a.ppb - b.ppb || byAvail(a, b),
-    ppsqm: (a, b) => (perSqm(a) ?? Infinity) - (perSqm(b) ?? Infinity) || byAvail(a, b),
-    beds: (a, b) => (+b.beds || 0) - (+a.beds || 0) || byPrice(a, b),
+  // Each sort: how two listings compare, and which listings have no value for it (kept last, even
+  // reversed: a "Contact agent" rent isn't the dearest). NaN from Infinity - Infinity is falsy, so
+  // ties on unknowns fall through to the next key.
+  const SORT_SPEC = {
+    avail: [(a, b) => byAvail(a, b) || byPrice(a, b), (r) => !(r.avail instanceof Date)],
+    price: [(a, b) => byPrice(a, b) || byAvail(a, b), (r) => !Number.isFinite(r.priceNum)],
+    ppb: [(a, b) => a.ppb - b.ppb || byAvail(a, b), (r) => !Number.isFinite(r.ppb)],
+    ppsqm: [(a, b) => (perSqm(a) ?? Infinity) - (perSqm(b) ?? Infinity) || byAvail(a, b), (r) => perSqm(r) == null],
+    beds: [(a, b) => (+b.beds || 0) - (+a.beds || 0) || byPrice(a, b), (r) => r.beds === ''],
     // Newest first: REA's listed date when present, else when this browser first saw it.
-    listed: (a, b) => (b.listed ?? b.firstSeen ?? -Infinity) - (a.listed ?? a.firstSeen ?? -Infinity) || byAvail(a, b),
-    inspect: (a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b),
-    value: (a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b),
-    distance: (a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || byAvail(a, b),
-    fit: (a, b) => fitKey(a.fit) - fitKey(b.fit) || (a.priceNum ?? Infinity) - (b.priceNum ?? Infinity) || byAvail(a, b),
-    allnear: (a, b) => (worstKm(a) ?? Infinity) - (worstKm(b) ?? Infinity) || byAvail(a, b),
-    match: (a, b) => (b.score ?? -1) - (a.score ?? -1) || byAvail(a, b),
-    cash: (a, b) => (cashToMove(a) ?? Infinity) - (cashToMove(b) ?? Infinity) || byAvail(a, b),
+    listed: [(a, b) => (b.listed ?? b.firstSeen ?? -Infinity) - (a.listed ?? a.firstSeen ?? -Infinity) || byAvail(a, b), (r) => r.listed == null && r.firstSeen == null],
+    inspect: [(a, b) => (a.nextInspect ?? Infinity) - (b.nextInspect ?? Infinity) || byAvail(a, b), (r) => r.nextInspect == null],
+    value: [(a, b) => (a.vsMedian ?? Infinity) - (b.vsMedian ?? Infinity) || byPrice(a, b), (r) => r.vsMedian == null],
+    distance: [(a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || byAvail(a, b), (r) => r.km == null],
+    fit: [(a, b) => fitKey(a.fit) - fitKey(b.fit) || (a.priceNum ?? Infinity) - (b.priceNum ?? Infinity) || byAvail(a, b), (r) => !r.fit],
+    allnear: [(a, b) => (worstKm(a) ?? Infinity) - (worstKm(b) ?? Infinity) || byAvail(a, b), (r) => worstKm(r) == null],
+    match: [(a, b) => (b.score ?? -1) - (a.score ?? -1) || byAvail(a, b), (r) => r.score == null],
+    cash: [(a, b) => (cashToMove(a) ?? Infinity) - (cashToMove(b) ?? Infinity) || byAvail(a, b), (r) => cashToMove(r) == null],
   };
-  // NaN from Infinity - Infinity is falsy, so ties on unknowns fall through to the next key.
-  // Reversed sorts keep listings without the value last (a "Contact agent" rent isn't the dearest).
-  const SORT_UNKNOWN = {
-    avail: (r) => !(r.avail instanceof Date), price: (r) => !Number.isFinite(r.priceNum), ppb: (r) => !Number.isFinite(r.ppb), ppsqm: (r) => perSqm(r) == null, beds: (r) => r.beds === '',
-    listed: (r) => r.listed == null && r.firstSeen == null, inspect: (r) => r.nextInspect == null, value: (r) => r.vsMedian == null,
-    distance: (r) => r.km == null, fit: (r) => !r.fit, allnear: (r) => worstKm(r) == null, match: (r) => r.score == null,
-    cash: (r) => cashToMove(r) == null,
-  };
+  const SORTS = Object.fromEntries(Object.entries(SORT_SPEC).map(([k, [cmp]]) => [k, cmp]));
+  const SORT_UNKNOWN = Object.fromEntries(Object.entries(SORT_SPEC).map(([k, [, unknown]]) => [k, unknown]));
   const sorter = (key, desc) => {
     const cmp = Object.hasOwn(SORTS, key) ? SORTS[key] : SORTS.avail;
     if (!desc) return cmp;
