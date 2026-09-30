@@ -67,6 +67,7 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
 - The **Shortlist** tab collects starred listings from every search you've run, with a private note and an **application status** (to inspect, inspected, applied, approved, declined) per listing; search it, filter by status and export it.
+- **What's next** orders the Shortlist: the approved listing first (outlined), then what needs doing (soonest deadline first), then the next inspection, then the rest by your rating, with ruled-out listings last (**Date added** keeps the old order). Opening it after an hour or more says what changed **since your last visit** (cheaper, dearer, no longer listed, inspections cancelled, dates or details changed, closing by tomorrow), and **Show them** filters to those.
 - **Compare** up to 6 shortlisted listings side by side, best value per row highlighted.
 - **Your rating** (1–5, or Shift+1–5) per shortlisted listing, shown in Compare and exports.
 - **Application pack**: tick the documents you have ready (ID, payslips, rental ledger, references, bank statement, or your own list; names only, nothing uploaded) above the Shortlist; the apply-by reminders say how much is ready.

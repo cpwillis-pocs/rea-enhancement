@@ -280,6 +280,33 @@
     return '';
   }; // an application with no answer after this long gets a "follow up?" nudge
   const needsFollowUp = (r, now = Date.now()) => !deadEnd(r) && r.appStatus === 'applied' && !!r.appAt && now - r.appAt > FOLLOW_UP_DAYS * DAY_MS;
+  // The Shortlist's "What's next" order: approved first, then what needs doing (soonest deadline
+  // first), then the next inspection, then the rest by your rating; ruled out and dead ends last.
+  const nextKey = (r, now = Date.now()) => {
+    if (r.appStatus === 'approved') return [0, 0];
+    if (deadEnd(r)) return [4, 0];
+    if (needsAction(r, now) || needsFollowUp(r, now)) return [1, r.applyBy ? +new Date(`${r.applyBy}T23:59:59`) : r.appAt || now];
+    const next = (r.inspections || []).map((i) => i?.at).filter((at) => typeof at === 'number' && at > now).sort((a, b) => a - b)[0];
+    if (next) return [2, next];
+    return [3, -(r.rating || 0)];
+  };
+  const byNext = (rows, now = Date.now()) => rows.map((r) => [nextKey(r, now), r]).sort(([a], [b]) => a[0] - b[0] || a[1] - b[1]).map(([, r]) => r);
+  // What changed on the Shortlist since `since` (your last visit): counts, the listings, and a line.
+  const sinceChanges = (rows, since, now = Date.now()) => {
+    const after = (t) => typeof t === 'number' && t > since;
+    const today = ymdLocal(new Date(now)), tomorrow = ymdLocal(new Date(now + DAY_MS));
+    const c = { cheaper: [], dearer: [], gone: [], cancelled: [], changed: [], closing: [] };
+    for (const r of rows) {
+      if (after(r.priceAt) && r.priceDir) c[r.priceDir === 'down' ? 'cheaper' : 'dearer'].push(r);
+      if (after(r.goneAt)) c.gone.push(r);
+      if (after(r.cancelledAt)) c.cancelled.push(r);
+      if (after(r.availAt) || after(r.featAt)) c.changed.push(r);
+      if (r.applyBy && !deadEnd(r) && !['applied', 'approved', 'declined'].includes(r.appStatus) && r.applyBy >= today && r.applyBy <= tomorrow) c.closing.push(r);
+    }
+    const parts = [[c.cheaper, 'cheaper'], [c.dearer, 'dearer'], [c.gone, 'no longer listed'], [c.cancelled, (n) => `${n === 1 ? 'inspection' : 'inspections'} cancelled`],
+      [c.changed, 'date or details changed'], [c.closing, (n) => `${n === 1 ? 'closes' : 'close'} by tomorrow`]].filter(([l]) => l.length).map(([l, w]) => `${l.length} ${typeof w === 'function' ? w(l.length) : w}`);
+    return { ...c, ids: new Set(Object.values(c).flat().map((r) => r.id)), text: parts.join(', ') };
+  };
   // Your track record per agency across the shortlist: { applied, approved, declined } by agency name.
   const agencyRecord = (rows) => {
     const out = new Map();
@@ -421,6 +448,9 @@
         inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
         inspectCancelled: Array.isArray(e.ic) && now() - e.ic[0] < CANCEL_SHOW_MS ? clip(e.ic[1], 80) : '',
         inspectCancelledAt: Array.isArray(e.ic) && typeof e.ic[2] === 'number' ? e.ic[2] : null, // so a calendar can cancel it
+        // When it last changed, for "since your last visit": price (and which way), availability, features, cancellation.
+        priceAt: typeof e.pt === 'number' ? e.pt : null, priceDir: typeof e.p === 'number' && typeof e.pp === 'number' && e.p !== e.pp ? (e.p < e.pp ? 'down' : 'up') : '',
+        availAt: typeof e.avt === 'number' ? e.avt : null, featAt: typeof e.fst === 'number' ? e.fst : null, cancelledAt: Array.isArray(e.ic) && typeof e.ic[0] === 'number' ? e.ic[0] : null,
       };
     };
     // Read-modify-write of one listing's entry: fn(entry, all marks) returns what the setter returns.
@@ -2112,7 +2142,7 @@
     from: '', to: '', withinDays: '', exactOnly: false,
     priceMin: '', priceMax: '', upfrontMax: '', cashMax: '', bedsMin: '', bathsMin: '', carsMin: '', sizeMin: '',
     type: '', keyword: '', hideNoImage: false, hideTaken: false, inspectOn: '', inspectWhen: '', inspectFree: '', staleOnly: false, amenities: '', anchor: '', maxKm: '', floorplanOnly: false, sort: 'avail', sortDesc: false,
-    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false, packDone: '', moveDone: '',
+    onlyStarred: false, showHidden: false, places: '', newOnly: false, changedOnly: false, unopenedOnly: false, unreviewedOnly: false, noWatch: '', leaseMin: '', onePerBuilding: false, building: '', showGone: false, packDone: '', moveDone: '', slSort: '', slSeenAt: '',
     ...Object.fromEntries(SETTINGS.map((x) => [x.key, x.def])),
   };
 
@@ -2120,11 +2150,11 @@
   // not this search's filters. Restored through sanitizeCfg, so a hand-edited file can't break it.
   // Not `remember`/`remindSaved`: restoring a backup made with Remember off must not delete this
   // browser's remembered searches.
-  const BACKUP_CFG_SKIP = new Set(SETTINGS.filter((x) => x.backup === false).map((x) => x.key));
+  const BACKUP_CFG_SKIP = new Set([...SETTINGS.filter((x) => x.backup === false).map((x) => x.key), 'slSeenAt']); // the visit stamp is this browser's
   const backupCfg = (c) => { const ok = sanitizeCfg(c); return Object.fromEntries(DISPLAY_PREFS.filter((k) => k in ok && !BACKUP_CFG_SKIP.has(k)).map((k) => [k, ok[k]])); };
   // What a restore would do, shown before anything is merged.
   const SETTING_NAMES = { ...Object.fromEntries(SETTINGS.filter((x) => x.name).map((x) => [x.key, x.name])),
-    places: 'places', inspectFree: 'inspection times', packDone: 'application pack', moveDone: 'moving list', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
+    places: 'places', inspectFree: 'inspection times', packDone: 'application pack', moveDone: 'moving list', slSort: 'Shortlist order', slSeenAt: 'last Shortlist visit', anchor: 'distance point', sort: 'sort', sortDesc: 'sort' };
   const backupSummary = (data, cur) => {
     const m = isObj(data?.m) ? Object.entries(data.m).filter(([id, e]) => isListingId(id) && isObj(e)) : [];
     const c = backupCfg(data?.cfg);
@@ -2151,7 +2181,7 @@
     'inspectOn', 'inspectWhen', 'hideNoImage', 'hideTaken', 'exactOnly', 'onlyStarred', 'newOnly', 'changedOnly', 'unopenedOnly', 'unreviewedOnly', 'staleOnly', 'amenities', 'noWatch', 'maxKm', 'floorplanOnly', 'leaseMin', 'onePerBuilding', 'building'];
   const MORE_KEYS = [...FILTER_KEYS.filter((k) => !['from', 'to', 'withinDays', 'exactOnly'].includes(k)), 'showHidden', 'showGone', 'anchor', 'places'];
   const PRESET_KEYS = [...FILTER_KEYS.filter((k) => k !== 'building'), 'anchor', 'sort', 'sortDesc']; // what a preset saves and restores
-  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', 'packDone', 'moveDone', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
+  const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', 'packDone', 'moveDone', 'slSort', 'slSeenAt', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
   const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
@@ -3387,7 +3417,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, byNext, sinceChanges, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3569,6 +3599,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   .rf-tabs button[aria-selected=true]{color:var(--rf-fg);border-bottom-color:var(--rf-accent)}
   .rf-sl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
   .rf-sl-ticks{flex-basis:100%} .rf-sl-ticks summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)} .rf-sl-ticks .rf-checks{margin:6px 0 0}
+  .rf-item.rf-approved{box-shadow:inset 0 0 0 2px var(--rf-accent);border-radius:8px}
   .rf-sl-bar .rf-label{flex-basis:100%;order:-2} /* the bar's name, above its search */
   .rf-sl-unfold{flex:1 1 100%;order:-1;text-align:left} .rf-sl-bar.rf-folded>:not(.rf-label):not(.rf-sl-q):not(.rf-sl-unfold){display:none!important}
   .rf-sl-bar .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
@@ -3934,8 +3965,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       <button type="button" class="rf-btn sec rf-sl-unfold" hidden aria-expanded="true"></button>
       <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
         <option value="">Any status</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
-        <option value="-">Not started</option><option value="!">Needs action</option>
+        <option value="-">Not started</option><option value="!">Needs action</option><option value="~">Changed since last visit</option>
       </select>
+      <select class="rf-sl-filter" id="rf-slSort" aria-label="Order of the shortlist"><option value="">What's next</option><option value="added">Date added</option></select>
       <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
       <button class="rf-btn sec" data-sl="recheck" title="Fetch each shortlisted listing's page for current price, availability and inspections">Re-check</button>
       <details class="rf-menu"><summary class="rf-btn sec" title="Export, share, print, backup">More</summary><div class="rf-menu-list">
@@ -3994,7 +4026,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
           title="Up to ${PLACES_MAX}. Straight-line km to each shows on listings; sort by 'Nearest to all places'."></textarea></label>
         <div class="rf-meta rf-places-fb" aria-live="polite"></div>
         <label class="rf-check" title="Several units in one building: keep the cheapest"><input type="checkbox" id="rf-onePerBuilding">One listing per building</label>
-        <input type="hidden" id="rf-building"><input type="hidden" id="rf-packDone"><input type="hidden" id="rf-moveDone">
+        <input type="hidden" id="rf-building"><input type="hidden" id="rf-packDone"><input type="hidden" id="rf-moveDone"><input type="hidden" id="rf-slSeenAt">
         <h3 class="rf-sect">Lease &amp; inspections</h3>
         <div class="rf-grid3">
           <label>Lease at least<select id="rf-leaseMin"><option value="">Any</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select></label>
@@ -5087,6 +5119,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       });
     }
     ui.slFilter.addEventListener('change', () => renderShortlist());
+    panel.querySelector('#rf-slSort').addEventListener('change', () => { if (!cache) renderShortlist(); }); // with results, the settings change redraws it
     let slqT = null;
     ui.slQuery.addEventListener('input', () => { clearTimeout(slqT); slqT = setTimeout(renderShortlist, 150); });
     ui.plan.addEventListener('change', () => {
@@ -5244,7 +5277,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   const BULK_HIDE = { sb: ['suburb', (n) => marks.toggleSuburb(n), 'in'], ag: ['agency', (n) => marks.toggleAgency(n), 'from'] };
 
   // Where you were in each tab (and for which search + filters), so switching tabs keeps it.
-  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify(cfg)}`);
+  // Shortlist-only settings (ticks, its order, the visit stamp) don't move your place on Results.
+  const placeSig = (view) => (view === 'shortlist' ? 'sl' : `${cacheKey}|${JSON.stringify({ ...cfg, packDone: '', moveDone: '', slSort: '', slSeenAt: '' })}`);
   // Settings live on Results: switch there, open them and go to one field (from the Shortlist's
   // "set your notice period", or a tick list's "Edit this list").
   function openSetting(key) {
@@ -5271,6 +5305,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     ui.slBar.hidden = !sl;
     ui.panel.querySelector('.rf-clear').hidden = sl; // filters don't apply to the shortlist
     ui.panel.classList.toggle('rf-wide', sl && !!ui.compare);
+    if (sl && ui.slSince == null) { // this page's first Shortlist visit: changes since the last one (an hour or more ago) are named
+      const last = +cfg.slSeenAt || 0;
+      ui.slSince = last || Date.now();
+      if (Date.now() - last > HOUR_MS) { // stored quietly: nothing to redraw
+        cfg = { ...cfg, slSeenAt: String(Date.now()) };
+        const el = ui.panel.querySelector('#rf-slSeenAt'); if (el) el.value = cfg.slSeenAt;
+        saveCfg(cfg);
+      }
+    }
     if (sl) renderShortlist();
     else if (cache) showResults();
     else { setEmpty(EMPTY_INTRO); setStatus(''); setExport(true); }
@@ -5285,7 +5328,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   // fresh objects once a minute).
   const shortlistRows = (all = marks.shortlist()) => {
     const f = ui.slFilter.value, q = ui.slQuery.value;
-    const rows = all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : r.appStatus === f)) && textMatch(r, q));
+    const changed = f === '~' ? sinceChanges(all, ui.slSince ?? cfg.slSeenAt).ids : null;
+    const kept = all.filter((r) => (!f || (f === '-' ? !r.appStatus : f === '!' ? !!(needsAction(r) || needsFollowUp(r)) : f === '~' ? changed.has(r.id) : r.appStatus === f)) && textMatch(r, q));
+    const rows = cfg.slSort === 'added' ? kept : byNext(kept);
     const anchor = parseAnchor(cfg.anchor), places = parsePlaces(cfg.places), end = leaseEndOf(cfg), extra = num(cfg.moveCosts) || 0, rentNow = num(cfg.rentNow) || 0;
     for (const r of rows) { setDistances(r, cfg, anchor, places); r.fit = leaseFit(r, end); r.moveExtra = extra; r.rentNow = rentNow; }
     return rows;
@@ -5432,6 +5477,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     else ui.list.innerHTML = !rows.length ? (total ? '<div class="rf-empty">Nothing on the shortlist matches.</div>' : '<div class="rf-empty">No shortlisted listings yet.<br>Use ☆ on any result to add one.</div>')
       : slots ? planHtml(slots, ui.planDay) : compareHtml(cmp, cfg, { total: ui.rows.length, picked: ui.cmpPicked });
     setStatus(rows.length ? `${rows.length < total ? `${rows.length} of ${total}` : rows.length} shortlisted across all searches. Details are as last seen.` : '');
+    const since = ui.slSince ? sinceChanges(all, ui.slSince) : null;
+    if (since?.text && ui.slFilter.value !== '~') { // since your last visit, with a way to see just those
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: 'Show them' });
+      b.addEventListener('click', () => { ui.slFilter.value = '~'; renderShortlist(); ui.slFilter.focus(); });
+      ui.status.append(` Since your last visit (${ago(Date.now() - ui.slSince)}): ${since.text}. `, b);
+    }
     const won = nextSteps(all, cfg), due = noticeDue(cfg);
     if (won || due) { // your own lease: tell the landlord in time
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'rf-undo', textContent: "I've given notice" });
@@ -5809,7 +5860,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       const { am, wt } = tagItemsOf(r), km = kmLabel(r), pk = placesLabel(r), inc = incomePct(r, cfg.income), med = medianLabel(r);
       const na = sl ? needsAction(r, now) : '';
       return `
-      <div tabindex="-1" role="article" aria-posinset="0" aria-setsize="0" aria-label="${esc(`0 of 0: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
+      <div tabindex="-1" role="article" aria-posinset="0" aria-setsize="0" aria-label="${esc(`0 of 0: ${name}`)}" class="rf-item${r.gone || ruledOut(r) ? ' rf-hidden' : ''}${r.starred ? ' rf-starred' : ''}${sl && r.appStatus === 'approved' ? ' rf-approved' : ''}" data-id="${esc(r.id)}"${r.reviewedAt ? ' data-rv="1"' : ''}>
       <a class="rf-card" href="${esc(r.url)}" target="_blank" rel="noopener" aria-label="${esc(`${name} (opens the listing)`)}">
         ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy">` : '<div></div>'}
         <div>

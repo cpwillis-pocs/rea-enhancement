@@ -748,6 +748,28 @@ test('tick lists: a | in an item is kept apart from the listing id; stored ticks
   assert.equal(core.sanitizeCfg({ moveDone: '1|a' }).moveDone, '1|a');
 });
 
+test("shortlist What's next order and what changed since your last visit", () => {
+  const now = new Date(2026, 8, 23, 12).getTime(), H = 36e5;
+  const rows = [
+    { id: 'plain', rating: 2 },
+    { id: 'rated', rating: 5 },
+    { id: 'dead', appStatus: 'declined' },
+    { id: 'insp', inspections: [{ at: now + 48 * H }] },
+    { id: 'soon', inspections: [{ at: now + 2 * H }] },
+    { id: 'due', applyBy: '2026-09-24' },
+    { id: 'won', appStatus: 'approved', gone: true },
+  ];
+  assert.deepEqual(core.byNext(rows, now).map((r) => r.id), ['won', 'due', 'soon', 'insp', 'rated', 'plain', 'dead']);
+  const since = now - 24 * H;
+  const ch = core.sinceChanges([
+    { id: 'a', priceAt: now - H, priceDir: 'down' }, { id: 'b', priceAt: now - 48 * H, priceDir: 'down' }, { id: 'c', goneAt: now - H },
+    { id: 'd', cancelledAt: now - H }, { id: 'e', availAt: now - H }, { id: 'f', applyBy: '2026-09-24' }, { id: 'g', applyBy: '2026-09-24', appStatus: 'applied' },
+  ], since, now);
+  assert.equal(ch.text, '1 cheaper, 1 no longer listed, 1 inspection cancelled, 1 date or details changed, 1 closes by tomorrow');
+  assert.deepEqual([...ch.ids].sort(), ['a', 'c', 'd', 'e', 'f']);
+  assert.equal(core.sinceChanges([{ id: 'b', priceAt: now - 48 * H, priceDir: 'up' }], since, now).text, '', 'older than your last visit');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

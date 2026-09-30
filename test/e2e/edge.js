@@ -2483,6 +2483,36 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 70. The Shortlist: approved first (What's next), and what changed since your last visit, with a
+  // way to see just those.
+  await block('70', async () => {
+    const ctx = await browser.newContext();
+    const t = FIXED.getTime(), D = 864e5;
+    await ctx.addInitScript(([t, D]) => {
+      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
+      localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ slSeenAt: String(t - 2 * D) }));
+      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+        146500101: { f: t - 9 * D, l: t, s: 1, st: t - 5 * D, p: 650, pp: 700, pt: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026', p: '$650 per week' } },
+        146500102: { f: t - 9 * D, l: t, s: 1, st: t - 6 * D, as: 'approved', ast: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', p: '$700 per week' } },
+      } }));
+    }, [t, D]);
+    const page = await open(ctx);
+    await page.click('#rf-launch');
+    await page.click('[data-view=shortlist]');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500102', '146500101'], 'approved first');
+    assert.ok(await page.$('.rf-item.rf-approved[data-id="146500102"]'));
+    await waitStatus(page, /Since your last visit \(2d ago\): 1 cheaper\./);
+    await page.click('.rf-status button:has-text("Show them")');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101']);
+    assert.equal(await page.inputValue('.rf-sl-filter'), '~');
+    await page.selectOption('.rf-sl-filter', '');
+    await page.selectOption('#rf-slSort', 'added');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101', '146500102'], 'Date added: newest shortlisted first');
+    assert.ok(+JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).slSeenAt >= t, 'this visit stamped');
+    console.log('shortlist order and since last visit: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
