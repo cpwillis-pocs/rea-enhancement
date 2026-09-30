@@ -2,6 +2,27 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.35.1
+
+- **Faster and steadier**:
+  - A status-line change no longer re-styles every listing: about 30 ms down to 0.1 ms with 935 shown.
+  - Best match's move-in comparison uses the whole search's median, so hiding or filtering out a listing doesn't shift the others' scores. A hide now redraws only that listing and its building's, and an in-place redraw no longer jumps to the top.
+- **A heads-up the agent answered** is muted (✓, struck through) when it's fine, or marked ✗ when it's a problem.
+- Fixed:
+  - On the Shortlist, a star or a decline reason left other rows' agency record and pack nudges out of date.
+  - Touch screens lost the drawer's ▸/▾ disclosure markers.
+  - My inspection times couldn't be set without the At my times filter; `{mytimes}`, Ask for a viewing and the day planner use it too.
+  - Opening the Shortlist could overwrite another tab's saved filters, and made other tabs jump to the top.
+  - Check all's match count applied this tab's building focus to other searches, and missed New since last visit.
+  - On a phone, focus could fall out of the folded Shortlist bar.
+  - A decline reason outlived the declined status.
+  - "Closes by tomorrow" was a day off on the night clocks change.
+  - A portal already on your pack list appeared twice.
+  - Open Settings went to lease end for a periodic lease.
+  - The since-your-last-visit line appeared within the hour.
+  - `{mytimes}` now says "any day" and lists Monday first.
+- Internals: the sort definitions are one `SORT_SPEC`, and the sticky wiring moved out of `build()`. A marks write test checks that another tab's changes survive. Reusing entries' JSON on writes measured no gain and wasn't kept.
+
 ## 2.35.0
 
 - **The Shortlist, in order**:
