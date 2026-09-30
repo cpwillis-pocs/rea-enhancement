@@ -133,8 +133,16 @@
     ok: true, listeners: new Set(),
     report(ok) { if (ok === this.ok) return; this.ok = ok; for (const f of this.listeners) f(ok); },
   };
+  // Reading window.localStorage/sessionStorage itself throws when site data is blocked: then
+  // every store (settings too) runs in memory, one per name: this page keeps what you do, it just isn't saved.
+  const memStore = () => {
+    const m = new Map();
+    return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, clear: () => m.clear() };
+  };
+  const memStores = {};
+  const storageOr = (name) => { try { return window[name] || (memStores[name] ||= memStore()); } catch { return (memStores[name] ||= memStore()); } };
   const loadCfg = () => {
-    try { const { building, ...c } = sanitizeCfg(JSON.parse(localStorage.getItem(CFG_KEY))); return c; } catch { return {}; }
+    try { const { building, ...c } = sanitizeCfg(JSON.parse(storageOr('localStorage').getItem(CFG_KEY))); return c; } catch { return {}; }
   };
   // Another tab may have saved settings since this one loaded: write only the keys this tab
   // changed (after vs before) over what is stored now, so an older tab can't undo them.
@@ -147,7 +155,7 @@
   const persistJson = (storage, key, value) => {
     try { storage.setItem(key, JSON.stringify(value)); writeState.report(true); return true; } catch { writeState.report(false); return false; }
   };
-  const saveCfg = (cfg) => { const { building, ...c } = cfg; persistJson(localStorage, CFG_KEY, c); };
+  const saveCfg = (cfg) => { const { building, ...c } = cfg; persistJson(storageOr('localStorage'), CFG_KEY, c); };
 
   // Only the amenities the listing answered (most are unknown): what caches and snapshots keep.
   const knownAmen = (amen) => Object.fromEntries(AMENITIES.map((a) => [a.id, amen?.[a.id]]).filter(([, v]) => v === 'yes' || v === 'no'));
@@ -244,7 +252,7 @@
   const summary = (r) => ({
     u: reaUrl(r.url), a: clip(r.address), p: clip(r.price, 80), v: clip(r.available, 80), i: reaImg(r.img),
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
-    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), ab: /^\d{4}-\d{2}-\d{2}$/.test(r.applyBy || '') ? r.applyBy : '', le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
+    in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), ab: isYmd(r.applyBy || '') ? r.applyBy : '', le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
     am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), an: AMENITIES.filter((a) => r.amen?.[a.id] === 'no').map((a) => a.id), ag: clip(r.agency, 80),
     sq: typeof r.sqm === 'number' ? sqmOk(r.sqm) : null, sqt: r.sqm != null && r.sqmFromText ? 1 : null,
@@ -631,7 +639,7 @@
       },
       // Re-check outcome: gone (REA took it down) or seen again (clears gone).
       setGone(id, gone) {
-        edit(id, (e) => { if (gone) e.x = now(); else delete e.x; });
+        edit(id, (e) => { if (gone) { if (typeof e.x !== 'number') e.x = now(); } else delete e.x; }); // gone since it was first found gone
       },
       // Cycle one checklist item: unknown -> yes -> no -> unknown.
       cycleCheck(id, label) {
@@ -1944,7 +1952,8 @@
     if (typeof v === 'string') {
       if (/^https?:\/\//.test(v)) return 'url';
       if (/^\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d\d:?\d\d)?)?$/.test(v)) return 'iso-date';
-      const personal = /\d{3,}\s*\w+\s+(?:st|street|rd|road|ave|avenue)\b|@|(?:\+?61|\b0)[\s-]?\d(?:[\s-]?\d){7,}|\b\d{4}[\s-]?\d{3}[\s-]?\d{3}\b/i.test(v); // addresses, emails, phone numbers
+      // Addresses (any street number, most street types), emails, phone numbers (incl. "(02) 5550 0123").
+      const personal = /\b\d{1,5}[a-z]?\s+(?:[\w'-]+\s+){1,3}(?:st|street|rd|road|ave|avenue|pde|parade|cres|crescent|dr|drive|ln|lane|pl|place|ct|court|hwy|highway|tce|terrace|way|cl|close|bvd|boulevard|blvd)\b|@|(?:\+?61|\b0|\(0\d\))[\s-]?\d(?:[\s-]?\d){7,}|\(0\d\)\s*\d{4}\s*\d{4}|\b\d{4}[\s-]?\d{3}[\s-]?\d{3}\b/i.test(v);
       return SHAPE_KEEP.test(key) && v.length <= 40 && !personal ? v : `string(${v.length})`;
     }
     return typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : typeof v;
@@ -2115,6 +2124,7 @@
   // values sanitizeCfg accepts. kind: check | select | date | int | text | textarea. `group`
   // gathers entries into a fieldset; `after` names fixed markup drawn after the entry.
   const WEIGHT_OPTS = [['0', 'Ignore'], ['1', 'Less'], ['2', 'Normal'], ['3', 'More']];
+  const NOTICE_MAX = 120; // days: the longest notice period Settings takes
   const SETTINGS = [
     { key: 'annotate', section: 'Display', kind: 'check', def: true, label: "Show badges and buttons on REA's result cards", name: 'card badges' },
     { key: 'dimCards', section: 'Display', kind: 'check', def: true, label: "Fade REA cards that don't match filters", name: 'card fading' },
@@ -2125,7 +2135,7 @@
       help: "A periodic lease ends one notice period after you give notice. Until you do, it's counted from today, so set your notice period below." },
     { key: 'leaseEnd', section: 'Your move', kind: 'date', def: '', label: 'My current lease ends (optional)', name: 'lease end',
       help: "Shows the overlap you'd pay, or the gap you'd need to cover, for each listing (sort: Least overlap)." },
-    { key: 'noticeDays', section: 'Your move', kind: 'int', def: '', min: 1, max: 120, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
+    { key: 'noticeDays', section: 'Your move', kind: 'int', def: '', min: 1, max: NOTICE_MAX, label: 'Notice I must give (days, optional)', placeholder: "check your state's rules", name: 'notice period',
       help: "Days before your lease ends that you must tell your landlord or agent. It depends on your state and your lease, so check them. Needs your lease end above; the Shortlist and the calendar export then remind you." },
     { key: 'noticeGiven', section: 'Your move', kind: 'date', def: '', label: 'Notice given on (optional)', name: 'notice given',
       help: 'Once you have given notice: the reminders stop.' },
@@ -2804,7 +2814,7 @@
   // Moving from your current lease: nights paying two rents (overlap) or with nowhere (gap).
   // Your lease covers through `leaseEnd`; the new one starts on its available date (today if now).
   const leaseFit = (r, leaseEnd, now = new Date()) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(leaseEnd || '')) || !(r.avail instanceof Date) || isNaN(r.avail)) return null;
+    if (!isYmd(String(leaseEnd || '')) || !(r.avail instanceof Date) || isNaN(r.avail)) return null;
     const end = dayNum(ymdStart(leaseEnd)), start = Math.max(dayNum(r.avail), dayNum(now));
     if (end < dayNum(now)) return null; // your lease already ended: nothing to fit
     const overlap = Math.max(0, end - start + 1), gap = Math.max(0, start - end - 1);
@@ -2819,7 +2829,7 @@
   const leaseEndOf = (cfg, now = new Date()) => {
     if (!cfg.periodic) return cfg.leaseEnd || '';
     const n = Math.round(+cfg.noticeDays);
-    if (!(n >= 1 && n <= 120)) return '';
+    if (!(n >= 1 && n <= NOTICE_MAX)) return '';
     return addDaysYmd(isYmd(cfg.noticeGiven || '') ? cfg.noticeGiven : ymdLocal(now), n);
   };
   // `moveExtra`: your own other moving costs (Settings), set beside `fit` when rows are filtered.
@@ -2889,7 +2899,7 @@
   // The last day to give notice: your lease end less the notice period you set ('' without both).
   const noticeBy = (leaseEnd, days) => {
     const n = Math.round(+days);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd || '') || !(n >= 1 && n <= 120)) return '';
+    if (!isYmd(leaseEnd || '') || !(n >= 1 && n <= NOTICE_MAX)) return '';
     return addDaysYmd(leaseEnd, -n);
   };
   // Within NOTICE_NUDGE_DAYS of the last day to give notice (and not given): { by, days } for the
@@ -3043,7 +3053,7 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
       allDay(`${r.id}-ab@rea-enhancement`, r.applyBy, `Applications close: ${r.address || 'rental'}`, [r.url ? `URL:${r.url}` : ''],
         { cancel: ['applied', 'approved', 'declined'].includes(r.appStatus) || deadEnd(r), alarm: r.applyBy > today }); // today's: the day-before alarm has gone
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(leaseEnd) && leaseEnd >= today) {
+    if (isYmd(leaseEnd || '') && leaseEnd >= today) {
       allDay('lease-end@rea-enhancement', leaseEnd, 'My current lease ends', [], { alarm: leaseEnd > today });
       // Your own notice period (it varies by state and lease, so it's yours to enter): the last
       // day to give notice, or today if that's already passed.
@@ -4034,15 +4044,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   })();
 
   const bootAt = Date.now();
-  // Reading window.localStorage/sessionStorage itself throws when site data is blocked;
-  // every store then runs on an inert storage and the tool works without persistence.
-  // In memory, one per name: this page keeps what you do, it just isn't saved.
-  const memStore = () => {
-    const m = new Map();
-    return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, clear: () => m.clear() };
-  };
-  const memStores = {};
-  const storageOr = (name) => { try { return window[name] || (memStores[name] ||= memStore()); } catch { return (memStores[name] ||= memStore()); } };
   const store = rowStore(storageOr('sessionStorage'));
   const snaps = snapshotStore(storageOr('localStorage'));
   let gone = []; // rows from the baseline that are no longer listed (shown when cfg.showGone)
@@ -4399,6 +4400,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (done) return;
       done = true;
       const saved = save && input.value.trim() && presets.save(input.value, cfg, key);
+      if (saved && key) visitKey.set(key); // it's applied already: a reload here keeps your later edits
       input.remove();
       if (saved) setStatus(`Saved preset "${saved}"${key ? ' for this search' : ''}.`);
       fillPresets();
@@ -4410,19 +4412,39 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     });
     input.addEventListener('blur', () => finish(true, false));
   };
-  ui.preset.addEventListener('change', () => {
+  onPick(ui.preset, async () => {
     const v = ui.preset.value;
     ui.preset.value = '';
     if (v === 'c:save' || v === 'c:bind') return askPresetName(v === 'c:bind' ? currentKey() : null);
     else if (v.startsWith('d:')) {
-      presets.remove(v.slice(2));
-      setStatus(`Deleted preset "${v.slice(2)}".`);
+      const name = v.slice(2);
+      if (!await askInline(ui.status, `Delete the preset "${name}"?`, 'Delete', 'Keep it', { safe: true })) return;
+      presets.remove(name);
+      setStatus(`Deleted preset "${name}".`);
     } else if (v.startsWith('a:')) applyPreset(presets.get(v.slice(2)));
     fillPresets();
   });
   }
   // #endregion
   // #region shortlist bar
+  // An action menu (a select that acts, then resets): only a chosen item acts. Arrow keys and
+  // type-ahead on a closed select change it, and fire change, as you move through it (Windows,
+  // Linux): those wait for Enter. A mouse or touch pick acts at once; Esc, Tab or leaving cancels.
+  function onPick(sel, fn) {
+    let browsing = false;
+    sel.addEventListener('pointerdown', () => { browsing = false; });
+    sel.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && browsing) { e.preventDefault(); browsing = false; if (sel.value) fn(); return; }
+      if (e.key === 'Escape' && (browsing || sel.value)) e.stopPropagation(); // leaves the menu, not the drawer
+      if (e.key === 'Escape' || e.key === 'Tab') { browsing = false; if (sel.value) sel.value = ''; return; }
+      if (/^(?:Arrow(?:Up|Down)|Home|End|Page(?:Up|Down))$/.test(e.key) || (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey)) browsing = true;
+    });
+    sel.addEventListener('change', () => {
+      if (!browsing) return fn();
+      if (sel.value) setStatus(`Press Enter for "${sel.selectedOptions[0]?.textContent || ''}", or Esc to leave it.`);
+    });
+    sel.addEventListener('blur', () => { if (browsing) { browsing = false; sel.value = ''; } });
+  }
   // A question asked in the drawer (not a browser dialog, which is clumsy on touch and screen
   // readers): the message and two buttons after `before`'s place; Enter / the first button says
   // yes, Esc or the second says no, and focus returns where it was. `safe`: focus starts on no.
@@ -4635,7 +4657,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         setStatus('Restore undone.');
         if (fromMirror) offerMirror();
       }, 'rf-undo-restore');
-    } catch (err) { setStatus(err.message, true); }
+    } catch (err) { setStatus(err.message, true); logError(`restore: ${err.message}`); } // merging a checked backup failed: worth a report
   });
   }
 
@@ -4695,7 +4717,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       }
       // Space on a button inside the listing presses the button; on the listing itself it's the photo.
       case 'p': case ' ': if (e.key === ' ' && document.activeElement !== cur) return false; if (ui.peekId) ui.closePeek(); else ui.showPeek(cur || items[0]); return true;
-      case 'u': { const undo = ui.status.querySelector('.rf-undo'); if (!undo || undo.textContent !== 'Undo') return false; undo.click(); return true; }
+      case 'u': { const undo = ui.status.querySelector('[data-undo]'); if (!undo) return false; undo.click(); return true; }
       // Enter opens only when the item itself is focused; on a button it presses the button.
       case 'o': case 'Enter': if (!cur || (e.key === 'Enter' && document.activeElement !== cur)) return false; cur.querySelector('.rf-card')?.click(); return true;
       default: return false;
@@ -5255,7 +5277,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     });
     wirePresets();
     // Bulk actions: one write, one re-render, one undo that restores the exact previous state.
-    const bulk = (sel, fn) => sel.addEventListener('change', () => {
+    const bulk = (sel, fn) => onPick(sel, () => {
       const v = sel.value;
       sel.value = '';
       const rows = (sel === ui.slBulk && ui.view === 'shortlist' && ui.bulkRows) || ui.rows;
@@ -5848,6 +5870,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function offerUndo(msg, undo, cls = '') {
     setStatus(msg);
     const b = statusBtn('Undo', () => { b.remove(); undo(); }, { once: true }, cls);
+    b.dataset.undo = '1'; // what keepingUndo and the u key look for (other status buttons share the look)
     ui.status.append(' ', b); // space: screen readers read "hidden. Undo", not "hidden.Undo"
     ui.undoAt = Date.now();
   }
@@ -5855,7 +5878,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // (with its hide reasons) instead of turning into "N of M match".
   const UNDO_KEEP_MS = 30000;
   const keepingUndo = (fn) => {
-    const keep = ui.status.querySelector('.rf-undo') && Date.now() - (ui.undoAt || 0) < UNDO_KEEP_MS ? [...ui.status.childNodes] : null;
+    const keep = ui.status.querySelector('[data-undo]') && Date.now() - (ui.undoAt || 0) < UNDO_KEEP_MS ? [...ui.status.childNodes] : null;
     const err = ui.status.classList.contains('err');
     fn();
     if (keep) { ui.status.replaceChildren(...keep); ui.status.classList.toggle('err', err); }
@@ -6601,7 +6624,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     marks.decorate([r]);
     bar.dataset.id = id;
     bar._row = r;
-    const info = [r.prevPrice && `was ${r.prevPrice}`, r.prevAvail && `available was ${r.prevAvail}`, r.relisted && 'relisted',
+    const info = [bar._goneId === id && 'REA says this listing is no longer listed', r.prevPrice && `was ${r.prevPrice}`, r.prevAvail && `available was ${r.prevAvail}`, r.relisted && 'relisted',
       r.firstSeen && `first seen ${ago(Date.now() - r.firstSeen)}`].filter(Boolean).join(' · ');
     const small = lbarMin.get();
     bar.classList.toggle('rf-lbar-min', small);
@@ -6616,11 +6639,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (focusSel) bar.querySelector(focusSel)?.focus();
     bar.querySelector('.rf-lbar-more')?.addEventListener('toggle', (e) => { bar._details = e.currentTarget.open; });
     // Reached by in-app navigation: the page's data is the previous listing's, so read this one's page.
-    if (r.partial && bar._fetching !== id && !pause.until()) {
+    // Each listing is fetched once per visit (a page that can't be read isn't asked for again on
+    // every click); one REA says is gone is marked so, if you'd marked it.
+    if (r.partial && bar._fetching !== id && !(bar._tried ||= new Set()).has(id) && !pause.until()) {
       bar._fetching = id;
+      bar._tried.add(id);
       fetchListingPage(location.href, null)
         .then(({ html, kind }) => {
-          if (BOT_KINDS.has(kind)) tripPause(botCheck(`listing page: ${kind}`));
+          if (BOT_KINDS.has(kind)) { bar._tried.delete(id); tripPause(botCheck(`listing page: ${kind}`)); } // after the pause, it may try again
+          if (kind === 'gone' && bar.dataset.id === id) {
+            bar._goneId = id;
+            if (marks.shortlist().some((x) => x.id === id) || marks.note(id)) marks.setGone(id, true);
+            renderListingBar();
+          }
           return kind === 'ok' ? html : '';
         })
         .then((html) => { const out = parseListingPage(html, id); if (out.status === 'ok') rawListingSample = out.listing; if (out.status === 'ok' && bar.dataset.id === id) { const row = safeRow(out.listing, false); if (row) { bar._row = row; if (marks.shortlist().some((x) => x.id === id)) learn([row], true, false, false); renderListingBar(); } } })

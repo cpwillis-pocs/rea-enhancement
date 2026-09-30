@@ -879,6 +879,14 @@ test('post-2.35.1 audit: times in a price, $ in listing text, overlap at an unkn
   assert.equal(core.fitLabel(out[1].fit), '22 days overlap');
 });
 
+test('copied report: short street numbers and bracketed landlines are left out; impossible dates refused', () => {
+  const shape = (v) => core.shapeOf({ price: { display: v } }).price.display;
+  for (const v of ['12 Smith St, Bondi', 'Unit 5, 7 Beach Rd', '(02) 5550 0123']) assert.match(shape(v), /^string\(\d+\)$/, v);
+  assert.equal(shape('$650 per week'), '$650 per week');
+  assert.equal(core.leaseFit({ avail: new Date(2026, 1, 20) }, '2026-02-31'), null);
+  assert.equal(core.noticeBy('2026-02-31', 21), '');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

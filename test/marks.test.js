@@ -755,3 +755,17 @@ test('restore: a decline reason comes in only with a declined status', () => {
   st.setStatus(r.id, 'declined');
   assert.equal(st.shortlist()[0].declineReason, '', 'no old reason from the backup');
 });
+
+test('Re-check: a listing already gone keeps when it was first found gone', () => {
+  let t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  const r = row('146500081');
+  st.toggle(r.id, 's', r);
+  st.setGone(r.id, true);
+  const first = st.shortlist()[0].goneAt;
+  t += 10 * 864e5;
+  st.setGone(r.id, true);
+  assert.equal(st.shortlist()[0].goneAt, first);
+  st.setGone(r.id, false); t += 1000; st.setGone(r.id, true);
+  assert.equal(st.shortlist()[0].goneAt, t, 'seen again, then gone again: a new date');
+});

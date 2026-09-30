@@ -598,6 +598,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.evaluate(() => document.activeElement.id), 'rf-from', 'leaving by click keeps focus where it went');
     assert.ok((await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:clicked away'), 'and saves');
     await page.selectOption('.rf-preset', 'd:clicked away');
+    await page.click('.rf-ask [data-ask=yes]'); // deleting asks first
     await presetSave(page, 'c:save', '3-bed');
     assert.match(await status(page), /Saved preset "3-bed"/);
     await page.click('.rf-clear');
@@ -611,7 +612,17 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
     await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 8000 });
     assert.match(await page.textContent('.rf-preset option'), /Preset: Bondi pets/);
+    // Moving through the menu with the keyboard picks nothing until Enter.
+    await page.focus('.rf-preset');
+    await page.keyboard.press('ArrowDown');
+    assert.match(await status(page), /Press Enter for/);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.inputValue('.rf-preset'), '', 'Esc leaves it');
     await page.selectOption('.rf-preset', 'd:3-bed');
+    await page.click('.rf-ask [data-ask=no]');
+    assert.ok((await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:3-bed'), 'Keep it keeps it');
+    await page.selectOption('.rf-preset', 'd:3-bed');
+    await page.click('.rf-ask [data-ask=yes]');
     assert.ok(!(await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:3-bed'));
     console.log('presets: ok');
     await done(page); await ctx.close();
