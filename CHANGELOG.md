@@ -2,6 +2,51 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.35.0
+
+- **The Shortlist, in order**:
+  - **What's next** is the new default order: the approved listing first (outlined), then what needs doing (soonest deadline first), then the next inspection, then the rest by your rating, with ruled-out listings last. **Date added** keeps the old order.
+  - **Since your last visit**: opening the Shortlist an hour or more after last time says what changed (cheaper, dearer, no longer listed, inspections cancelled, dates or details changed, closing by tomorrow). **Show them** filters to those listings.
+  - **The launcher** counts what needs doing, eg "● 2 to do".
+- **The agent's answers**: tap a What to ask question once it's answered (✓ fine, ✗ a problem), on the Shortlist and in the listing bar. Answers show in Compare and the printout, get an `agent_answers` spreadsheet column, and drop out of `{questions}`.
+- **Applying**:
+  - Apply portals your shortlist names (2Apply, Snug, Ignite…) join the application pack as profiles to set up, and a deadline nudge says when one isn't.
+  - `{mytimes}` puts your inspection times into an enquiry.
+  - **Ask for a viewing** on by-appointment listings.
+  - **Why declined?** (optional) is counted in your record with that agency and gets a `decline_reason` column.
+  - **Check all** says how many new listings match your filters, or the search's bound preset.
+- **Once approved**:
+  - The default moving list starts with paying the bond and rent in advance, with what's **left to pay** worked out from the listing, and ends with claiming your old bond back.
+  - A **condition report** checklist goes room by room, with a printable sheet and its due date.
+- **Room to negotiate?**: a facts-only line when at least two of these agree: listed 3+ weeks, a price drop, and the agency's drop rate.
+- **Easier to use**:
+  - Every drawer control is 44px on touch screens.
+  - On a phone, the Shortlist's tools fold under its search.
+  - Settings can be reached from the Shortlist (Open Settings, Edit this list), and Backup and Restore are next to "Last backup".
+  - More filters splits Show only from Also show or hide.
+  - The checklist, pack and moving list are two-line fields.
+  - The enquiry field shows a filled-in example.
+  - My inspection times appears once At my times is picked.
+  - Copy is now Copy details, and Clear is now Reset.
+  - REA's card badge uses the same pets wording as the drawer.
+- **Fixed**:
+  - What to ask no longer asks the Shortlist what a listing said it lacks.
+  - The phone fold keeps focus, and `f`, `/` and a search change unfold it.
+  - An empty result keeps Bulk, Market and Map in place, disabled.
+  - Before a search, Bulk, Market, Map and the exports are hidden from the first open.
+  - Focus after an in-drawer question returns to a closed menu's toggle.
+  - A new question, or Esc, calls off an open one instead of answering no.
+  - A checklist that opened by itself folds again.
+  - Moving-list items containing `|` can be ticked.
+  - There's no notice line once your lease is over.
+- **Faster**:
+  - The end-of-search save now really runs after the results paint (about 113 to 60 ms at 1000 listings). The saved-searches redraw had been writing it in the same task.
+  - Ticking a list item redraws the Shortlist once instead of twice.
+  - The shortlist is reused while nothing has changed.
+- **Tests**:
+  - The a11y check measures touch targets on a phone for the drawer and the Shortlist.
+  - An e2e retry closes the failed attempt's pages first.
+
 ## 2.34.0
 
 - **What to ask the agent**: each heads-up (water billed, short lease, busy road…), each feature you filter on that a listing doesn't mention, and an unknown move-in date become plain questions. They show in the listing bar's details, the printout and Compare, and `{questions}` in your enquiry template adds them to the message.

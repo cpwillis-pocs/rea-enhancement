@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.34.0
+// @version      2.35.0
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -6422,10 +6422,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.34.0', items: [
-    'What to ask the agent, from each heads-up and the features you filter on, in the listing bar, print and Compare.',
-    'Your move: an application pack and moving list to tick off, moving day in the calendar, and rent vs what you pay now.',
-    'Share with a partner, including statuses and ratings; on a phone the filters fold away once there are results.',
+  const WHATS_NEW = { version: '2.35.0', items: [
+    "The Shortlist opens on what's next (approved first) and says what changed since your last visit; the launcher counts what needs doing.",
+    'Tick off the agent\'s answers to What to ask; apply portals join your application pack; Check all says how many new listings match.',
+    'Once approved: what\'s left to pay, and a room-by-room condition report checklist to print.',
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',
