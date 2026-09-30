@@ -844,6 +844,16 @@ test('room to negotiate: facts only, and only when two agree', () => {
   assert.equal(core.negotiateFacts(rows[1], drops, now), 'Room to negotiate? dropped $20 · this agency dropped 2 of 3');
 });
 
+test('Best match: the move-in median is the whole search, so hiding one listing does not move others', () => {
+  const rows = [1, 2, 3, 4].map((i) => ({ id: String(i), url: String(i), priceNum: 600, upfront: 2000 + i * 500, avail: new Date(2026, 9, 1) }));
+  const cfg = { ...core.DEFAULT_CFG, sort: 'match', priceMax: '700' };
+  const all = core.applyFilters(rows, cfg).map((r) => [r.id, r.score]);
+  const fewer = core.applyFilters(rows, { ...cfg, upfrontMax: '3500' }).map((r) => [r.id, r.score]);
+  assert.equal(fewer.length, 3);
+  assert.ok(all.every(([, sc]) => typeof sc === 'number'));
+  for (const [id, sc] of fewer) assert.equal(sc, all.find(([i]) => i === id)[1], `listing ${id} keeps its score`);
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

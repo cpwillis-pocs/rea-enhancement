@@ -57,11 +57,11 @@ The 2.33.0 audit (its bugs, the UI/UX pass, seven ideas and the end-of-search sl
 - Moving-list ticks as a marks field: they're kept in settings as `id|item,item` instead, which needs no marks schema change and still starts afresh for a new approved listing.
 - A full FILTERS spec (a consistency test guards it for now).
 
-The 2.34.0 audit (its bugs, UI/UX issues and eleven ideas) shipped in 2.35.0 (see the [CHANGELOG](../CHANGELOG.md#2350)). Measured and held back:
-- A status-line height change restyles every listing on screen (about 10 ms at 935 shown), because the sticky offsets are inherited custom properties. Plain pixel offsets on the drawer would avoid it, but need their own visual and a11y check.
-- Hiding a listing with about 930 shown is a 100 ms task: every visible item's markup is rebuilt, because Best match's move-in median comes from the filtered rows and so shifts other listings' scores. Taking it from the whole search would change what the score means.
-- Every marks write re-stringifies the whole store: 20–33 ms per star, hide or status at 3000 marks (a Shortlist status change at 1000 listings is a 103 ms task). This is the per-entry write cache below, now with numbers.
-- Recording the agent's answers doesn't mute or strike through the heads-up tag it answers, and decline reasons aren't in the Market view's agency table yet.
+The 2.34.0 audit (its bugs, UI/UX issues and eleven ideas) shipped in 2.35.0 (see the [CHANGELOG](../CHANGELOG.md#2350)); its held-back items followed on `main`:
+- A status-line height change no longer re-styles every listing (about 30 ms to 0.1 ms at 935 shown): the tabs' and status line's offsets are plain pixels, and the listings' scroll margin only grows.
+- Best match's move-in median is the whole search's, so a hide redraws only that listing and its building's; an in-place redraw no longer forces a scroll-to-top layout. What's left of a hide with ~930 shown is the browser moving focus off the removed listing (about 16 ms).
+- A heads-up the agent answered is muted (✓, struck through) or marked (✗); decline reasons show in the Market view's agency table through your record.
+- Still measured and open: every marks write re-stringifies the whole store (20–33 ms per star, hide or status at 3000 marks). This is the per-entry write cache below.
 
 Still open from 2.28.0, as not worth their risk: pruning old marks outside the page-load task (deferring it would let short visits skip it for good), a per-entry cache for the marks store's writes, keeping remembered searches packed in memory until read, and merging the `SORTS` / `SORT_UNKNOWN` accessors. The code is not split into modules: install, update, the dev stub, coverage and lint all assume one file; revisit around 8000 lines, or if `build()` passes its lint budget. Run a fresh audit for the next list.
 

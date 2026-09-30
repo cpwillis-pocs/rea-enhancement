@@ -2370,11 +2370,13 @@
 
   // Best match weights (0 = ignore, 1-3 = importance), set under Settings.
   const SCORE_WEIGHTS = [['rent', 'wRent'], ['timing', 'wTiming'], ['distance', 'wDist'], ['move-in', 'wMovein']];
-  const withScores = (rows, cfg) => {
+  // `all`: the whole search, for the move-in median, so hiding or filtering out one listing doesn't
+  // shift every other listing's score (and redraw it).
+  const withScores = (rows, cfg, all = rows) => {
     // Budget: your max rent, else what 30% of your income affords.
     const pMax = num(cfg.priceMax) || (num(cfg.income) > 0 ? Math.round((num(cfg.income) * RENT_STRESS_PCT) / 100 / 52) : null), kmMax = num(cfg.maxKm) || SCORE_KM;
     const from = cfg.from ? new Date(cfg.from + 'T00:00:00') : null;
-    const upMed = quantile(rows.map((r) => r.upfront).filter(Number.isFinite).sort(asc), 0.5);
+    const upMed = quantile(all.map((r) => r.upfront).filter(Number.isFinite).sort(asc), 0.5);
     const w = Object.fromEntries(SCORE_WEIGHTS.map(([k, key]) => { const v = num(cfg[key]); return [k, v == null ? 2 : Math.max(0, Math.min(3, v))]; }));
     for (const r of rows) {
       const parts = [];
@@ -2681,7 +2683,7 @@
     const kept = filterRows(rows, cfg, now);
     const leaseEnd = leaseEndOf(cfg, now);
     for (const r of kept) { r.fit = leaseFit(r, leaseEnd, now); r.moveExtra = num(cfg.moveCosts) || 0; r.rentNow = num(cfg.rentNow) || 0; }
-    return withScores(kept, cfg).sort(sorter(cfg.sort, cfg.sortDesc));
+    return withScores(kept, cfg, rows).sort(sorter(cfg.sort, cfg.sortDesc));
   }
 
   // Every per-row test filterRows applies, tagged with the filter it belongs to (a cfg key, or
@@ -3522,7 +3524,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, DECLINE_REASONS, agencyDrops, negotiateFacts, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, agencyDrops, negotiateFacts, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3620,9 +3622,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   #rf-panel:not(.rf-full)>.rf-controls{max-height:none;overflow:visible}
   #rf-panel:not(.rf-full)>.rf-controls>.rf-actions{position:static}
   #rf-panel:not(.rf-full)>.rf-list{flex:1 0 auto;overflow:visible}
-  #rf-panel:not(.rf-full)>.rf-tabs{position:sticky;top:var(--rf-head-h,51px);z-index:4;background:var(--rf-bg)}
-  #rf-panel:not(.rf-full)>.rf-status{position:sticky;top:calc(var(--rf-head-h,51px) + var(--rf-tabs-h,38px));z-index:3;background:var(--rf-bg)}
-  #rf-panel:not(.rf-full) .rf-item{scroll-margin-top:calc(var(--rf-head-h,51px) + var(--rf-tabs-h,38px) + var(--rf-status-h,40px) + 4px)}
+  /* Sticky offsets: defaults here, measured by syncSticky. The tabs' and status line's are plain pixels
+     on them; the listings' scroll margin is one variable that only grows with the status line, so a
+     status change doesn't re-style every listing (it's inherited by all of them). */
+  #rf-panel:not(.rf-full)>.rf-tabs{position:sticky;top:51px;z-index:4;background:var(--rf-bg)}
+  #rf-panel:not(.rf-full)>.rf-status{position:sticky;top:89px;z-index:3;background:var(--rf-bg)}
+  #rf-panel:not(.rf-full) .rf-item{scroll-margin-top:var(--rf-item-top,133px)}
   /* Expanded: near full-screen. Filters become a left column and results a grid on the right. */
   @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
   @media (min-width:760px){
@@ -3796,7 +3801,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-menu>summary::after{content:' ▾'}
   .rf-menu-list{position:absolute;right:0;top:calc(100% + 4px);z-index:5;display:grid;gap:4px;min-width:150px;padding:6px;
     background:var(--rf-bg);border:1px solid var(--rf-line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)}
-  .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)}
+  .rf-tags.rf-watch span{background:rgba(204,102,0,.16);color:var(--rf-fg)} .rf-tags.rf-watch span.rf-ok{background:none;color:var(--rf-muted);text-decoration:line-through} .rf-tags.rf-watch span.rf-bad{font-weight:700}
   .rf-storage{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   /* Floating notes on REA's page: undo toast and saved-search reminder by the launcher, listing bar. */
   #rf-toast,#rf-remind,#rf-lbar{box-sizing:border-box;position:fixed;z-index:2147483000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 12px;border-radius:10px;
@@ -4873,7 +4878,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const act = b.dataset.act;
     const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
     const on = marks.toggle(id, act, rowById(id));
-    refreshMarks(act === 's' ? [id] : null); // a star changes only its own listing (unless a filter drops it)
+    // A star changes only its own listing (unless a filter drops it); a hide, its own and its
+    // building's ("N in this building").
+    refreshMarks(act === 's' ? [id] : act === 'h' ? withMates(id) : null);
     // Re-render replaced the button: put focus back (or on the next item if this one left the list).
     const q = (i) => itemEl(i, `[data-act="${act}"]`);
     (q(id) || (next && q(next)) || ui.list).focus?.();
@@ -5174,30 +5181,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     placesBox.addEventListener('input', paintPlaces);
     ui.paintPlaces = paintPlaces;
     paintPlaces();
-    // Side drawer: the status line (count, Undo, "Why?") sticks under the header, and once the
-    // filters have scrolled away the header offers a way back to them.
-    const head = panel.querySelector('.rf-head'), toFilters = panel.querySelector('.rf-tofilters');
-    // Every height is read before any is written: each write re-styles the whole drawer (its
-    // listings inherit the variables), so a read after it would force that at once, per variable.
-    const tabs = panel.querySelector('.rf-tabs');
-    ui.syncSticky = () => {
-      const hs = [['--rf-head-h', head], ['--rf-status-h', ui.status], ['--rf-tabs-h', tabs]].map(([k, el]) => [k, `${el.offsetHeight}px`]);
-      for (const [k, v] of hs) if (panel.style.getPropertyValue(k) !== v) panel.style.setProperty(k, v);
-      const top = ui.view === 'shortlist' ? ui.slBar : ui.controls;
-      toFilters.hidden = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
-    };
-    if (typeof ResizeObserver === 'function') new ResizeObserver(() => ui.syncSticky()).observe(ui.status);
-    panel.addEventListener('scroll', () => { ui.syncSticky(); notePlace(); }, { passive: true });
-    ui.list.addEventListener('scroll', () => notePlace(), { passive: true });
-    ui.list.addEventListener('focusin', () => notePlace());
-    ui.applyPlace = () => applyPlace();
-    ui.toFilters = () => {
-      ui.fold?.(false);
-      panel.scrollTop = 0;
-      (ui.view === 'shortlist' ? ui.slBar.querySelector('select, input, button') : panel.querySelector('#rf-from'))?.focus({ preventScroll: true });
-      ui.syncSticky();
-    };
-    toFilters.addEventListener('click', () => ui.toFilters());
+    wireSticky(panel);
     wirePeek(panel);
     for (const b of panel.querySelectorAll('[data-report]')) b.addEventListener('click', async () => {
       const ok = await copyText(reportText());
@@ -5353,6 +5337,42 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   // Phones: once there are results, the controls fold into one bar ("Filters · 2 active · Sort:
   // Price ▾"); a tap opens them again. Wider screens never fold.
+  // The side drawer's sticky header, tabs and status line, and the way back to the filters.
+  function wireSticky(panel) {
+  // Side drawer: the status line (count, Undo, "Why?") sticks under the header, and once the
+  // filters have scrolled away the header offers a way back to them.
+  const head = panel.querySelector('.rf-head'), toFilters = panel.querySelector('.rf-tofilters');
+  // Every height is read before any is written, so no write forces a layout before the next read.
+  const tabs = panel.querySelector('.rf-tabs');
+  ui.syncSticky = () => {
+    const hh = head.offsetHeight, th = tabs.offsetHeight, sh = ui.status.offsetHeight;
+    const full = panel.classList.contains('rf-full');
+    const set = (el, prop, v) => { if (el.style[prop] !== v) el.style[prop] = v; };
+    set(tabs, 'top', full ? '' : `${hh}px`);
+    set(ui.status, 'top', full ? '' : `${hh + th}px`);
+    // Listings scrolled into view clear all three: the tallest status line seen since the header
+    // or tabs last changed height (rather than re-styling every listing each time it changes).
+    const base = hh + th;
+    if (ui.stickyBase !== base) { ui.stickyBase = base; ui.stickyStatus = 0; }
+    ui.stickyStatus = Math.max(ui.stickyStatus || 0, sh);
+    const it = `${base + ui.stickyStatus + 4}px`;
+    if (panel.style.getPropertyValue('--rf-item-top') !== it) panel.style.setProperty('--rf-item-top', it);
+    const top = ui.view === 'shortlist' ? ui.slBar : ui.controls;
+    toFilters.hidden = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
+  };
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => ui.syncSticky()).observe(ui.status);
+  panel.addEventListener('scroll', () => { ui.syncSticky(); notePlace(); }, { passive: true });
+  ui.list.addEventListener('scroll', () => notePlace(), { passive: true });
+  ui.list.addEventListener('focusin', () => notePlace());
+  ui.applyPlace = () => applyPlace();
+  ui.toFilters = () => {
+    ui.fold?.(false);
+    panel.scrollTop = 0;
+    (ui.view === 'shortlist' ? ui.slBar.querySelector('select, input, button') : panel.querySelector('#rf-from'))?.focus({ preventScroll: true });
+    ui.syncSticky();
+  };
+  toFilters.addEventListener('click', () => ui.toFilters());
+  }
   function wireFold(panel, narrow) {
   const foldBtn = panel.querySelector('.rf-unfold'), controls = panel.querySelector('.rf-controls');
   ui.fold = (on) => {
@@ -5726,6 +5746,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   // `only`: the listings whose marks changed, when nothing else on screen can (a star, rating,
   // checklist tick): the list then rebuilds just those, if its order is unchanged.
+  const withMates = (id) => {
+    const k = buildingKey(rowById(id)?.address);
+    return k && cache ? [id, ...cache.filter((r) => r.id !== id && buildingKey(r.address) === k).map((r) => r.id)] : [id];
+  };
   function refreshMarks(only = null) {
     ui.onlyIds = only ? new Set(only) : null;
     mirrorSoon();
@@ -5902,7 +5926,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     if (ui.mapOn) ui.list.innerHTML = mapHtml(rows, cfg);
     else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : '', { records: agencyRecord(marks.shortlist()), hiddenAg: new Set(marks.hiddenAgencies().map(agencyKey)) }); else paintList(rows);
-    toListTop();
+    if (!ui.keepShown) toListTop(); // a redraw in place (refreshMarks) keeps the scroll: no layout to force
   }
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
@@ -5926,6 +5950,32 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         el.replaceWith(tpl.content.firstElementChild);
       });
       return numberItems(rows.length);
+    }
+    // Only these changed and some left the list (a hide): drop their nodes, redraw the rest of
+    // them, and top up from below, instead of rebuilding every listing's markup.
+    if (only && els.length && rows.length < (ui.lastPaintTotal ?? -1) && ui.lastPaintTotal - rows.length <= only.size) {
+      const at = new Map(rows.map((r, i) => [r.id, i]));
+      const stay = [...els].filter((el) => at.has(el._rf?.id));
+      if (stay.length >= els.length - only.size && stay.every((el, i) => at.get(el._rf.id) === i)) {
+        ui.lastPaintTotal = rows.length;
+        for (const el of els) if (!at.has(el._rf?.id)) el.remove();
+        for (const el of stay) {
+          const r = rows[at.get(el._rf.id)];
+          if (!only.has(r.id)) continue;
+          const [p] = itemParts([r]);
+          if (el._rf.html === p.html) continue;
+          const tpl = document.createElement('template');
+          tpl.innerHTML = p.html;
+          tpl.content.firstElementChild._rf = p;
+          el.replaceWith(tpl.content.firstElementChild);
+        }
+        moreBtn()?.remove();
+        const add = itemParts(rows.slice(stay.length, n));
+        ui.list.insertAdjacentHTML('beforeend', add.map((p) => p.html).join('') + moreHtml(rows.length - Math.min(n, rows.length)));
+        const all = listItems();
+        add.forEach((p, i) => { const el = all[stay.length + i]; if (el) el._rf = p; });
+        return numberItems(rows.length);
+      }
     }
     ui.lastPaintTotal = rows.length;
     const parts = itemParts(rows.slice(0, n));
@@ -5999,9 +6049,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // A shortlisted listing's checklist folds away until it matters: open around an inspection, once
   // ticked, or when you opened it (kept across redraws).
   const ckOpen = (r) => (ui.ckOpen?.has(r.id) ? ui.ckOpen.get(r.id) : r.appStatus === 'to inspect' || r.appStatus === 'inspected' || !!(r.checks && Object.keys(r.checks).length));
-  // Tags are labels, or [label, why] for a per-tag tooltip.
+  // Tags are labels, or [label, why, id, quote, class] (a class marks a heads-up the agent answered).
   const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => (Array.isArray(t)
-    ? `<span${t[1] ? ` title="${esc(t[1])}"` : ''}>${esc(t[0])}</span>` : `<span>${esc(t)}</span>`)).join('')}</div>` : '');
+    ? `<span${t[1] ? ` title="${esc(t[1])}"` : ''}${t[4] ? ` class="${t[4]}"` : ''}>${esc(t[0])}</span>` : `<span>${esc(t)}</span>`)).join('')}</div>` : '');
+  // A heads-up the agent has answered: muted and ticked when fine, marked when it's a problem.
+  const answeredTags = (wt, r) => wt.map((t) => {
+    const a = r.answers?.[`w:${t[2]}`];
+    return !a ? t : a === 'y' ? [`✓ ${t[0]}`, 'The agent says this is fine (your answer, under What to ask)', t[2], t[3], 'rf-ok'] : [`✗ ${t[0]}`, 'The agent confirmed this (your answer, under What to ask)', t[2], t[3], 'rf-bad'];
+  });
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
   // Markup per listing, without its place in the list (numberItems sets "12 of 150" afterwards).
   function itemParts(rows) {
@@ -6024,7 +6079,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
           ${km || pk || r.score != null ? `<div class="rf-meta">${esc([km, pk].filter(Boolean).join(' · '))}${r.score != null ? `${km || pk ? ' · ' : ''}<span class="rf-score" title="${esc(r.scoreWhy)}">Match ${r.score}</span>` : ''}</div>` : ''}
           ${metaLine([r.agency, r.agency ? recordText(ui.agencyRec?.get(agencyKey(r.agency))) : '', r.photos != null ? plural(r.photos, 'photo') : '', r.floorplan ? 'floorplan' : ''], ' rf-sec')}
           ${tagsHtml([...am, r.lease ? leaseText(r.lease) : '', r.applyVia ? `Apply: ${r.applyVia}` : '', applyByLabel(r.applyBy)].filter(Boolean), ' rf-sec')}
-          ${tagsHtml(wt, ' rf-watch rf-sec', 'Mentioned in the listing text: worth asking the agent')}
+          ${tagsHtml(answeredTags(wt, r), ' rf-watch rf-sec', 'Mentioned in the listing text: worth asking the agent')}
           ${kq ? `<div class="rf-meta rf-sec rf-kwq">matched: ${esc(kq)}</div>` : ''}
           ${moneyLine(r, inc, med)}${metaLine([negotiateFacts(r, drops, now)])}
           ${metaLine([

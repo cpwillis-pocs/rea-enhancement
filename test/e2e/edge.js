@@ -2522,6 +2522,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal((await marks(page))['146500101'].qa['w:water'], 'y');
     assert.equal(await page.getAttribute(q, 'data-state'), 'yes');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.qa), 'w:water', 'focus kept');
+    assert.match(await page.textContent('.rf-item[data-id="146500101"] .rf-watch .rf-ok'), /^✓ Water usage charged$/, 'the heads-up it answers is muted');
     assert.match(await page.textContent('.rf-item[data-id="146500101"] .rf-ck-more summary'), /Asked 1\/2/, "answered, counted like the checklist");
     await page.selectOption('.rf-sl-filter', '');
     await page.selectOption('.rf-item[data-id="146500101"] select[data-app]', 'declined');
