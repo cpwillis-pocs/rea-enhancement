@@ -34,10 +34,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (opts) => {
     const c = await newContext(opts);
+    const id = blockOf.getStore();
+    if (id != null) (opened.get(id) || opened.set(id, []).get(id)).push(c); // closed if the block fails, before a retry
     await c.route('**/*', (r) => (process.env.E2E_STRAY && console.log(`stray: ${r.request().url()}`), r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stray</title>' }))); // 200, not 204: a 204 cancels a popup's navigation
     return c;
   };
   const errors = []; // { id, msg }: page errors, tagged with the block that opened the page
+  const opened = new Map(); // block id -> its browser contexts
   const blockOf = new AsyncLocalStorage(); // which block is running, even with E2E_JOBS > 1
   // `before` runs after the page loads and before the script is added (eg to consume REA's global).
   const open = async (ctx, url = SEARCH, { route = serve(), before } = {}) => {
@@ -81,11 +84,16 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
       console.error(`block ${id} failed: ${e.stack || e}`);
       let again = null;
       if (process.env.E2E_RETRY) {
+        // The failed attempt's pages could still throw and be counted against the retry: close them
+        // (without a retry they stay open, for the failure screenshots).
+        for (const c of opened.get(id) || []) await c.close().catch(() => {});
+        opened.delete(id);
         for (let i = errors.length - 1; i >= 0; i--) if (errors[i].id === id) errors.splice(i, 1);
         try { await attempt(id, fn); } catch (e2) { again = e2; }
       }
       if (process.env.E2E_RETRY && !again) flaky.push(id); else failed.push(`[block ${id}] ${String((again || e).message).split('\n')[0]}`);
     }
+    opened.delete(id);
     times.push([id, Date.now() - t]);
     if (process.env.E2E_TIMES) console.log(`  block ${id}: ${Date.now() - t}ms`);
   };
@@ -691,6 +699,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await a.textContent('.rf-ask'), /Include your notes and statuses and ratings/);
     await a.keyboard.press('Enter');
     await waitStatus(a, /Share link copied \(2 listings, with your notes and statuses and ratings\)/);
+    assert.equal(await a.evaluate(() => document.activeElement.textContent), 'More', 'focus back on the closed menu, not the page');
     const link = await a.evaluate(() => navigator.clipboard.readText());
     await done(a); await ctxA.close();
 
@@ -1049,7 +1058,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const id = await page.getAttribute('.rf-item', 'data-id');
     await page.click(`.rf-item[data-id="${id}"] [data-act=s]`);
     await page.click('[data-view=shortlist]');
-    assert.equal(await page.$eval(`.rf-item[data-id="${id}"] .rf-ck-more`, (d) => d.open), false, 'checklist folded until it matters');
+    const ckOpenNow = () => page.$eval(`.rf-item[data-id="${id}"] .rf-ck-more`, (d) => d.open);
+    assert.equal(await ckOpenNow(), false, 'checklist folded until it matters');
+    await page.selectOption(`.rf-item[data-id="${id}"] select[data-app]`, 'to inspect');
+    await page.waitForFunction((i) => document.querySelector(`.rf-item[data-id="${i}"] .rf-ck-more`)?.open, id);
+    await page.selectOption(`.rf-item[data-id="${id}"] select[data-app]`, 'applied');
+    await page.waitForFunction((i) => document.querySelector(`.rf-item[data-id="${i}"] .rf-ck-more`)?.open === false, id); // opened by itself, so it folds again
     await page.click(`.rf-item[data-id="${id}"] .rf-ck-more summary`);
     await page.click(`.rf-item[data-id="${id}"] [data-ck="Natural light"]`);
     await page.click(`.rf-item[data-id="${id}"] [data-ck="Noise"]`); await page.click(`.rf-item[data-id="${id}"] [data-ck="Noise"]`);
@@ -2426,8 +2440,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('69', async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); // not isMobile: the fixture pages have no viewport meta
     const page = await open(ctx);
-    await run(page);
+    await page.click('#rf-launch');
+    await page.focus('#rf-run');
+    await page.keyboard.press('Enter'); // searched from the keyboard: focus doesn't fall to the page when Search folds away
+    await waitStatus(page, /listings match/); await settle(page);
     await page.waitForSelector('.rf-controls.rf-folded');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('rf-unfold'));
     assert.match(await page.textContent('.rf-unfold'), /^▸ Filters · Sort: Available date$/);
     assert.equal(await page.isVisible('#rf-from'), false, 'folded');
     const top = await page.$eval('.rf-item', (el) => el.getBoundingClientRect().top);
@@ -2435,6 +2453,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.tap('.rf-unfold');
     assert.equal(await page.isVisible('#rf-from'), true, 'a tap opens the filters');
     assert.equal(await page.getAttribute('.rf-unfold', 'aria-expanded'), 'true');
+    await page.tap('.rf-unfold'); // folded again, then f unfolds and goes to the filters
+    await page.locator('.rf-item').first().focus();
+    await page.keyboard.press('f');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'rf-from', 'f reaches the filters while folded');
+    // Nothing matches: Bulk and Map stay in place, disabled (hidden only before a search).
+    await page.fill('#rf-from', '2030-01-01'); await page.dispatchEvent('#rf-from', 'change');
+    await waitStatus(page, /0 of 18/);
+    assert.ok(await page.isVisible('.rf-map-btn') && await page.isDisabled('.rf-map-btn'), 'Map disabled, not hidden');
     console.log('phone controls fold: ok');
     await done(page); await ctx.close();
   });

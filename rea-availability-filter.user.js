@@ -246,11 +246,11 @@
     t: clip(r.type, 40), b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), su: clip(r.suburb, 80),
     in: cleanInspections(r.inspections), w: clip(r.watch, 80), ap: clip(r.applyVia, 30), ab: /^\d{4}-\d{2}-\d{2}$/.test(r.applyBy || '') ? r.applyBy : '', le: clip(r.lease, 10), tk: clip(r.taken, 12), bp: r.byAppt ? 1 : 0,
     bo: clip(r.bond, 40), la: typeof r.lat === 'number' ? r.lat : null, ln: typeof r.lng === 'number' ? r.lng : null,
-    am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), ag: clip(r.agency, 80),
+    am: AMENITIES.filter((a) => r.amen?.[a.id] === 'yes').map((a) => a.id), an: AMENITIES.filter((a) => r.amen?.[a.id] === 'no').map((a) => a.id), ag: clip(r.agency, 80),
     sq: typeof r.sqm === 'number' ? sqmOk(r.sqm) : null, sqt: r.sqm != null && r.sqmFromText ? 1 : null,
   });
   // Summary fields a search result always carries in full (empty means none, not unknown).
-  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'ab', 'le', 'am', 'tk', 'bp']; // a deadline the agent took out goes too
+  const SEARCH_COMPLETE = ['in', 'w', 'ap', 'ab', 'le', 'am', 'an', 'tk', 'bp']; // a deadline the agent took out goes too
   // The upcoming stored inspection missing from the fresh list (null if none went). A session
   // still listed by label only (no time) is not missing.
   const cancelledInspection = (old, next, t) => {
@@ -322,7 +322,8 @@
   const fromSummary = (d) => ({
     url: reaUrl(d.u), address: d.a, price: d.p, available: d.v, img: reaImg(d.i), type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
     inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', applyBy: typeof d.ab === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.ab) ? d.ab : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
-    amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : null])) : {},
+    // `an`: what the listing said it doesn't have (kept since 2.35; older summaries read those as unknown).
+    amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : Array.isArray(d.an) && d.an.includes(a.id) ? 'no' : null])) : {},
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
@@ -400,7 +401,7 @@
         writeState.report(true);
       } catch { raw = null; writeState.report(false); /* quota/blocked: re-read next time */ }
     };
-    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp', 'sq', 'sqt'], SUM_KEEP = ['in', 'am']; // summary fields kept as numbers / as given
+    const SUM_NUM = ['b', 'ba', 'c', 'la', 'ln', 'bp', 'sq', 'sqt'], SUM_KEEP = ['in', 'am', 'an']; // summary fields kept as numbers / as given
     const entry = (m, id) => m[id] || (m[id] = { f: now(), l: now() });
     const rowMemo = new Map();
     let listMemo = null; // the whole list, for the stored string it was read from
@@ -1728,7 +1729,8 @@
   // the listing doesn't mention, then an unknown availability. Plain questions, no listing text.
   const AMEN_ASK = { pets: 'Are pets allowed?', furnished: 'Is it furnished?', laundry: 'Is the laundry inside the home?', outdoor: 'Is there a balcony, courtyard or yard?',
     robes: 'Are there built-in robes?', stepfree: 'Is there step-free access?', watereff: 'Is the home water efficient?', gas: 'Is the cooking gas?', parking: 'Is the parking secure?' };
-  const askList = (r, amenities = '') => [
+  // A listing-page stand-in not read yet (`partial`) knows nothing: only its heads-ups are asked.
+  const askList = (r, amenities = '') => r.partial ? watchList(r).map((w) => w.ask) : [
     ...watchList(r).map((w) => w.ask),
     ...Object.keys(parseAmenCfg(amenities)).filter((id) => r.amen?.[id] == null).map((id) => AMEN_ASK[id] || `Does it have ${AMEN_BY_ID.get(id).label.toLowerCase()}?`),
     ...(!r.avail && !r.gone ? ['When is it available?'] : []),
@@ -2071,6 +2073,7 @@
   ];
   const SETTING_BY_KEY = new Map(SETTINGS.map((x) => [x.key, x]));
   const settingOk = (k, v) => {
+    if (k === 'packDone' || k === 'moveDone') return v.length <= 2000; // ticks: item names, a listing id
     const x = SETTING_BY_KEY.get(k);
     if (!x) return true;
     if (x.kind === 'select') return x.options.some(([o]) => o === v);
@@ -2812,7 +2815,8 @@
     // Given notice: for this lease, or (no lease end to tell by) within the last year.
     const yearAgo = ymdLocal(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()));
     if (end ? noticeGivenFor(end, cfg.noticeGiven) : isYmd(cfg.noticeGiven || '') && cfg.noticeGiven >= yearAgo) return null;
-    const by = cfg.periodic || (cfg.leaseEnd && cfg.leaseEnd < today) ? '' : noticeBy(cfg.leaseEnd, cfg.noticeDays); // a lease already over has no notice date
+    if (!cfg.periodic && cfg.leaseEnd && cfg.leaseEnd < today) return null; // your lease is already over: no notice to give
+    const by = cfg.periodic ? '' : noticeBy(cfg.leaseEnd, cfg.noticeDays);
     const pending = rows.filter((r) => r !== won && r.appStatus === 'applied' && !deadEnd(r)).length;
     return { r: won, by, days: cfg.periodic ? Math.round(+cfg.noticeDays) || 0 : 0, pending };
   };
@@ -2821,7 +2825,7 @@
   // ("id|item,item"), so moving again starts afresh.
   const PACK_DEFAULT = 'Photo ID, Payslips, Rental ledger, References, Bank statement';
   const MOVING_DEFAULT = 'Book removalists, Connect power and gas, Connect internet, Redirect mail, Update your address, Book the end-of-lease clean, Hand back the old keys';
-  const tickItems = (v, def) => [...new Set(String(v || def).split(/[,\n]/).map((x) => clip(x.trim(), 40)).filter(Boolean))].slice(0, CHECK_MAX);
+  const tickItems = (v, def) => [...new Set(String(v || def).split(/[,\n]/).map((x) => clip(x.replace(/\|/g, '/').trim(), 40)).filter(Boolean))].slice(0, CHECK_MAX); // | separates the listing id in moveDone
   const tickSet = (v) => new Set(String(v || '').split(',').filter(Boolean));
   const packState = (cfg) => { const items = tickItems(cfg.packList, PACK_DEFAULT), done = tickSet(cfg.packDone); return { items, done: items.filter((i) => done.has(i)) }; };
   const packLabel = (cfg) => { const { items, done } = packState(cfg); return done.length === items.length ? 'Application pack ready' : `Pack: ${done.length} of ${items.length} ready`; };
@@ -2833,7 +2837,7 @@
     const won = rows.find((r) => r.appStatus === 'approved');
     if (!won) return null;
     const items = tickItems(cfg.movingList, MOVING_DEFAULT);
-    const [forId, list] = String(cfg.moveDone || '').split('|');
+    const md = String(cfg.moveDone || ''), bar = md.indexOf('|'), forId = md.slice(0, bar), list = bar < 0 ? '' : md.slice(bar + 1);
     const d = forId === won.id ? tickSet(list) : new Set();
     const moveDate = isYmd(cfg.moveDate || '') ? cfg.moveDate : '', days = Math.round(+cfg.ecrDays);
     return { r: won, items, done: items.filter((i) => d.has(i)), next: items.find((i) => !d.has(i)) || '', moveDate, ecrBy: moveDate && days >= 1 && days <= 30 ? addDaysYmd(moveDate, days) : '' };
@@ -4241,7 +4245,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   // readers): the message and two buttons after `before`'s place; Enter / the first button says
   // yes, Esc or the second says no, and focus returns where it was. `safe`: focus starts on no.
   function askInline(anchor, message, yes, no, { safe = false } = {}) {
-    document.querySelector('.rf-ask')?.querySelector('[data-ask=no]')?.click();
+    document.querySelector('.rf-ask')?._cancel?.(); // a new question calls off an open one (it resolves null: do nothing)
     const back = document.activeElement;
     const box = Object.assign(document.createElement('div'), { className: 'rf-ask' });
     box.setAttribute('role', 'group');
@@ -4249,9 +4253,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     box.innerHTML = `<span>${esc(message)}</span> <button type="button" class="rf-btn${safe ? ' sec' : ''}" data-ask="yes">${esc(yes)}</button> <button type="button" class="rf-btn${safe ? '' : ' sec'}" data-ask="no">${esc(no)}</button>`;
     anchor.before(box);
     return new Promise((resolve) => {
-      const done = (v) => { box.remove(); if (back?.isConnected) back.focus(); resolve(v); };
+      // Focus goes back where it was, or to its menu's toggle when a closed menu has hidden it.
+      const done = (v, refocus = true) => {
+        box.remove();
+        const to = back?.isConnected && back.checkVisibility?.() === false ? back.closest('details')?.querySelector('summary') || back : back;
+        if (refocus && to?.isConnected) to.focus();
+        resolve(v);
+      };
+      box._cancel = () => done(null, false);
       box.addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) done(b.dataset.ask === 'yes'); });
-      box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } });
+      box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } }); // Esc calls the whole thing off
       box.querySelector(`[data-ask=${safe ? 'no' : 'yes'}]`).focus();
     });
   }
@@ -4274,6 +4285,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     if (!rows.length) return setStatus('Nothing on the shortlist to share.', true);
     const has = [rows.some((r) => r.note) && 'notes', rows.some((r) => r.appStatus || r.rating) && 'statuses and ratings'].filter(Boolean);
     const notes = has.length > 0 && await askInline(ui.status, `Include your ${has.join(' and ')} in the share link (eg for a partner)?`, 'Include them', 'Just the listings');
+    if (notes === null) return setStatus('Share link not copied.');
     const url = shareUrl(rows, { notes });
     const ok = await copyText(url);
     setStatus(ok ? `Share link copied (${Math.min(rows.length, SHARE_MAX)} listings${notes ? `, with your ${has.join(' and ')}` : ''}). Anyone with this script can open it.`
@@ -4543,7 +4555,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       if (e.key === 'm' && ui.view !== 'shortlist' && !ui.market.disabled) { e.preventDefault(); ui.market.click(); ui.market.focus(); return; }
       if (e.key === 'v' && ui.view !== 'shortlist' && !ui.map.disabled) { e.preventDefault(); ui.map.click(); ui.map.focus(); return; }
       if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
-      if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
+      if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.fold?.(false); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
       if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
         if (listKeys(e)) { e.preventDefault(); return; }
       }
@@ -4561,10 +4573,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   // Clicks inside a listing (shortlist, hide, note, status, checklist, ⋯ menu…), delegated from the
   // list. `write`/`onChange` put a setting into the form and apply it (building, anchor, places).
   function wireList(panel, { write, onChange }) {
-  ui.list.addEventListener('toggle', (e) => { // remember which checklists you opened or closed
-    if (!e.target.matches?.('.rf-ck-more')) return;
-    const id = e.target.closest('.rf-item')?.dataset.id;
-    if (id) (ui.ckOpen ||= new Set())[e.target.open ? 'add' : 'delete'](id);
+  // Which checklists you opened or closed yourself (a click on its summary, mouse or keyboard):
+  // the browser opening one as it's drawn isn't a choice, so it can still fold away later.
+  ui.list.addEventListener('click', (e) => {
+    const sum = e.target.closest?.('.rf-ck-more > summary');
+    const id = sum?.closest('.rf-item')?.dataset.id;
+    if (id) (ui.ckOpen ||= new Map()).set(id, !sum.parentElement.open); // the click runs before the toggle
   }, true);
   ui.list.addEventListener('click', (e) => {
     if (e.target.closest('.rf-more-btn')) return renderMore();
@@ -5010,6 +5024,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     ui.list.addEventListener('focusin', () => notePlace());
     ui.applyPlace = () => applyPlace();
     ui.toFilters = () => {
+      ui.fold?.(false);
       panel.scrollTop = 0;
       (ui.view === 'shortlist' ? ui.slBar.querySelector('select, input, button') : panel.querySelector('#rf-from'))?.focus({ preventScroll: true });
       ui.syncSticky();
@@ -5173,6 +5188,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   const foldBtn = panel.querySelector('.rf-unfold'), controls = panel.querySelector('.rf-controls');
   ui.fold = (on) => {
     const can = narrow.matches && !!cache;
+    // Folding away what has focus (Search, after a search) would drop it to the page: the bar takes it.
+    if (can && on && controls.contains(document.activeElement)) queueMicrotask(() => foldBtn.focus({ preventScroll: true }));
     controls.classList.toggle('rf-folded', can && on);
     foldBtn.hidden = !can;
     foldBtn.setAttribute('aria-expanded', String(!(can && on)));
@@ -5564,8 +5581,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   const setExport = (disabled) => {
     for (const b of ui.exports) b.disabled = disabled;
     ui.bulk.disabled = disabled; ui.market.disabled = disabled; ui.map.disabled = disabled;
-    ui.panel.querySelector('.rf-controls .rf-exports').hidden = disabled && ui.view !== 'shortlist';
-    for (const el of [ui.bulk, ui.market, ui.map]) el.hidden = disabled;
+    ui.panel.querySelector('.rf-controls .rf-exports').hidden = disabled && !cache && ui.view !== 'shortlist';
+    for (const el of [ui.bulk, ui.market, ui.map]) el.hidden = disabled && !cache; // nothing searched yet: hidden; an empty result: disabled, in place
   };
 
   // Data-format warnings sit in their own banner, so the status line keeps "N of M match".
@@ -5741,7 +5758,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
 
   // A shortlisted listing's checklist folds away until it matters: open around an inspection, once
   // ticked, or when you opened it (kept across redraws).
-  const ckOpen = (r) => r.appStatus === 'to inspect' || r.appStatus === 'inspected' || !!(r.checks && Object.keys(r.checks).length) || !!ui.ckOpen?.has(r.id);
+  const ckOpen = (r) => (ui.ckOpen?.has(r.id) ? ui.ckOpen.get(r.id) : r.appStatus === 'to inspect' || r.appStatus === 'inspected' || !!(r.checks && Object.keys(r.checks).length));
   // Tags are labels, or [label, why] for a per-tag tooltip.
   const tagsHtml = (tags, cls = '', title = '') => (tags.length ? `<div class="rf-tags${cls}"${title ? ` title="${esc(title)}"` : ''}>${tags.map((t) => (Array.isArray(t)
     ? `<span${t[1] ? ` title="${esc(t[1])}"` : ''}>${esc(t[0])}</span>` : `<span>${esc(t)}</span>`)).join('')}</div>` : '');
@@ -6613,6 +6630,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       setBusy(false);
       ui.refresh.hidden = true;
       setExport(true);
+      ui.fold?.(false); // Search is needed again: not folded away
       if (restore() || !hadState) return;
       setLaunchCount(null);
       if (ui.view === 'shortlist') return; // shortlist is search-independent

@@ -726,6 +726,28 @@ test('moving plan: once approved, a moving list per listing, moving day and cond
   assert.match(moved, /UID:move@rea-enhancement[\s\S]*STATUS:CANCELLED/, 'moving day cleared: taken out of the calendar');
 });
 
+test('ask list on the Shortlist: what a listing said it lacks is not asked again; a page not read yet asks only heads-ups', () => {
+  const st = core.marksStore(require('./helpers').memStorage(), () => 1e12);
+  const r = { id: '146500031', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500031', address: '1 A St', price: '$600', amen: { pets: 'no', furnished: 'no', aircon: 'yes' }, watch: 'water', avail: new Date(), inspections: [] };
+  assert.deepEqual(core.askList(r, 'pets:no,furnished:no,dishwasher:yes'), ['How is water usage billed, and is the home water efficient?', 'Does it have dishwasher?']);
+  st.toggle(r.id, 's', r);
+  const [sl] = st.shortlist();
+  assert.deepEqual([sl.amen.pets, sl.amen.furnished, sl.amen.aircon, sl.amen.dishwasher], ['no', 'no', 'yes', null], 'kept on the shortlist copy');
+  assert.deepEqual(core.askList({ ...sl, avail: new Date() }, 'pets:no,furnished:no,dishwasher:yes'), core.askList(r, 'pets:no,furnished:no,dishwasher:yes'));
+  assert.deepEqual(core.askList({ id: '1', partial: true, watch: '' }, 'pets:yes'), [], 'not read yet: nothing to ask');
+});
+
+test('tick lists: a | in an item is kept apart from the listing id; stored ticks bounded', () => {
+  const won = { id: '146500001', appStatus: 'approved' };
+  const cfg = { ...core.DEFAULT_CFG, movingList: 'Pay bond | rent, Keys' };
+  const plan = core.movePlan([won], cfg);
+  assert.deepEqual(plan.items, ['Pay bond / rent', 'Keys']);
+  const moveDone = core.moveToggle(cfg, plan, 'Pay bond / rent');
+  assert.deepEqual(core.movePlan([won], { ...cfg, moveDone }).done, ['Pay bond / rent']);
+  assert.equal(core.sanitizeCfg({ packDone: 'x'.repeat(3000) }).packDone, undefined, 'a huge hand-edited value is dropped');
+  assert.equal(core.sanitizeCfg({ moveDone: '1|a' }).moveDone, '1|a');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };
@@ -1343,6 +1365,6 @@ test('nextSteps: approved somewhere and notice not given: your notice date and w
   assert.equal(core.nextSteps(rows.slice(1), cfg, now), null, 'not approved anywhere');
   assert.equal(core.nextSteps(rows, { ...cfg, periodic: true }, now).days, 21, 'periodic: your notice period');
   assert.equal(core.nextSteps([{ appStatus: 'approved' }], { ...core.DEFAULT_CFG, noticeGiven: '2026-09-28' }, now), null, 'no lease end set: "I\'ve given notice" still dismisses it');
-  assert.equal(core.nextSteps([{ appStatus: 'approved' }], { ...cfg, leaseEnd: '2026-01-31' }, now).by, '', 'a lease already over has no notice date');
+  assert.equal(core.nextSteps([{ appStatus: 'approved' }], { ...cfg, leaseEnd: '2026-01-31' }, now), null, 'a lease already over: no notice to give');
   assert.ok(core.nextSteps([{ appStatus: 'approved', gone: true }], cfg, now), 'the approved listing taken down by REA is still yours');
 });
