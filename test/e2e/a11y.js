@@ -80,6 +80,11 @@ const check = async (page, include, label, out) => {
   // A phone at an inspection: touch, 390px wide; target size counts here.
   for (const [name, url, sel, go] of [
     ['phone drawer', SEARCH, '#rf-panel', async (p) => { await p.click('#rf-launch'); await p.click('#rf-run'); await p.waitForFunction(() => /listings match/.test(document.querySelector('.rf-status').textContent)); }],
+    ['phone shortlist', SEARCH, '#rf-panel', async (p) => {
+      await p.click('#rf-launch'); await p.click('#rf-run'); await p.waitForFunction(() => /listings match/.test(document.querySelector('.rf-status').textContent));
+      for (const n of [1, 2]) await p.tap(`.rf-item:nth-child(${n}) [data-act=s]`);
+      await p.tap('[data-view=shortlist]'); if (await p.isVisible('.rf-sl-unfold')) await p.tap('.rf-sl-unfold'); await p.tap('.rf-sl-ticks summary');
+    }],
     ['phone listing bar', `${ORIGIN}/property-unit-nsw-bondi-146500101`, '#rf-lbar', async (p) => { await p.waitForSelector('#rf-lbar'); await p.tap('#rf-lbar [data-l=s]'); await p.tap('#rf-lbar .rf-lbar-more summary'); }],
   ]) {
     harness.section(name);
@@ -94,7 +99,7 @@ const check = async (page, include, label, out) => {
     await check(page, sel, name, found);
     const small = await page.$$eval(`${sel} button, ${sel} select, ${sel} summary`, (els) => els.filter((e) => e.offsetParent && (e.getBoundingClientRect().height < 44 || e.getBoundingClientRect().width < 24))
       .map((e) => `${e.className || e.tagName} "${(e.textContent || '').trim().slice(0, 20)}" ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`));
-    if (name === 'phone listing bar' && small.length) found.push(`${name}: touch targets under 44px: ${small.slice(0, 5).join('; ')}`);
+    if (small.length) found.push(`${name}: touch targets under 44px: ${small.slice(0, 5).join('; ')}`);
     await ctx.close();
   }
   // Other ways people browse: Windows high contrast, reduced motion, a short landscape window and

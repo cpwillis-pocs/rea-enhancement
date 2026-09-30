@@ -3568,7 +3568,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   .rf-tabs button[aria-selected=true]{color:var(--rf-fg);border-bottom-color:var(--rf-accent)}
   .rf-sl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--rf-line)}
   .rf-sl-ticks{flex-basis:100%} .rf-sl-ticks summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--rf-accent-fg)} .rf-sl-ticks .rf-checks{margin:6px 0 0}
-  .rf-sl-bar .rf-label{flex-basis:100%}
+  .rf-sl-bar .rf-label{flex-basis:100%;order:-2} /* the bar's name, above its search */
+  .rf-sl-unfold{flex:1 1 100%;order:-1;text-align:left} .rf-sl-bar.rf-folded>:not(.rf-label):not(.rf-sl-q):not(.rf-sl-unfold){display:none!important}
   .rf-sl-bar .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
   .rf-note{margin:-2px 9px 8px 124px;padding:6px 8px;border-radius:6px;background:var(--rf-hover);font-size:12px;
     white-space:pre-wrap;overflow-wrap:anywhere}
@@ -3769,6 +3770,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   @media (pointer: coarse){
     #rf-lbar button,#rf-lbar select,#rf-lbar .rf-lbar-more summary,.rf-checks .rf-chip,.rf-lbar-checks button,.rf-rate button,.rf-acts button,.rf-acts-more summary,.rf-chip{min-height:44px;min-width:44px}
     .rf-lbar-more summary{display:flex;align-items:center}
+    /* Every control in the drawer (the a11y check measures them all on a touch phone). */
+    #rf-panel button,#rf-panel select{min-height:44px} #rf-panel button{min-width:44px}
+    #rf-panel summary{min-height:44px;display:flex;align-items:center}
   }
   @media (prefers-reduced-motion: reduce){ [data-rf-id][data-rf-match="0"],#rf-panel *,#rf-lbar *{transition:none!important;animation:none!important} }
   [data-rf-id][data-rf-match="0"]:hover{opacity:1}
@@ -3926,8 +3930,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
       </select>
       <select class="rf-plan" aria-label="Plan an inspection day"></select>
       <input type="search" class="rf-sl-q" placeholder="Search shortlist" aria-label="Search the shortlist by address, note, agency or suburb">
+      <button type="button" class="rf-btn sec rf-sl-unfold" hidden aria-expanded="true"></button>
       <select class="rf-sl-filter" aria-label="Filter shortlist by application status">
-        <option value="">All</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
+        <option value="">Any status</option>${APP_STATUSES.filter(Boolean).map((v) => `<option value="${v}">${statusLabel(v)}</option>`).join('')}
         <option value="-">Not started</option><option value="!">Needs action</option>
       </select>
       <button class="rf-btn sec" data-sl="compare" aria-pressed="false" title="Side-by-side table of up to ${COMPARE_MAX}">Compare</button>
@@ -5197,7 +5202,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     foldBtn.textContent = `${can && on ? '▸' : '▾'} Filters${n ? ` · ${n} active` : ''} · Sort: ${sort.selectedOptions[0]?.textContent || ''}`;
   };
   foldBtn.addEventListener('click', () => ui.fold(!controls.classList.contains('rf-folded')));
-  narrow.addEventListener?.('change', () => ui.fold(controls.classList.contains('rf-folded')));
+  narrow.addEventListener?.('change', () => { ui.fold(controls.classList.contains('rf-folded')); ui.slFold(ui.slFolded ?? true); });
+  // The Shortlist's bar too: its search stays, the tools fold behind one button that says what's set.
+  const slBtn = ui.slBar.querySelector('.rf-sl-unfold');
+  ui.slFold = (on) => {
+    const can = narrow.matches && marks.counts().starred > 0;
+    if (can && on && ui.slBar.contains(document.activeElement) && document.activeElement !== ui.slQuery && document.activeElement !== slBtn) queueMicrotask(() => slBtn.focus({ preventScroll: true }));
+    ui.slBar.classList.toggle('rf-folded', can && on);
+    slBtn.hidden = !can;
+    slBtn.setAttribute('aria-expanded', String(!(can && on)));
+    const f = ui.slFilter.selectedOptions[0], pack = ui.slBar.querySelector('.rf-sl-ticks:not([hidden]) summary')?.textContent;
+    slBtn.textContent = `${can && on ? '▸' : '▾'} Tools${ui.slFilter.value ? ` · ${f?.textContent}` : ''}${pack ? ` · ${pack.replace(/^Application pack: /, 'Pack ')}` : ''}`;
+  };
+  slBtn.addEventListener('click', () => { ui.slFolded = !ui.slBar.classList.contains('rf-folded'); ui.slFold(ui.slFolded); });
   }
   // Export buttons (Results bar and Shortlist menu): what's on screen, as CSV, TSV, a copy or a calendar.
   function wireExports() {
@@ -5375,6 +5392,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
     const all = marks.shortlist();
     const rows = shortlistRows(all);
     renderTicks(all);
+    ui.slFold?.(ui.slFolded ?? true); // on a phone: folded until you open it
     ui.agencyRec = agencyRecord(all); // over the whole shortlist, not just what the search box shows
     ui.rows = rows;
     setExport(rows.length === 0);
@@ -6705,7 +6723,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askList(r, amenities).le
   };
   step('build', build);
   if (ui?.ready) { // only wire the rest if build() completed
-    step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); });
+    step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); setExport(!cache); }); // nothing searched: Bulk, Market, Map and exports hidden
     // The rest in a second task, so page load isn't one long (50 ms+) task: reading page 1's
     // listings and your marks is most of it. Order within is unchanged.
     setTimeout(() => {

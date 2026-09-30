@@ -2441,6 +2441,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); // not isMobile: the fixture pages have no viewport meta
     const page = await open(ctx);
     await page.click('#rf-launch');
+    assert.equal(await page.isVisible('.rf-map-btn') || await page.isVisible('.rf-bulk'), false, 'nothing searched yet: Map and Bulk hidden, from the first open');
     await page.focus('#rf-run');
     await page.keyboard.press('Enter'); // searched from the keyboard: focus doesn't fall to the page when Search folds away
     await waitStatus(page, /listings match/); await settle(page);
@@ -2461,6 +2462,17 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.fill('#rf-from', '2030-01-01'); await page.dispatchEvent('#rf-from', 'change');
     await waitStatus(page, /0 of 18/);
     assert.ok(await page.isVisible('.rf-map-btn') && await page.isDisabled('.rf-map-btn'), 'Map disabled, not hidden');
+    // The Shortlist's tools fold too, behind one button; its search stays.
+    await page.fill('#rf-from', ''); await page.dispatchEvent('#rf-from', 'change');
+    for (const n of [1, 2]) await page.tap(`.rf-item:nth-child(${n}) [data-act=s]`);
+    await page.tap('[data-view=shortlist]');
+    assert.ok(await page.isVisible('.rf-sl-q') && !(await page.isVisible('.rf-sl-filter')), 'folded: search only');
+    assert.match(await page.textContent('.rf-sl-unfold'), /^▸ Tools · Pack 0 of 5 ready$/);
+    await page.tap('.rf-sl-unfold');
+    assert.ok(await page.isVisible('.rf-sl-filter'));
+    await page.selectOption('.rf-sl-filter', '-');
+    await page.tap('.rf-sl-unfold');
+    assert.match(await page.textContent('.rf-sl-unfold'), /· Not started/, 'what is set shows on the bar');
     console.log('phone controls fold: ok');
     await done(page); await ctx.close();
   });
