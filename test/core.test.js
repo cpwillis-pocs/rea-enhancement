@@ -773,6 +773,13 @@ test("shortlist What's next order and what changed since your last visit", () =>
     { id: 'won', appStatus: 'approved', gone: true },
   ];
   assert.deepEqual(core.byNext(rows, now).map((r) => r.id), ['won', 'due', 'soon', 'insp', 'rated', 'plain', 'dead']);
+  // The keyed redraw keeps the longest run already in order and moves only the rest.
+  const keep = (seq) => [...core.inOrder(seq)].sort((x, y) => x - y);
+  assert.deepEqual(keep([0, 2, 3, 1, 4]), [0, 1, 2, 4]); // one listing moved down: only it moves
+  assert.deepEqual(keep([3, 0, 1, 2]), [1, 2, 3]); // one moved up
+  assert.deepEqual(keep([-1, 0, -1, 1]), [1, 3]); // new nodes (-1) always go in
+  assert.deepEqual(keep([]), []);
+  assert.equal(keep([2, 1, 0]).length, 1);
   const since = now - 24 * H;
   const ch = core.sinceChanges([
     { id: 'a', priceAt: now - H, priceDir: 'down' }, { id: 'b', priceAt: now - 48 * H, priceDir: 'down' }, { id: 'c', goneAt: now - H },

@@ -292,6 +292,21 @@
     if (next) return [2, next];
     return [3, -(r.rating || 0)];
   };
+  // Indexes of the longest strictly increasing run in `seq` (negatives skipped): the listings
+  // already in order, so a redraw moves only the rest.
+  const inOrder = (seq) => {
+    const tails = [], prev = seq.map(() => -1);
+    seq.forEach((v, i) => {
+      if (v < 0) return;
+      let lo = 0, hi = tails.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (seq[tails[mid]] < v) lo = mid + 1; else hi = mid; }
+      if (lo) prev[i] = tails[lo - 1];
+      tails[lo] = i;
+    });
+    const out = new Set();
+    for (let i = tails.length ? tails[tails.length - 1] : -1; i >= 0; i = prev[i]) out.add(i);
+    return out;
+  };
   const byNext = (rows, now = Date.now()) => rows.map((r) => [nextKey(r, now), r]).sort(([a], [b]) => a[0] - b[0] || a[1] - b[1]).map(([, r]) => r);
   // What changed on the Shortlist since `since` (your last visit): counts, the listings, and a line.
   const sinceChanges = (rows, since, now = Date.now()) => {
@@ -3521,7 +3536,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, agencyDrops, negotiateFacts, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, agencyDrops, negotiateFacts, inOrder, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -3989,7 +4004,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.launch.textContent = `Availability Filter${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
     // Shortlisted listings that need something from you (a deadline, a follow-up, did you inspect?)
     // and your own notice date: named on the launcher, so they're seen without opening the drawer.
-    const todo = (star ? marks.shortlist().filter((r) => needsAction(r) || needsFollowUp(r)).length : 0) + (noticeDue(cfg) ? 1 : 0);
+    // Counted from startup's last task on (ui.countTodo): building the shortlist's rows in page
+    // load's first task made it longer, and the restore that follows rebuilt most of them.
+    const todo = !ui.countTodo ? 0 : (star ? marks.shortlist().filter((r) => needsAction(r) || needsFollowUp(r)).length : 0) + (noticeDue(cfg) ? 1 : 0);
     if (todo) ui.launch.append(' · ', Object.assign(document.createElement('span'), { className: 'rf-launch-due', textContent: `● ${todo} to do` }));
   };
   const currentKey = () => (isSearchPage(location.href) ? searchKey(location.href) : null);
@@ -6007,11 +6024,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (old) old.replaceWith(el);
       node.set(p.id, el);
     }
+    // Only the nodes outside the longest run already in order move: one listing going down the
+    // list (a What's next reorder) moves that node, not every node it passes.
+    const pos = new Map([...ui.list.children].map((el, i) => [el, i]));
+    const stay = inOrder(parts.map((p) => pos.get(node.get(p.id)) ?? -1));
     let at = ui.list.firstElementChild;
-    for (const p of parts) {
+    parts.forEach((p, i) => {
       const el = node.get(p.id);
-      if (el === at) at = at.nextElementSibling; else ui.list.insertBefore(el, at);
-    }
+      if (el === at) at = at.nextElementSibling;
+      else if (stay.has(i)) at = el.nextElementSibling; // what's between moves later
+      else ui.list.insertBefore(el, at);
+    });
     numberItems(rows.length);
     ui.list.insertAdjacentHTML('beforeend', moreHtml(rows.length - n));
   };
@@ -6063,8 +6086,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   });
   const metaLine = (parts, cls = '') => { const t = parts.filter(Boolean).join(' · '); return t ? `<div class="rf-meta${cls}">${esc(t)}</div>` : ''; };
   // Markup per listing, without its place in the list (numberItems sets "12 of 150" afterwards).
+  // Each agency's price drops over this search, for "Room to negotiate?": worked out once per
+  // search and marks version, not on every paint, chunk and one-listing redraw.
+  const cacheDrops = () => {
+    if (ui.drops?.rows !== cache || ui.drops.ver !== knownVer) ui.drops = { rows: cache, ver: knownVer, m: agencyDrops(cache || []) };
+    return ui.drops.m;
+  };
   function itemParts(rows) {
-    const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist), drops = sl ? null : agencyDrops(cache || []);
+    const now = Date.now(), sl = ui.view === 'shortlist', checks = checklistItems(cfg.checklist), drops = sl ? null : cacheDrops();
     return rows.map((r) => ({ id: r.id, html: itemHtml(r) }));
     function itemHtml(r) {
       const kq = cfg.keyword.trim() ? keywordEvidence(r.text, cfg.keyword) : '';
@@ -6619,7 +6648,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const rec = r.agency ? recordText(agencyRecord(marks.shortlist()).get(agencyKey(r.agency))) : '';
     const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
       cash != null ? `cash to move ${money(cash)}` : '', applyByLabel(r.applyBy), rec ? `${r.agency}: ${rec}` : '', sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',
-      ...watchTags(r), placesLabel(r) || kmLabel(r), negotiateFacts(r, cache ? agencyDrops(cache) : null)].filter(Boolean);
+      ...watchTags(r), placesLabel(r) || kmLabel(r), negotiateFacts(r, cache ? cacheDrops() : null)].filter(Boolean);
     const checks = checklistItems(cfg.checklist).map((k) => checkBtn(k, r.checks?.[k], 'data-l="ck"')).join('');
     const sl = marks.shortlist(), mine = sl.find((x) => x.id === r.id);
     const nx = nextStop(sl, Number.isFinite(r.lat) || !mine ? r : { ...r, lat: mine.lat, lng: mine.lng }); // the page may not say where it is; the shortlist copy does
@@ -7063,6 +7092,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       // Restoring remembered results (parse, rebuild rows, render) is the rest of the cost: its own task too.
       setTimeout(() => {
         step('restore', restore);
+        step('launch to-do', () => { ui.countTodo = true; setLaunchCount(ui.launchN ?? null); });
         step('listing bar', () => {
           renderListingBar();
           window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
