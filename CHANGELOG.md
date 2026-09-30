@@ -2,6 +2,34 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.35.2
+
+- **Keyboard-safe menus**: Presets and Bulk act only on the item you choose. Moving through them with the arrow keys or type-ahead waits for Enter (Esc leaves them), and deleting a preset asks first.
+- **With site data blocked**, filters, settings and the Shortlist work for the page, kept in memory, instead of failing.
+- Fixed:
+  - Changed since last visit compared with all time when you were back within the hour.
+  - Hiding one copy of a place listed twice left "Also listed by" on the other.
+  - Un-starring an applied listing, or hiding one on the Shortlist, left other rows' agency record or pack nudge stale.
+  - Least overlap put a listing with no rent first.
+  - Another tab's settings didn't reach a Shortlist with no search, or the listing bar.
+  - Shortlisting from the listing bar before its page was read saved an empty copy.
+  - "open Sat 1 pm" in a price read as per month.
+  - A `$` in listing text could act as a pattern in enquiries.
+  - A restored decline reason came back without a declined status.
+  - Saving a preset for this search let a reload re-apply it over your later edits.
+  - The listing bar refetched a page it couldn't read on every click; a listing REA says is gone is now marked so.
+  - Re-check moved a gone listing's date.
+  - The copied report could keep a short street address or a bracketed landline.
+  - An old Undo could keep a later status line.
+- **Faster**:
+  - Page load's first task is about 15 ms shorter at 1000 listings, because the launcher's to-do count waits for the restore.
+  - Agency drop rates are worked out once per search, not on every paint.
+  - A Shortlist reorder moves only the listings out of order.
+- **Internals**:
+  - Shared helpers replace duplicated code for tick lists, answer and checklist cycling, check buttons, print windows, status buttons, date math and focus after redraws.
+  - Unexpected errors in the listing bar, Re-check and restore are logged.
+  - The e2e suite runs in Sydney time, whatever the machine's time zone.
+
 ## 2.35.1
 
 - **Faster and steadier**:
