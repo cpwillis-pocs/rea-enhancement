@@ -263,6 +263,8 @@
   const checklistItems = (v) => [...new Set(String(v || CHECKLIST_DEFAULT).split(/[,\n]/).map((x) => clip(x.trim(), 30)).filter(Boolean))].slice(0, CHECK_MAX);
   const checkSummary = (r, items) => items.filter((k) => r.checks?.[k]).map((k) => `${r.checks[k] === 'y' ? '✓' : '✗'} ${k}`).join(', ');
   const HIDE_REASONS = ['too small', 'location', 'condition', 'price', 'other'];
+  // Why an application was declined (optional, your guess or what the agent said): counted per agency.
+  const DECLINE_REASONS = ['another applicant', 'income', 'rental history', 'pets', 'no reply'];
   const FOLLOW_UP_DAYS = 5;
   // After an inspection you were down for: "Inspected?"; inspected a while ago but not applied: "Apply?".
   const ACTION_WINDOW_DAYS = 7, APPLY_NUDGE_DAYS = 2;
@@ -313,14 +315,19 @@
     for (const r of rows) {
       if (!r.agency || !['applied', 'approved', 'declined'].includes(r.appStatus)) continue;
       const k = agencyKey(r.agency);
-      const v = out.get(k) || { applied: 0, approved: 0, declined: 0 };
+      const v = out.get(k) || { applied: 0, approved: 0, declined: 0, why: {} };
       v.applied++; if (r.appStatus !== 'applied') v[r.appStatus]++;
+      if (r.appStatus === 'declined' && r.declineReason) v.why[r.declineReason] = (v.why[r.declineReason] || 0) + 1;
       out.set(k, v);
     }
     return out;
   };
-  const recordText = (v) => (v ? `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined` : ''}` : '');
-  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'as', 'ast', 'ck', 'qa', 'rv', 'rt']; // user choices a bulk action can change
+  const recordText = (v) => {
+    if (!v) return '';
+    const why = Object.entries(v.why || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => (n > 1 ? `${k} ×${n}` : k)).join(', ');
+    return `you: ${v.applied} applied${v.approved ? `, ${v.approved} approved` : ''}${v.declined ? `, ${v.declined} declined${why ? ` (${why})` : ''}` : ''}`;
+  };
+  const MARK_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'as', 'ast', 'dr', 'ck', 'qa', 'rv', 'rt']; // user choices a bulk action can change
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const PRUNE_EVERY = 20;
   const keep = (e) => e.s || e.h || e.n || e.as;
@@ -443,7 +450,7 @@
         ...fromSummary(d), id, suburb: d.su || '', priceNum, available: d.v || '-', avail: parseAvail(d.v),
         beds: d.b ?? '', baths: d.ba ?? '', cars: d.c ?? '', bond: d.bo || '', ppb: perBed(priceNum, d.b),
         ...moveIn(d.bo, priceNum), agency: d.ag || '',
-        starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, listed: null, lastSeen: e.l || null,
+        starred: true, hidden: !!e.h, note: e.n || '', appStatus: e.as || '', appAt: e.as && e.ast ? e.ast : null, declineReason: DECLINE_REASONS.includes(e.dr) ? e.dr : '', listed: null, lastSeen: e.l || null,
         gone: !!e.x, goneAt: e.x || null, checks: cleanChecks(e.ck), answers: cleanQa(e.qa), rating: e.rt >= 1 && e.rt <= 5 ? e.rt : 0,
         // The latest inspection that has already happened (the display list drops past ones).
         lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
@@ -558,6 +565,7 @@
           r.appStatus = e?.as || '';
           r.rating = e?.rt >= 1 && e.rt <= 5 ? e.rt : 0;
           r.appAt = e?.as && e.ast ? e.ast : null;
+          r.declineReason = DECLINE_REASONS.includes(e?.dr) ? e.dr : '';
           r.agencyHidden = !!(r.agency && ag?.[agencyKey(r.agency)]);
           r.suburbHidden = !!(r.suburb && sb?.[agencyKey(r.suburb)]);
           r.firstSeen = e?.f ? new Date(e.f) : null;
@@ -626,6 +634,10 @@
       answerInspect(id) { edit(id, (e) => { e.nd = now(); }); },
       // Still not interested at the new price: hidden again from here.
       rehide(id) { edit(id, (e) => { e.h = 1; stampHide(e, now()); }); },
+      // The same reason again clears it.
+      setDeclineReason(id, reason) {
+        edit(id, (e) => { if (DECLINE_REASONS.includes(reason) && e.dr !== reason) e.dr = reason; else delete e.dr; });
+      },
       setHideReason(id, reason) {
         edit(id, (e) => { if (HIDE_REASONS.includes(reason)) e.hr = reason; else delete e.hr; });
       },
@@ -676,7 +688,7 @@
         const { m } = load();
         const out = {};
         for (const [id, e] of Object.entries(m)) {
-          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, hr: e.hr, ck: e.ck, qa: e.qa, o: e.o, nd: e.nd, li: e.li, ic: e.ic, ht: e.ht, hp: e.hp, rv: e.rv, rt: e.rt, d: e.s ? e.d : undefined };
+          if (keep(e)) out[id] = { x: e.x, s: e.s ? 1 : undefined, st: e.st, h: e.h ? 1 : undefined, n: e.n, as: e.as, ast: e.ast, dr: e.dr, hr: e.hr, ck: e.ck, qa: e.qa, o: e.o, nd: e.nd, li: e.li, ic: e.ic, ht: e.ht, hp: e.hp, rv: e.rv, rt: e.rt, d: e.s ? e.d : undefined };
         }
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
@@ -698,6 +710,7 @@
           if (typeof e.x === 'number' && !(seenHere > e.x)) cur.x = e.x; // seen live here since: not gone
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
           if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
+          if (DECLINE_REASONS.includes(e.dr)) cur.dr = e.dr;
           if (Number.isInteger(e.rt) && e.rt >= 1 && e.rt <= 5) cur.rt = e.rt;
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           const qa = cleanQa(e.qa); if (Object.keys(qa).length) cur.qa = { ...cleanQa(cur.qa), ...qa };
@@ -2788,7 +2801,7 @@
     ['availDate', 'available_date'], ['available', 'available'], ['price', 'price'], ['priceNum', 'weekly_rent'],
     ['ppb', 'rent_per_bed'], ['bond', 'bond'], ['bondWeeks', 'bond_weeks'], ['upfront', 'move_in_cost'], ['cashToMove', 'cash_to_move'], ['vsMedian', 'vs_median_pct'], ['vsNow', 'vs_current_rent'], ['amenList', 'amenities'], ['watchList', 'heads_up'], ['leaseText', 'lease'], ['applyVia', 'apply_via'], ['applyBy', 'apply_by'], ['takenText', 'taken'], ['byAppt', 'by_appointment'], ['fitText', 'lease_fit'], ['km', 'km'], ['score', 'match_score'], ['agency', 'agency'], ['photos', 'photos'], ['floorplan', 'floorplan'], ['sqm', 'floor_m2'], ['perSqmVal', 'rent_per_m2'], ['address', 'address'], ['suburb', 'suburb'], ['beds', 'beds'],
     ['baths', 'baths'], ['cars', 'cars'], ['type', 'type'], ['inspect', 'inspections'], ['listed', 'listed'],
-    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['answersText', 'agent_answers'], ['hideReason', 'hide_reason'], ['note', 'note'],
+    ['surrounding', 'nearby'], ['starred', 'shortlisted'], ['isNew', 'new'], ['prevPrice', 'previous_price'], ['prevAvail', 'previous_available'], ['priceHistoryText', 'price_history'], ['relistedText', 'relisted_from_price'], ['appStatus', 'application'], ['appDate', 'application_date'], ['declineReason', 'decline_reason'], ['rating', 'my_rating'], ['checksText', 'checklist'], ['answersText', 'agent_answers'], ['hideReason', 'hide_reason'], ['note', 'note'],
     ['headline', 'headline'], ['url', 'url'], ['id', 'id'], ['lat', 'lat'], ['lng', 'lng'], // last: lat/lng let Google My Maps plot the file
   ];
   const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -3455,7 +3468,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   if (typeof window === 'undefined') {
     module.exports = {
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
-      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
+      fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, DECLINE_REASONS, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
     return;
   }
@@ -4747,6 +4760,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       onChange({ type: 'change' });
       return setStatus(msg);
     }
+    if (b.dataset.act === 'dr') { marks.setDeclineReason(id, b.dataset.r); refreshMarks([id]); itemEl(id, `[data-act=dr][data-r="${CSS.escape(b.dataset.r)}"]`)?.focus(); return; }
     if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
     if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
     if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
@@ -5964,6 +5978,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       }).join('')}</div>${asks.length ? `<div class="rf-checks rf-asks" role="group" aria-label="What to ask the agent (tap once the agent answers: fine, then a problem)">${asks.map((x) => qaBtn(x, 'class="rf-chip"')).join('')}</div>` : ''}</details>` : ''}
       ${r.starred && sl ? `<div class="rf-app"><span class="rf-meta" aria-hidden="true">My rating</span> ${ratingHtml(r, 'data-act="rate"')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
+      ${sl && r.appStatus === 'declined' ? `<div class="rf-acts rf-why"><span class="rf-meta">Why declined? (optional)</span>${DECLINE_REASONS.map((x) => `<button data-act="dr" data-r="${x}" aria-pressed="${r.declineReason === x}">${reasonLabel(x)}</button>`).join('')}</div>` : ''}
       ${r.note ? `<div class="rf-note">${esc(r.note)}</div>` : ''}
       <div class="rf-acts">
         <button data-act="s" aria-pressed="${r.starred}" title="${r.starred ? 'Remove from shortlist' : 'Add to shortlist'}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>

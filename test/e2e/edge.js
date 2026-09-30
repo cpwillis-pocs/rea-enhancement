@@ -2517,8 +2517,13 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.evaluate(() => document.activeElement.dataset.qa), 'w:water', 'focus kept');
     assert.match(await page.textContent('.rf-item[data-id="146500101"] .rf-ck-more summary'), /Asked 1\/2/, "answered, counted like the checklist");
     await page.selectOption('.rf-sl-filter', '');
+    await page.selectOption('.rf-item[data-id="146500101"] select[data-app]', 'declined');
+    await page.click('.rf-item[data-id="146500101"] [data-act=dr][data-r="income"]');
+    assert.equal((await marks(page))['146500101'].dr, 'income', 'why it was declined (optional)');
+    assert.equal(await page.getAttribute('.rf-item[data-id="146500101"] [data-act=dr][data-r="income"]', 'aria-pressed'), 'true');
+    await page.selectOption('.rf-item[data-id="146500101"] select[data-app]', '');
     await page.selectOption('#rf-slSort', 'added');
-    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), ['146500101', '146500102'], 'Date added: newest shortlisted first');
+    assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id + ':' + x.querySelector('select[data-app]')?.value)), ['146500101:', '146500102:approved'], 'Date added: newest shortlisted first');
     assert.ok(+JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).slSeenAt >= t, 'this visit stamped');
     console.log('shortlist order and since last visit: ok');
     await done(page); await ctx.close();

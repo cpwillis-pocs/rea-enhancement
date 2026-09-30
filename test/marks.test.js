@@ -400,11 +400,30 @@ test('marksStore: a partial view of one of two same-address listings is not a re
 test('agencyRecord / needsFollowUp', () => {
   const rows = [{ agency: 'Harbour Co', appStatus: 'applied', appAt: 1 }, { agency: 'harbour co ', appStatus: 'declined' }, { agency: 'Other', appStatus: 'to inspect' }];
   const rec = core.agencyRecord(rows);
-  assert.deepEqual(rec.get('harbour co'), { applied: 2, approved: 0, declined: 1 });
+  assert.deepEqual(rec.get('harbour co'), { applied: 2, approved: 0, declined: 1, why: {} });
   assert.equal(rec.has('other'), false);
   assert.equal(core.recordText(rec.get('harbour co')), 'you: 2 applied, 1 declined');
   assert.ok(core.needsFollowUp(rows[0], 6 * 864e5 + 1));
   assert.ok(!core.needsFollowUp(rows[0], 4 * 864e5));
+});
+
+test('decline reasons: optional, stored per listing, backed up, counted in the agency record', () => {
+  const st = core.marksStore(mem(), () => 1e12);
+  const r = row('146500051');
+  st.toggle(r.id, 's', r);
+  st.setStatus(r.id, 'declined');
+  st.setDeclineReason(r.id, 'income');
+  assert.equal(st.shortlist()[0].declineReason, 'income');
+  st.setDeclineReason(r.id, 'nonsense');
+  assert.equal(st.shortlist()[0].declineReason, '', 'unknown reasons clear it');
+  st.setDeclineReason(r.id, 'pets');
+  const back = core.marksStore(mem(), () => 1e12);
+  back.importJson(st.exportData());
+  assert.equal(back.shortlist()[0].declineReason, 'pets');
+  const rec = core.agencyRecord([{ agency: 'A', appStatus: 'declined', declineReason: 'income' }, { agency: 'A', appStatus: 'declined', declineReason: 'income' }, { agency: 'A', appStatus: 'declined' }]);
+  assert.equal(core.recordText(rec.get('a')), 'you: 3 applied, 3 declined (income ×2)');
+  const [head, line] = core.toCsv([{ id: '1', url: 'u', declineReason: back.shortlist()[0].declineReason }]).split('\r\n');
+  assert.equal(line.split(',')[head.split(',').indexOf('decline_reason')], 'pets');
 });
 
 test('hide reasons: stored, shown only while hidden, round-trip through backup', () => {

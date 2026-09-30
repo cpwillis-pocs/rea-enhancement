@@ -81,6 +81,7 @@ A failed write of something you chose (marks, settings, presets) goes to `writeS
 | `h`, `hr`, `ht`, `hp` | Hidden, reason, when hidden, weekly rent when hidden (used for "cheaper since you hid it") |
 | `n` | Note |
 | `as`, `ast`, `ck`, `rt` | Application status and when set, checklist answers, your 1–5 rating |
+| `dr` | Why an application was declined (optional): another applicant, income, rental history, pets, no reply |
 | `qa` | The agent's answers to What to ask, per question id (`w:<heads-up>`, `a:<amenity>`, `avail`): `y` fine, `n` a problem |
 | `o`, `rv` | Opened, reviewed |
 | `p`, `ps`, `pp`, `pps`, `pt`, `ph` | Price now, previous price, when it changed, price history |
