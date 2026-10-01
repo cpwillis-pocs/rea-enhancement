@@ -138,7 +138,7 @@ const html = (n) => {
   console.log('from 2026-10-01:', dated.join(' | '));
   assert.ok(dated.every((t) => !/now|Contact/i.test(t)));
 
-  await page.click('#rf-more summary');
+  await page.click('#rf-more summary'); await page.evaluate(() => new Promise((r) => setTimeout(r, 0))); // the press ends a task later
   await page.fill('#rf-keyword', 'pool');
   await page.dispatchEvent('#rf-keyword', 'change');
   assert.equal(await page.$$eval('.rf-card', (els) => els.length), 1);
@@ -305,6 +305,7 @@ const html = (n) => {
     await p1.click('#rf-launch');
     await p1.click('#rf-run');
     await p1.waitForFunction(() => /2 of 2 listings match/.test(document.querySelector('.rf-status').textContent));
+    await p1.evaluate(() => new Promise((r) => setTimeout(r, 0))); // the search is remembered a task after it paints
     await cov.collect(p1, SCRIPT);
     await p1.close();
 
