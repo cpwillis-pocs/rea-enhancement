@@ -5091,8 +5091,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     }
     // A decline reason shows in the agency's record on its other listings too: all redraw.
     if (b.dataset.act === 'dr') { marks.setDeclineReason(id, b.dataset.r); refreshMarks(); itemEl(id, `[data-act=dr][data-r="${CSS.escape(b.dataset.r)}"]`)?.focus(); return; }
-    if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(); return setStatus(`Hide reason: ${b.dataset.r}.`); }
-    if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(); return setStatus('Hidden again; it comes back if the rent drops further.'); }
+    if (b.dataset.act === 'why') { marks.setHideReason(id, b.dataset.r); refreshMarks(touched(id)); return setStatus(`Hide reason: ${b.dataset.r}.`); }
+    if (b.dataset.act === 'h' && rowOf(id)?.resurfaced) { marks.rehide(id); refreshMarks(touched(id, 'h')); return setStatus('Hidden again; it comes back if the rent drops further.'); }
     if (b.dataset.act === 'ics') { const r = rowOf(id); if (r) downloadIcs([r]); return; }
     if (b.dataset.act === 'rate') {
       const n = marks.setRating(id, +b.dataset.v);
@@ -5149,16 +5149,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const act = b.dataset.act;
     const next = b.closest('.rf-item').nextElementSibling?.dataset.id;
     const on = marks.toggle(id, act, rowById(id));
-    // A star changes only its own listing (unless a filter drops it); a hide, its own and its
-    // building's ("N in this building").
-    // On the Shortlist a star changes others too (the agency record, the pack's portals): all redraw.
-    // A star with an application status also changes the agency's record on its other listings.
-    const sl = ui.view === 'shortlist', row = rowById(id);
-    refreshMarks(sl ? null : act === 's' && !row?.appStatus ? [id] : act === 'h' ? withMates(id) : null); // on the Shortlist, the pack's portals too
+    refreshMarks(touched(id, act)); // see touched()
     // Re-render replaced the button: put focus back (or on the next item if this one left the list).
     const q = (i) => itemEl(i, `[data-act="${act}"]`);
     (q(id) || (next && q(next)) || ui.list).focus?.();
-    if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); (q(id) || ui.list).focus(); });
+    if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(touched(id, 'h')); (q(id) || ui.list).focus(); });
   });
   }
 
@@ -6043,7 +6038,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (save) marks.setNote(id, ta.value);
       ta.remove(); // the keyed paint keeps an unchanged item's node, so the editor goes here
       if (item._rf) item._rf = { ...item._rf, html: '' }; // and the item is drawn again (its note line)
-      refreshMarks();
+      refreshMarks(touched(id));
       if (refocus) (itemEl(id, '[data-act=n]') || ui.list).focus();
     };
     ta.addEventListener('keydown', (e) => {
@@ -6064,6 +6059,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // checklist tick): the list then rebuilds just those, if its order is unchanged.
   // A listing and those whose markup names it: the same building ("N in this building") and the
   // same place listed twice ("Also listed by…").
+  // What one listing's change redraws on Results: a star, a note or a hide reason only its own
+  // listing (unless a filter drops it); a hide, its own and its building's ("N in this building");
+  // a star with an application status, the agency's record on its other listings too, so all.
+  // On the Shortlist a change touches others (the agency record, the pack's portals): all redraw.
+  const touched = (id, act = '') => (ui.view === 'shortlist' ? null : act === 'h' ? withMates(id) : act === 's' ? (rowById(id)?.appStatus ? null : [id]) : act ? null : [id]);
   const withMates = (id) => {
     const a = rowById(id)?.address, k = buildingKey(a), ak = addressKey(a);
     return cache && (k || ak) ? [id, ...cache.filter((r) => r.id !== id && ((k && buildingKey(r.address) === k) || (ak && addressKey(r.address) === ak))).map((r) => r.id)] : [id];
@@ -7160,8 +7160,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (e.type !== 'click') return; // press/release events only swallowed, so REA sees nothing
       const id = b.dataset.id, act = b.dataset.cardAct;
       const on = marks.toggle(id, act, rowById(id));
-      refreshMarks();
-      if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(); });
+      refreshMarks(touched(id, act));
+      if (act === 'h' && on) offerHideUndo(id, () => { marks.toggle(id, 'h'); refreshMarks(touched(id, 'h')); });
       else if (act === 's') setStatus(on ? 'Added to shortlist.' : 'Removed from shortlist.');
     };
     for (const type of ['click', 'auxclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchend']) document.addEventListener(type, onAct, true);
