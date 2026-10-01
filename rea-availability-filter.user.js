@@ -5267,7 +5267,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     let t;
     // The blur after typing fires "change" with nothing new; re-rendering then would
     // replace the list between mousedown and mouseup and swallow the user's click.
-    let lastSig = JSON.stringify(cfg);
+    // Compared with the live config, not the last one typed here: another tab, or a search change,
+    // can set cfg quietly, and changing the field back must still count.
+    const cfgSig = () => JSON.stringify(Object.fromEntries(fields.map(([k]) => [k, cfg[k]])));
     // Leaving a typed field mid-click (mousedown -> blur -> change) must not re-render the list
     // under the pointer, or the click is lost: renders asked for during a press wait for its end.
     let pressing = false, renderAfterPress = false;
@@ -5275,18 +5277,21 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const renderNow = (defer) => { if (defer && pressing) renderAfterPress = true; else showResults(); };
     panel.addEventListener('pointerdown', () => { pressing = true; }, true);
     // A press that never got its pointerup can't hold renders: a key ends it, and flushes what it held.
-    panel.addEventListener('keydown', () => { if (pressing) { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } } }, true);
-    const endPress = () => pressing && setTimeout(() => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } }, 0);
+    // Other redraws (a note editor closing on blur) can wait for the press the same way.
+    let held = [];
+    const flushPress = () => { pressing = false; if (renderAfterPress) { renderAfterPress = false; if (cache) showResults(); } const fns = held; held = []; for (const fn of fns) fn(); };
+    ui.afterPress = (fn) => { if (pressing) held.push(fn); else fn(); };
+    panel.addEventListener('keydown', () => { if (pressing) flushPress(); }, true);
+    const endPress = () => pressing && setTimeout(flushPress, 0);
     for (const type of ['pointerup', 'pointercancel', 'click']) document.addEventListener(type, endPress, true); // pointerup's timeout runs after its click
     const onChange = (e) => {
       const next = Object.fromEntries(fields.map(([k, el]) => [k, read(el)]));
       const sig = JSON.stringify(next);
-      if (sig === lastSig) {
+      if (sig === cfgSig()) {
         // Same config: only flush a pending debounced render (eg Enter right after typing).
         if (t && e?.type === 'change') { clearTimeout(t); t = null; if (cache) renderNow(typed(e.target)); }
         return;
       }
-      lastSig = sig;
       const wasRemember = cfg.remember;
       cfg = next;
       panel.classList.toggle('rf-compact', !!cfg.compact);
@@ -5380,7 +5385,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.slFilter.addEventListener('change', () => renderShortlist());
     panel.querySelector('#rf-slSort').addEventListener('change', () => { if (!cache) renderShortlist(); }); // with results, the settings change redraws it
     let slqT = null;
-    ui.slQuery.addEventListener('input', () => { clearTimeout(slqT); slqT = setTimeout(renderShortlist, 150); });
+    ui.slQuery.addEventListener('input', () => { clearTimeout(slqT); slqT = setTimeout(() => { if (ui.view === 'shortlist') renderShortlist(); }, 150); }); // not into Results if the tab changed meanwhile
     ui.plan.addEventListener('change', () => {
       ui.planDay = ui.plan.value || null;
       if (ui.planDay && ui.compare) ui.slBar.querySelector('[data-sl=compare]').click(); // one view at a time
@@ -5655,7 +5660,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // Re-check shortlisted listings one at a time (user-initiated, polite delay, abortable).
   const RECHECK_MAX = 30;
   // User-started background jobs (re-check, check all) share the search's abort/busy slot.
-  const startJob = (btn) => { runCtrl?.abort(); const c = runCtrl = new AbortController(); setBusy(true); btn.setAttribute('aria-disabled', 'true'); return c; };
+  const startJob = (btn) => { runCtrl?.abort(); const c = runCtrl = new AbortController(); c.job = true; setBusy(true); btn.setAttribute('aria-disabled', 'true'); return c; };
   const endJob = (c, btn) => { if (runCtrl === c) { runCtrl = null; setBusy(false); } btn.removeAttribute('aria-disabled'); }; // a search that took over owns busy now
 
   async function recheckShortlist(btn) {
@@ -5909,7 +5914,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true, true); }
     });
     // A task later: a blur from a redraw in progress (another tab's change) mustn't redraw inside it.
-    ta.addEventListener('blur', () => setTimeout(() => finish(true), 0));
+    // Saved at once; the redraw waits for a press under way (a click on this listing's Shortlist).
+    ta.addEventListener('blur', () => setTimeout(() => {
+      if (!done) marks.setNote(id, ta.value);
+      (ui.afterPress || ((fn) => fn()))(() => finish(true));
+    }, 0));
   }
 
   // `only`: the listings whose marks changed, when nothing else on screen can (a star, rating,
@@ -6010,9 +6019,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const UNDO_KEEP_MS = 30000;
   const keepingUndo = (fn) => {
     const keep = ui.status.querySelector('[data-undo]') && Date.now() - (ui.undoAt || 0) < UNDO_KEEP_MS ? [...ui.status.childNodes] : null;
-    const err = ui.status.classList.contains('err');
+    const err = ui.status.classList.contains('err'), had = keep && ui.status.contains(document.activeElement) ? document.activeElement : null;
     fn();
     if (keep) { ui.status.replaceChildren(...keep); ui.status.classList.toggle('err', err); }
+    if (had && document.activeElement !== had) had.focus({ preventScroll: true }); // the same node, put back: so is focus
   };
 
   // Before there's anything to act on, these aren't shown at all (a row of greyed-out buttons on
@@ -6112,13 +6122,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // (and focus). Anything else, or most items changed, is one innerHTML.
   // A redraw that swaps or moves the focused listing (another tab's change, a reorder) would drop
   // focus to the page: put it back on the same control in the new node.
+  const FOCUS_KEYS = ['act', 'v', 'r', 'ck', 'qa', 'app', 'cmp'];
   const paintList = (rows) => {
     const a = document.activeElement, it = a && ui.list.contains(a) ? a.closest('.rf-item') : null;
-    const sel = it && a !== it ? [a.dataset.act && `[data-act="${CSS.escape(a.dataset.act)}"]`, a.dataset.v && `[data-v="${CSS.escape(a.dataset.v)}"]`, a.dataset.r && `[data-r="${CSS.escape(a.dataset.r)}"]`].filter(Boolean).join('') : '';
+    const sel = it && a !== it ? [...FOCUS_KEYS].filter((k) => a.dataset[k] != null).map((k) => `[data-${k}="${CSS.escape(a.dataset[k])}"]`).join('') : '';
+    const opened = it ? [...it.querySelectorAll('details[open]')].filter((d) => d.contains(a) && !d.matches('.rf-acts-more')).map((d) => d.className).filter(Boolean) : []; // only the one focus is in (the ⋯ menu closes after its action): others fold as drawn
     paintRows(rows);
     if (!it || document.activeElement === a && a.isConnected) return;
-    const id = it.dataset.id, to = (sel && itemEl(id, sel)) || itemEl(id);
+    const id = it.dataset.id, el = itemEl(id);
+    // A folded part it was in (the checklist's "more") is opened again first, so it can take focus.
+    for (const c of opened) { const d = el?.querySelector(`details.${CSS.escape(c.split(' ')[0])}`); if (d) d.open = true; }
+    const to = (sel && itemEl(id, sel)) || el;
     to?.focus({ preventScroll: true });
+    if (to && document.activeElement !== to) el?.focus({ preventScroll: true });
   };
   const paintRows = (rows) => {
     const n = Math.max(RENDER_CHUNK, ui.keepShown || 0);
@@ -6748,10 +6764,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function renderListingBar({ onlyIfMoved = false } = {}) {
     let bar = document.getElementById('rf-lbar');
     const id = isListingPage(location.href) ? listingId(location.pathname) : '';
+    if (bar?._editing && bar.dataset.id === id) return; // a note half-typed isn't redrawn away
+    // Moved to another listing (or off listings) mid-note: keep the draft. Not every browser fires
+    // blur on removal, and one that does would remove the bar again from inside this remove().
+    if (bar?._editing) { bar._finishEdit?.(true, false); bar = document.getElementById('rf-lbar'); }
     if (!id) { bar?.remove(); return; }
     if (onlyIfMoved && bar?.dataset.id === id) return; // same listing (eg a gallery ?query): keep focus
-    if (bar?._editing && bar.dataset.id === id) return; // a note half-typed isn't redrawn away
-    if (bar?._editing) bar._finishEdit?.(true, false); // moved to another listing mid-note: keep the draft (not every browser fires blur on removal)
     const focusSel = bar?.contains(document.activeElement) ? lbarFocusSel(document.activeElement) : null;
     if (!bar) {
       bar = Object.assign(document.createElement('div'), { id: 'rf-lbar' });
@@ -6849,10 +6867,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     bar.querySelector('[data-l=min]').after(ta);
     bar._editing = true;
     ta.focus();
+    // :active isn't set yet when the press's blur runs: the press is noted here instead.
+    let pressed = false;
+    const down = (e) => { pressed = e.target !== ta; };
+    bar.addEventListener('pointerdown', down, true);
     const finish = (save, refocus) => {
       if (!bar._editing) return;
       bar._editing = false;
       bar._finishEdit = null;
+      bar.removeEventListener('pointerdown', down, true);
       if (save && ta.value !== (r.note || '')) { marks.setNote(id, ta.value); mirrorSoon(); }
       renderListingBar();
       if (refocus) bar.querySelector('[data-l=n]')?.focus(); // not when you clicked away
@@ -6863,7 +6886,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (e.key === 'Escape') finish(false, true);
       else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true, true); }
     });
-    ta.addEventListener('blur', () => finish(true, false));
+    // Clicked another of the bar's buttons: save now, but redraw after that click lands, or the
+    // redraw replaces the button under the pointer and the click is lost.
+    ta.addEventListener('blur', () => {
+      if (!pressed) return finish(true, false);
+      if (ta.value !== (r.note || '')) { marks.setNote(id, ta.value); mirrorSoon(); }
+      const later = () => { document.removeEventListener('pointerup', later, true); document.removeEventListener('pointercancel', later, true); setTimeout(() => finish(true, false), 0); };
+      document.addEventListener('pointerup', later, true);
+      document.addEventListener('pointercancel', later, true);
+    });
   }
   function onListingBar(e) {
     const bar = e.currentTarget, id = bar.dataset.id, r = bar._row;
@@ -7126,13 +7157,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       remindSaved();
       if (cacheKey && cacheKey === key) return;
       const hadState = cacheKey || busy;
-      runCtrl?.abort(); // stop crawling the old search
+      // Stop crawling the old search; Check all and Re-check aren't about this search, so they go on.
+      const job = runCtrl?.job;
+      if (!job) runCtrl?.abort();
       runId++;
       applySnap(null);
       showPartial(null);
       cache = null;
       cacheKey = null;
-      setBusy(false);
+      renderActive(); // the old search's filter chips (eg a Building one) go with it
+      if (!job) setBusy(false);
       ui.refresh.hidden = true;
       setExport(true);
       ui.fold?.(false); // Search is needed again: not folded away
