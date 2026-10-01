@@ -802,3 +802,35 @@ test('Re-check: a listing already gone keeps when it was first found gone', () =
   st.setGone(r.id, false); t += 1000; st.setGone(r.id, true);
   assert.equal(st.shortlist()[0].goneAt, t, 'seen again, then gone again: a new date');
 });
+
+test('restore with replace: the result is the backup\'s choices; what was seen here stays', () => {
+  const t = 1e12;
+  const st = core.marksStore(mem(), () => t);
+  st.observe([row('146500021', '$700 per week'), row('146500022'), row('146500023')]);
+  st.toggle('146500021', 's'); st.setNote('146500021', 'old note'); st.toggle('146500022', 'h'); st.toggleAgency('Some Agency');
+  const backup = { app: 'rea-enhancement', kind: 'marks', v: 1, m: { 146500023: { s: 1, st: t - 5, n: 'from backup' }, 146500021: { h: 1 } }, ag: { other: 'Other Agency' } };
+  const merged = core.marksStore(mem(), () => t); merged.importJson(st.exportJson()); merged.importJson(backup);
+  assert.equal(merged.counts().starred, 2, 'merge keeps what was here');
+  st.importJson(backup, { replace: true });
+  const out = st.exportData().m;
+  assert.deepEqual(Object.keys(out).sort(), ['146500021', '146500023']);
+  assert.equal(out['146500023'].n, 'from backup');
+  assert.equal(out['146500021'].s, undefined, 'unstarred: the backup had it hidden');
+  assert.equal(out['146500021'].n, undefined, 'its note went with it');
+  assert.equal(out['146500021'].h, 1);
+  assert.deepEqual(st.hiddenAgencies(), ['Other Agency'], 'hidden agencies are the backup\'s');
+  const seen = row('146500022'); st.decorate([seen]);
+  assert.equal(seen.hidden, false, 'unhidden: not in the backup');
+  assert.equal(+seen.firstSeen, t, 'but still known as seen here');
+});
+
+test('presets restore with replace: only the backup\'s', () => {
+  const p = core.presetStore(mem());
+  p.save('Mine', { priceMax: '900' });
+  p.importData([{ name: 'Theirs', cfg: { bedsMin: '2' } }]);
+  assert.deepEqual(p.list().map((x) => x.name), ['Theirs', 'Mine']);
+  p.importData([{ name: 'Theirs', cfg: { bedsMin: '2' } }], { replace: true });
+  assert.deepEqual(p.list().map((x) => x.name), ['Theirs']);
+  assert.equal(p.importData(null, { replace: true }), 0);
+  assert.deepEqual(p.list().map((x) => x.name), ['Theirs'], 'no presets in the file: none taken away');
+});

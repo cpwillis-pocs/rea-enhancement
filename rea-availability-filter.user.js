@@ -360,6 +360,8 @@
   const BULK_STAR_MAX = 50; // "shortlist all shown" cap, so one click can't flood the shortlist
   const PRUNE_EVERY = 20;
   const keep = (e) => e.s || e.h || e.n || e.as;
+  // Everything a backup restores on a listing: what a replacing restore clears first.
+  const CHOICE_FIELDS = ['s', 'st', 'd', 'h', 'hr', 'ht', 'hp', 'n', 'as', 'ast', 'dr', 'ck', 'qa', 'rt', 'o', 'rv', 'nd', 'li', 'ic'];
   // Inspection checklist answers: { label: 'y' | 'n' }, labels clipped, at most CHECK_MAX of them.
   const CHECK_MAX = 12;
   // The agent's answers to What to ask: question id ("w:water", "a:pets", "avail") -> y (fine) / n (a problem).
@@ -743,13 +745,19 @@
         return { app: 'rea-enhancement', kind: 'marks', v: 1, exported: new Date(now()).toISOString(), m: out, ag: load().ag || {}, sb: load().sb || {} };
       },
       exportJson() { return JSON.stringify(this.exportData(), null, 1); },
-      // Merges a backup: imported choices win per listing. Untrusted input: ids and
-      // fields are validated and strings clipped; URLs pass through safeUrl.
-      importJson(input) {
+      // Merges a backup: imported choices win per listing. `replace`: every choice here goes first
+      // (listings marked since the backup are unmarked), so the result is the backup's; what was
+      // seen (first seen, prices, dates) stays, as a backup doesn't carry it. Untrusted input: ids
+      // and fields are validated and strings clipped; URLs pass through safeUrl.
+      importJson(input, { replace = false } = {}) {
         let src = input;
         if (typeof input === 'string') { try { src = JSON.parse(input); } catch { throw new Error('Not a JSON file.'); } }
         if (src?.app !== 'rea-enhancement' || src?.kind !== 'marks' || typeof src.m !== 'object' || !src.m) throw new Error('Not an rea-enhancement backup.');
-        const { m } = fresh();
+        const d = fresh(), { m } = d;
+        if (replace) {
+          for (const e of Object.values(m)) for (const k of CHOICE_FIELDS) delete e[k];
+          for (const f of Object.keys(NAMED)) delete d[f];
+        }
         let n = 0;
         for (const [id, e] of Object.entries(src.m)) {
           if (!isListingId(id) || !e || typeof e !== 'object') continue;
@@ -1251,11 +1259,12 @@
       get: (name) => load().list.find((p) => p.name === name) || null,
       forSearch: (key) => load().list.find((p) => p.key === key) || null,
       exportData: () => load().list,
-      importData(list) {
+      importData(list, { replace = false } = {}) {
         if (!Array.isArray(list)) return 0;
         // Imported presets win (a restore is deliberate): they go first, replacing same-named
-        // ones and any existing preset bound to the same search.
+        // ones and any existing preset bound to the same search. `replace`: only the backup's.
         const d = load();
+        if (replace) d.list = [];
         const incoming = [];
         for (const p of list.slice(0, PRESETS_MAX)) {
           const name = clip(String(p?.name || '').trim(), 60);
@@ -4138,6 +4147,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-preset{font:12px system-ui,sans-serif;padding:6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg);width:100%}
   .rf-share-in,.rf-restore-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 16px;background:var(--rf-hover);border-bottom:1px solid var(--rf-line)}
   .rf-share-in .rf-btn,.rf-restore-in .rf-btn{flex:0 0 auto;padding:6px 11px;font-size:12px}
+  .rf-restore-in .rf-check{display:inline-flex;align-items:center;gap:6px;font-size:12px}
   .rf-share-msg{font-weight:600;margin-right:auto}
   .rf-plan{font:12px system-ui,sans-serif;padding:4px 6px;border:1px solid var(--rf-input);border-radius:6px;background:var(--rf-bg);color:var(--rf-fg)}
   .rf-planner{padding:8px 12px}
@@ -4438,7 +4448,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       <button role="tab" id="rf-tab-shortlist" data-view="shortlist" aria-selected="false" aria-controls="rf-list" tabindex="-1">Shortlist <span class="rf-count"></span></button>
     </div>
     <div class="rf-warnbar" role="alert" hidden><span class="rf-warn-msg"></span><button type="button" class="rf-btn sec rf-report" data-report hidden>Copy report</button><button type="button" class="rf-warn-x" aria-label="Dismiss warning">×</button></div>
-    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="later" hidden>Not now</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
+    <div class="rf-restore-in" hidden role="region" aria-label="Restore a backup"><span class="rf-restore-msg"></span>
+      <label class="rf-check"><input type="checkbox" data-restore-replace>Replace what's here</label><button class="rf-btn" data-restore="yes">Restore</button><button class="rf-btn sec" data-restore="later" hidden>Not now</button><button class="rf-btn sec" data-restore="no">Cancel</button></div>
     <div class="rf-share-in" hidden role="region" aria-label="Shared listings">
       <span class="rf-share-msg"></span>
       <button class="rf-btn" data-share="add">Add to my shortlist</button>
@@ -4984,12 +4995,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const restoreIn = panel.querySelector('.rf-restore-in');
   // Say what it will do first: a restore merges into what's here and can change settings.
   // `lead` opens the sentence ("Restore …", or where a safety copy came from).
+  // Replace what's here: the result is the backup's (listings marked since lose their marks).
+  const replaceBox = restoreIn.querySelector('[data-restore-replace]');
   ui.offerRestore = (data, lead = 'Restore') => {
     ui.restoreFromMirror = false;
     const sm = backupSummary(data, cfg);
     const parts = [plural(sm.listings, 'listing') + (sm.listings ? ` (${sm.shortlisted} shortlisted, ${sm.hidden} hidden)` : ''),
       cfg.remember && sm.searches ? plural(sm.searches, 'saved search', 'es') : '', sm.presets ? plural(sm.presets, 'preset') : ''].filter(Boolean);
-    restoreIn.querySelector('.rf-restore-msg').textContent = `${lead} ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? It merges with what's here; you can undo it.`;
+    const extra = Object.keys(marks.exportData().m).filter((id) => !(id in data.m)).length; // marked here, not in the backup
+    const say = () => {
+      const how = replaceBox.checked
+        ? `It replaces what's here${extra ? `: ${plural(extra, 'listing')} marked here and not in the backup ${extra === 1 ? 'loses its' : 'lose their'} marks` : ''}${data.presets ? ', presets are the backup\'s' : ''}${cfg.remember && isObj(data.snapshots) ? ', saved searches are the backup\'s' : ''}; you can undo it.`
+        : "It merges with what's here; you can undo it.";
+      restoreIn.querySelector('.rf-restore-msg').textContent = `${lead} ${parts.join(', ')}${sm.settings.length ? `, and replace your ${sm.settings.join(', ')}` : ''}? ${how}`;
+    };
+    replaceBox.checked = false;
+    replaceBox.onchange = say;
+    say();
     restoreIn.hidden = false;
     ui.pendingRestore = data;
     restoreIn.querySelector('[data-restore=no]').textContent = 'Cancel'; // a file's offer; the safety copy's relabels it
@@ -4999,7 +5021,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   restoreIn.addEventListener('click', (e) => {
     const b = e.target.closest('[data-restore]');
     if (!b) return;
-    const data = ui.pendingRestore, fromMirror = ui.restoreFromMirror;
+    const data = ui.pendingRestore, fromMirror = ui.restoreFromMirror, replace = replaceBox.checked;
     if (b.dataset.restore === 'later') { restoreIn.hidden = true; return setStatus('The safety copy is kept: it will be offered again next time.'); } // held, untouched
     restoreIn.hidden = true;
     ui.pendingRestore = null;
@@ -5019,20 +5041,21 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       fillPresets(); renderSaved(); refreshMarks();
     };
     try {
-      const n = marks.importJson(data);
+      const n = marks.importJson(data, { replace });
       // The copy's own offer answered: copies resume (refreshMarks below writes one). A file restored
       // while that offer waits leaves the copy alone, and it's offered again for what's still missing.
       if (fromMirror) mirrorHeld = false; else if (mirrorHeld) setTimeout(offerMirror, 0);
       const c = backupCfg(data.cfg);
       if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
       const localKeys = Object.keys(snaps.exportData());
+      if (replace && cfg.remember && isObj(data.snapshots)) snaps.clear(); // a backup made with Remember off has none: this browser's stay
       const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
       const pushedOut = localKeys.filter((key) => !snaps.exportData()[key]); // made room for the backup's
-      presets.importData(data.presets);
+      presets.importData(data.presets, { replace });
       fillPresets();
       renderSaved();
       refreshMarks();
-      offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.${pushedOut.length ? ` No longer remembered here: ${pushedOut.map(searchLabel).join(', ')}.` : ''}`, () => {
+      offerUndo(`${replace ? 'Replaced what was here: restored ' : 'Restored '}${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.${pushedOut.length ? ` No longer remembered here: ${pushedOut.map(searchLabel).join(', ')}.` : ''}`, () => {
         if (fromMirror) mirrorHeld = true; // the copy still holds what the undo took away: offer it again
         putBack();
         setStatus('Restore undone.');

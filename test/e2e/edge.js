@@ -2739,6 +2739,38 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 79. Restore with "Replace what's here": back to exactly the backup (listings starred since
+  // are unstarred), said first, and Undo puts it back.
+  await block('79', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
+    const star = async (id) => { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); await settle(page); };
+    await star(ids[0]);
+    await page.click('[data-view=shortlist]');
+    const [bk] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('[data-sl=backup]'))]);
+    const file = fs.readFileSync(await bk.path());
+    await page.click('[data-view=results]');
+    await star(ids[1]);
+    await page.click('[data-view=shortlist]');
+    await page.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: file });
+    await page.waitForSelector('.rf-restore-in:not([hidden])');
+    assert.match(await page.textContent('.rf-restore-msg'), /It merges with what's here/);
+    await page.check('[data-restore-replace]');
+    assert.match(await page.textContent('.rf-restore-msg'), /It replaces what's here: 1 listing marked here and not in the backup loses its marks, presets are the backup's/);
+    await page.click('[data-restore=yes]');
+    await waitStatus(page, /^Replaced what was here: restored 1 listing/);
+    let m = await marks(page);
+    assert.equal(m[ids[0]].s, 1);
+    assert.ok(!m[ids[1]]?.s, 'starred since the backup: not any more');
+    await page.click('.rf-undo-restore');
+    m = await marks(page);
+    assert.equal(m[ids[1]].s, 1, 'Undo puts it back');
+    console.log('restore replacing what is here: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
