@@ -6766,6 +6766,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // `resume`: after a search stopped partway, fetch from where it failed (pages already read
   // come from pageMemo, without a pause).
   async function run(force = false, { resume = false } = {}) {
+    // This search's results already shown (whole, not a part-read): Search applies the filters to
+    // them at once, however old they are; only Refresh reads every page again.
+    if (!force && cache && cacheKey === searchKey(location.href) && ui.partial.hidden) return showResults('Refresh fetches current listings.');
     if (!force && restoreSession()) return;
     // Refresh or Resume during a bot-check pause would drop what's read (and the Resume notice)
     // and then fail: keep them.

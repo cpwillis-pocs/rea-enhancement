@@ -2664,6 +2664,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 76. Search again on the same REA search applies the filters to what's read, however long ago
+  // (no page fetched); Refresh reads every page again.
+  await block('76', async () => {
+    const ctx = await browser.newContext();
+    const hits = [];
+    const page = await open(ctx, SEARCH, { route: serve(hits) });
+    await run(page);
+    await page.clock.runFor(11 * 60e3); // past the tab cache's 10 minutes
+    const before = hits.length;
+    await page.fill('#rf-from', '2026-10-10'); await page.dispatchEvent('#rf-from', 'change');
+    await page.click('#rf-run');
+    await waitStatus(page, /^\d+ of 18 listings match\..* Refresh fetches current listings\./);
+    assert.equal(hits.length, before, 'no page fetched');
+    await page.click('#rf-refresh');
+    await waitStatus(page, /^\d+ of 18 listings match\./);
+    assert.ok(hits.length > before, 'Refresh fetched');
+    console.log('search again re-filters, Refresh fetches: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
