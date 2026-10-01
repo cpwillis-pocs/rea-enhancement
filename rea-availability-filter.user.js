@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.36.3
+// @version      2.36.4
 // @description  Rental Toolkit for realestate.com.au: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement

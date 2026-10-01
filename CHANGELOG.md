@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.4
+
+- Fixed: on a Mac, picking a preset or a Bulk action with the keyboard needed Enter twice: once in the system's menu and again after it. Choosing in the system's menu is now the pick; Windows and Linux still wait for Enter while you arrow through.
+- Tampermonkey's dashboard describes the script as Rental Toolkit.
+- README: new screenshots (framed, with drawn listing photos), including REA's own filters on its search.
+
 ## 2.36.3
 
 - Fixed: on a listing page, the bar's checklist and details could fold shut just after you opened them (when the listing's own page finished loading), taking focus with them.
