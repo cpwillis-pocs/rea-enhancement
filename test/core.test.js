@@ -925,6 +925,29 @@ test('2.35.2 audit: an earlier session added is not a cancellation; remembered s
   assert.ok(bad.sizes()[0].lite, 'trimmed text stays marked');
 });
 
+test('2.35.5 audit: false matches from the 2.35.4 patterns', () => {
+  const am = (t) => core.amenitiesOf({ features: [], amenText: t.toLowerCase() });
+  assert.equal(am('No smoking, pets considered on application').pets, 'yes');
+  assert.equal(am('No parties, pets negotiable').pets, 'yes');
+  assert.equal(am('No gas heating').gas, null);
+  assert.equal(am('No heaters').heating, 'no');
+  assert.deepEqual(core.toRow(listing({ description: 'We don’t charge application fees.' }), false).watch, '', 'a curly n\'t still negates');
+  const now = new Date(2026, 8, 23);
+  for (const t of ['Available 3 bedroom home in Jan Juc', 'Available 2 bed unit in Mar St', 'Available: for inspection Sat 10 Oct', 'Open homes available Sat 10 Oct']) assert.equal(core.availFromText(t, now), null, t);
+  assert.equal(core.availFromText('Available in June', now)?.getMonth(), 5);
+  assert.equal(core.availFromText('Available 1 Nov-12 month lease', now)?.getDate(), 1);
+  for (const t of ['Level 3, 6 month lease', 'Sleeps 4, 6 month lease preferred']) assert.deepEqual(core.leaseTermOf(t), { min: 6, max: 6 }, t);
+  assert.equal(core.leaseTermOf('12 weeks rent free on lease'), null);
+  for (const [t, v] of [['$600 a month free', 600], ['$650 Furnished. Monthly cleaning', 650], ['$1300 every 2 weeks', 650], ['Open Sat 11:30 weekly', Infinity]]) assert.equal(core.parsePrice(t), v, t);
+  assert.equal(core.applyByOf('Applications close Fri 9/10 lease from 1/12/2026', now), '2026-10-09');
+  assert.equal(core.applyByOf('Applications close 5pm Tues 6/10', now), '2026-10-06');
+  const slots = (t) => core.parseFreeTimes(t)?.map((w) => `${[...w.days].sort().join('')}:${w.from}-${w.to}`).join(' ');
+  assert.equal(slots('Sat 9-11 or 2-4'), '6:540-660 6:840-960');
+  assert.equal(slots('Weekends or weekdays after 5pm'), '06:0-1440 12345:1020-1440');
+  assert.equal(slots('Saturday or Sunday after 2pm'), '06:840-1440');
+  assert.equal(core.toDate('2026-10-03').getDate(), 3, 'a bare date is that local day');
+});
+
 test('2.35.4 audit: periods, dates, leases, amenities and free times as listings write them', () => {
   const pp = { '$2,600 pcm (600 pw)': 600, '$2,800 per month including weekly cleaning': 646, '$650 pw ($2,817 pcm)': 650, '$2,600/mo': 600, '$2,600 per calender month': 600,
     '$1,300 p/f': 650, '$1,300 per 2 weeks': 650, '$95 per day': 665, '650 per week': 650, 'Rent: 650pw': 650, 'Contact agent': Infinity };
