@@ -3904,14 +3904,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     .rf-full .rf-list>:not(.rf-item){grid-column:1/-1}
   }
   .rf-head{padding:14px 16px;border-bottom:1px solid var(--rf-line);display:flex;align-items:center;gap:8px}
-  .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1;color:var(--rf-fg)}
+  .rf-head h2{margin:0;font-size:14px;font-weight:650;flex:1;color:var(--rf-fg);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} /* gives way to the buttons on a narrow phone */
   #rf-panel :focus-visible,#rf-launch:focus-visible{outline:2px solid var(--rf-accent-fg);outline-offset:2px}
   .rf-btn[aria-disabled=true]{opacity:.6;cursor:progress}
   .rf-n{font-weight:400;color:var(--rf-soft)}
   /* Undo and the hide reasons are buttons, as in the note by the launcher (they were bare links). */
   .rf-undo{margin-left:8px;border:1px solid var(--rf-line);border-radius:6px;background:var(--rf-bg);padding:2px 8px;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer}
   .rf-clear,.rf-tofilters{border:0;background:none;font:600 12px system-ui,sans-serif;color:var(--rf-accent-fg);cursor:pointer;padding:2px 6px}
-  .rf-keys,.rf-expand{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
+  .rf-keys,.rf-expand,.rf-themebtn{border:1px solid var(--rf-line);background:none;border-radius:999px;width:22px;height:22px;font:600 12px system-ui,sans-serif;
     color:var(--rf-muted);cursor:pointer;padding:0}
   .rf-help{padding:10px 16px;border-bottom:1px solid var(--rf-line);font-size:12px;background:var(--rf-hover)}
   .rf-help dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 0}
@@ -4222,7 +4222,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     .rf-controls .rf-sort{flex:1 1 100%} .rf-menu-list{left:0;right:auto}
     .rf-expand,.rf-resize{display:none} }
   /* Narrow but with a mouse: 32px. Touch screens keep the 44px set above (this used to win over it). */
-  @media (max-width:480px) and (pointer: fine){ .rf-x,.rf-keys,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} }
+  @media (max-width:480px) and (pointer: fine){ .rf-x,.rf-keys,.rf-themebtn,.rf-clear,.rf-acts button,.rf-acts-more summary{min-height:32px;min-width:32px} }
   @media (max-height:600px){ .rf-controls{max-height:38vh} } /* short windows / zoomed in: keep room for the list */
   .rf-btn{white-space:nowrap}
   `;
@@ -4323,6 +4323,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       <h2>Availability Filter</h2>
       <button type="button" class="rf-tofilters" hidden title="Back up to the filters (f)">↑ Filters</button>
       <button class="rf-clear" title="Reset all filters (your settings, places and times stay)">Reset</button>
+      <button class="rf-themebtn" title="Dark mode" aria-label="Dark mode">☾︎</button>
       <button class="rf-expand" title="Expand to near full screen (e)" aria-label="Expand drawer" aria-pressed="false">⤢</button>
       <button class="rf-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="rf-help">?</button>
       <button class="rf-x" title="Close (Esc)" aria-label="Close">&times;</button>
@@ -5375,6 +5376,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       helpBtn.setAttribute('aria-expanded', String(!help.hidden));
       if (!help.hidden) help.scrollIntoView({ block: 'nearest' });
     };
+    // Light / dark in one click: the opposite of what's showing (the system's until you pick), set
+    // through the Theme setting so it's saved, synced to other tabs and shown in Settings too.
+    const themeBtn = panel.querySelector('.rf-themebtn'), darkMq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const isDark = () => cfg.theme === 'dark' || (cfg.theme !== 'light' && !!darkMq?.matches);
+    ui.paintThemeBtn = () => { const d = isDark(), l = d ? 'Light mode' : 'Dark mode'; themeBtn.textContent = d ? '☀︎' : '☾︎'; themeBtn.title = l; themeBtn.setAttribute('aria-label', l); };
+    themeBtn.addEventListener('click', () => { const sel = panel.querySelector('#rf-theme'); sel.value = isDark() ? 'light' : 'dark'; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+    darkMq?.addEventListener?.('change', () => ui.paintThemeBtn());
+    ui.paintThemeBtn();
     // Expanded drawer, remembered per browser. Phones are already full screen, so the button is hidden there.
     const expandBtn = panel.querySelector('.rf-expand');
     const setWide = (on, save = true) => {
@@ -6241,6 +6250,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const applyTheme = () => {
     const root = document.documentElement;
     if (cfg.theme === 'light' || cfg.theme === 'dark') root.dataset.rfTheme = cfg.theme; else delete root.dataset.rfTheme;
+    ui?.paintThemeBtn?.();
   };
   const setWarn = (kind, msg) => {
     if (msg) warnings[kind] = msg; else delete warnings[kind];

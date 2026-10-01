@@ -2645,6 +2645,25 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 75. The header's light/dark button: the opposite of what's showing (the system's first), saved
+  // as the Theme setting, and its label says what a click does.
+  await block('75', async () => {
+    const ctx = await browser.newContext({ colorScheme: 'dark' });
+    const page = await open(ctx);
+    await page.click('#rf-launch');
+    assert.equal(await page.getAttribute('.rf-themebtn', 'aria-label'), 'Light mode', 'system dark: offers light');
+    await page.click('.rf-themebtn');
+    assert.equal(await page.getAttribute('html', 'data-rf-theme'), 'light');
+    assert.equal(await page.inputValue('#rf-theme'), 'light', 'shown in Settings');
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).theme, 'light', 'saved');
+    assert.equal(await page.getAttribute('.rf-themebtn', 'aria-label'), 'Dark mode');
+    await page.click('.rf-themebtn');
+    assert.equal(await page.getAttribute('html', 'data-rf-theme'), 'dark');
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'rf-themebtn', 'focus stays on it');
+    console.log('light/dark button: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
