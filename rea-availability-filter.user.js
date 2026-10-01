@@ -1472,14 +1472,18 @@
     return v;
   };
   const LISTING_SCAN_NODES = 20000;
+  // Page data as REA ships it (JSON nested in strings): a string is parsed only if it holds the id
+  // (digits are never escaped), and only the listing found is unpacked, not the whole page's data.
   function findListing(root, id) {
-    const queue = [root];
+    const queue = [[root, 0]];
+    const packed = (v, parses) => typeof v === 'string' && parses < UNPACK_PARSES && v.includes(id) && /^\s*[[{]/.test(v);
     for (let qi = 0; qi < queue.length && qi < LISTING_SCAN_NODES; qi++) {
-      const o = queue[qi];
+      let [o, parses] = queue[qi];
+      if (typeof o === 'string') { try { o = JSON.parse(o); parses++; } catch { continue; } }
       if (!o || typeof o !== 'object') continue;
       const own = listingId(str(o._links?.canonical?.href)) || (o.id != null ? String(o.id) : '');
-      if (own === id && (o.price || o.availableDate)) return o;
-      for (const v of Object.values(o)) if (v && typeof v === 'object') queue.push(v);
+      if (own === id && (o.price || o.availableDate)) return unpackJson(o, parses);
+      for (const v of Object.values(o)) if (v && typeof v === 'object' || packed(v, parses)) queue.push([v, parses]);
     }
     return null;
   }
@@ -1504,7 +1508,7 @@
     const m = html.match(EXCHANGE_RE);
     if (!m) return { status: 'unknown' };
     try {
-      const listing = findListing(unpackJson(JSON.parse(m[1])), id);
+      const listing = findListing(JSON.parse(m[1]), id);
       return listing ? { status: 'ok', listing } : { status: 'unknown' };
     } catch { return { status: 'unknown' }; }
   }
@@ -6903,7 +6907,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       ex = tag ? parseListingPage(tag.outerHTML, id).listing ?? null : null;
       if (ex) { rawListingSample = ex; return safeRow(ex, false); }
     }
-    const l = ex ? findListing(unpackJson(ex), id) : null;
+    const l = ex ? findListing(ex, id) : null;
     if (l) rawListingSample = l;
     return (l && safeRow(l, false)) || { id, url: location.origin + location.pathname, address: '', price: '', inspections: [], partial: true };
   }

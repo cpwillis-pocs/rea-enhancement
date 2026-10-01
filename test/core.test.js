@@ -518,6 +518,13 @@ test('findListing: finds the listing by id anywhere in unpacked page data', () =
   const data = { a: { b: [{ id: '146500002', price: { display: '$2' } }, { id: '146500001', price: { display: '$1' } }] } };
   assert.equal(core.findListing(data, '146500001').price.display, '$1');
   assert.equal(core.findListing(data, '146500009'), null);
+  // As REA ships it: JSON in strings, parsed only where the id is; the listing found comes unpacked.
+  const l = { id: '146500003', price: { display: '$3' }, media: JSON.stringify({ images: [1, 2] }) };
+  const packed = { q1: { data: JSON.stringify({ other: JSON.stringify({ id: '146500004', price: {} }), details: { listing: l } }) } };
+  const got = core.findListing(packed, '146500003');
+  assert.equal(got.price.display, '$3');
+  assert.deepEqual(got.media, { images: [1, 2] });
+  assert.equal(core.findListing(packed, '146500009'), null);
 });
 
 test('QA round 8: sort sanitised, yearless dates roll back, month checked, pm rents, ICS/URL, CSV dash, inspectOn tz', () => {
