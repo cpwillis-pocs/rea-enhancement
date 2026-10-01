@@ -106,8 +106,8 @@ test('shapeOf: structure kept, words out (descriptions, names, addresses, ids, u
 });
 
 test('shapeOf: phone numbers and emails in display strings are taken out', () => {
-  const out = core.shapeOf({ agent: { phoneNumber: { display: '0491 570 156' }, email: { display: 'jane.d@example.com' } }, price: { display: '$650 per week' } });
+  const out = core.shapeOf({ agent: { phoneNumber: { display: '0491 570 156' }, email: { display: 'jane@example.com' } }, price: { display: '$650 per week' } });
   assert.equal(out.agent.phoneNumber.display, 'string(12)');
-  assert.equal(out.agent.email.display, 'string(18)');
+  assert.equal(out.agent.email.display, 'string(16)');
   assert.equal(out.price.display, '$650 per week');
 });
