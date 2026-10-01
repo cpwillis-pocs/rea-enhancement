@@ -11,10 +11,25 @@ const dates = ['Available now', 'Available 12 Oct 2026', 'Available Mon 2nd Nov'
 const types = ['Apartment', 'Apartment', 'House', 'Unit', 'Townhouse', 'Studio'];
 const hue = (i) => [200, 28, 150, 265, 340, 90, 180, 10, 230, 50][i % 10];
 
-const photo = (i) => `<svg xmlns="http://www.w3.org/2000/svg" width="690" height="520" viewBox="0 0 690 520">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue(i)},45%,72%)"/><stop offset="1" stop-color="hsl(${hue(i) + 30},40%,48%)"/></linearGradient></defs>
-<rect width="690" height="520" fill="url(#g)"/><rect x="180" y="190" width="330" height="230" fill="rgba(255,255,255,.55)"/>
-<polygon points="150,200 345,90 540,200" fill="rgba(255,255,255,.7)"/><rect x="310" y="310" width="70" height="110" fill="rgba(0,0,0,.25)"/></svg>`;
+// A drawn street scene per listing (house, apartment block or terrace row), so screenshots look
+// like listings without using anyone's photos. Deterministic per index.
+const photo = (i) => {
+  const h = hue(i), kind = i % 3, wall = `hsl(${(h + 20) % 360},28%,${kind === 1 ? 88 : 82}%)`, trim = `hsl(${h},30%,34%)`;
+  const win = (x, y, w = 46, ht = 54) => `<rect x="${x}" y="${y}" width="${w}" height="${ht}" rx="3" fill="#cfe6f5" stroke="${trim}" stroke-width="5"/><line x1="${x + w / 2}" y1="${y}" x2="${x + w / 2}" y2="${y + ht}" stroke="${trim}" stroke-width="3"/>`;
+  const tree = (x, s) => `<rect x="${x - 6}" y="${430 - 70 * s}" width="12" height="${70 * s}" fill="#7a5a3a"/><circle cx="${x}" cy="${430 - 80 * s}" r="${46 * s}" fill="hsl(120,32%,${36 + (i % 4) * 4}%)"/><circle cx="${x - 26 * s}" cy="${430 - 58 * s}" r="${30 * s}" fill="hsl(118,30%,${33 + (i % 3) * 4}%)"/>`;
+  const house = `<polygon points="160,250 345,120 530,250" fill="${trim}"/><rect x="190" y="245" width="310" height="185" fill="${wall}"/>
+    ${win(220, 290)}${win(424, 290)}<rect x="318" y="320" width="54" height="110" rx="4" fill="hsl(${h},45%,40%)"/><circle cx="360" cy="378" r="4" fill="#f4d58d"/>`;
+  const block = `<rect x="200" y="96" width="290" height="334" fill="${wall}"/><rect x="200" y="88" width="290" height="16" fill="${trim}"/>
+    ${[0, 1, 2, 3].map((r) => [0, 1, 2].map((c) => win(222 + c * 92, 120 + r * 72, 64, 44)).join('') + `<rect x="210" y="${168 + r * 72}" width="270" height="7" fill="${trim}" opacity=".55"/>`).join('')}`;
+  const terrace = [0, 1, 2].map((k) => `<rect x="${150 + k * 130}" y="210" width="130" height="220" fill="hsl(${(h + k * 25) % 360},30%,${80 - k * 4}%)" stroke="${trim}" stroke-width="2"/>
+    <polygon points="${150 + k * 130},212 ${215 + k * 130},160 ${280 + k * 130},212" fill="${trim}"/>${win(165 + k * 130, 240, 40, 50)}${win(225 + k * 130, 240, 40, 50)}<rect x="${195 + k * 130}" y="335" width="40" height="95" rx="3" fill="hsl(${h},40%,38%)"/>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="690" height="520" viewBox="0 0 690 520">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${200 + (i % 4) * 6},70%,${70 + (i % 3) * 4}%)"/><stop offset="1" stop-color="hsl(${30 + (i % 5) * 8},80%,90%)"/></linearGradient></defs>
+<rect width="690" height="520" fill="url(#sky)"/><circle cx="${560 - (i % 4) * 90}" cy="${86 + (i % 3) * 14}" r="34" fill="#fff4c9" opacity=".9"/>
+<path d="M0 360 Q170 300 345 345 T690 330 V520 H0 Z" fill="hsl(130,24%,${62 + (i % 3) * 4}%)"/>
+${tree(80, 1)}${[house, block, terrace][kind]}${tree(612, 0.85)}
+<rect y="430" width="690" height="90" fill="hsl(105,34%,${44 + (i % 4) * 3}%)"/><rect x="${kind === 1 ? 300 : 318}" y="430" width="${kind === 1 ? 90 : 54}" height="90" fill="#d9d4c7"/></svg>`;
+};
 
 // extras: a few listings carry text-only facts (apply portal, lease terms, availability in the
 // description) and share buildings/addresses, for the tests of those features.
