@@ -3968,7 +3968,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-compact .rf-card img,.rf-compact .rf-card>div:first-child:empty{width:64px;height:48px}
   .rf-compact .rf-item{contain-intrinsic-size:auto 96px}
   .rf-compact .rf-acts{margin-left:82px}
-  @media (hover:hover){ .rf-compact .rf-item:not(:hover):not(:focus-within) .rf-acts{display:none} }
+  @media (hover:hover){ .rf-compact .rf-acts{position:absolute;right:6px;bottom:4px;margin:0;padding:2px 4px;border-radius:6px;background:var(--rf-bg);box-shadow:0 1px 4px rgba(0,0,0,.18)}
+    .rf-compact .rf-item:not(:hover):not(:focus-within) .rf-acts{visibility:hidden} } /* over the card, not below it: hovering a listing doesn't push the rest down */
   .rf-full.rf-compact .rf-list{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
   .rf-acts button{border:1px solid var(--rf-line);background:var(--rf-bg);color:var(--rf-fg);border-radius:6px;
     font:600 12px system-ui,sans-serif;padding:3px 7px;cursor:pointer}
