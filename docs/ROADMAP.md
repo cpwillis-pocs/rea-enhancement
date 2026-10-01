@@ -31,7 +31,7 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
   - Putting inspection times and coordinates into share links (they would get longer; the recipient can Re-check).
   - Rent-free / effective-rent parsing.
   - A price-drop report in Check all.
-- **Title:** the drawer is called **Availability Filter**.
+- **Title:** the drawer and launcher are called **Rental Toolkit** (2.36.1; it was Availability Filter, which undersold the shortlist and planning side). The Tampermonkey `@name` stays REA Availability Filter, so installs update in place.
 - **CI:** runs on pull requests and on demand only (no push, no schedule). Maintainers run `npm run ci` locally before releasing.
 
 ## Known limitations

@@ -4253,7 +4253,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const setLaunchCount = (n) => {
     ui.launchN = n;
     const star = marks.counts().starred;
-    ui.launch.textContent = `Availability Filter${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
+    ui.launch.textContent = `Rental Toolkit${n == null ? '' : ` (${n})`}${star ? ` · ★${star}` : ''}`;
     // Shortlisted listings that need something from you (a deadline, a follow-up, did you inspect?)
     // and your own notice date: named on the launcher, so they're seen without opening the drawer.
     // Counted from startup's last task on (ui.countTodo): building the shortlist's rows in page
@@ -4320,7 +4320,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const panelHtml = () => `
     <div class="rf-resize" role="separator" aria-orientation="vertical" aria-label="Drawer width: drag, or use the left and right arrow keys" tabindex="0" aria-valuemin="${DRAWER_MIN}" aria-valuemax="${DRAWER_MAX}"></div>
     <div class="rf-head">
-      <h2>Availability Filter</h2>
+      <h2>Rental Toolkit</h2>
       <button type="button" class="rf-tofilters" hidden title="Back up to the filters (f)">↑ Filters</button>
       <button class="rf-clear" title="Reset all filters (your settings, places and times stay)">Reset</button>
       <button class="rf-themebtn" title="Dark mode" aria-label="Dark mode">☾︎</button>
@@ -5213,13 +5213,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
     const launch = document.createElement('button');
     launch.id = 'rf-launch';
-    launch.textContent = 'Availability Filter';
+    launch.textContent = 'Rental Toolkit';
 
     const panel = document.createElement('div');
     panel.id = 'rf-panel';
     panel.hidden = true;
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Availability Filter');
+    panel.setAttribute('aria-label', 'Rental Toolkit');
     launch.setAttribute('aria-controls', 'rf-panel');
     launch.setAttribute('aria-expanded', 'false');
     panel.innerHTML = panelHtml();

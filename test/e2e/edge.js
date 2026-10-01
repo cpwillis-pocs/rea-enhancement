@@ -1363,7 +1363,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.$eval('#rf-panel', (p) => { p.scrollTop = p.scrollHeight; });
     const headTop = await page.$eval('.rf-head', (h) => h.getBoundingClientRect().top);
     assert.equal(Math.round(headTop), 0, 'header stays at the top');
-    assert.equal(await page.textContent('.rf-head h2'), 'Availability Filter');
+    assert.equal(await page.textContent('.rf-head h2'), 'Rental Toolkit');
     await done(page); await ctx.close();
 
     // 150 listings: Undo stays in view deep in the list, ↑ Filters goes back up, tabs keep your

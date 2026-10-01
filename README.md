@@ -18,7 +18,7 @@ Tampermonkey userscript for [realestate.com.au](https://www.realestate.com.au/) 
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Firefox, Edge).
 2. **[Install the script](https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js)** and confirm.
-3. Open any `realestate.com.au/rent/...` search and click **Availability Filter** (bottom right).
+3. Open any `realestate.com.au/rent/...` search and click **Rental Toolkit** (bottom right).
 
 Updates install automatically when `@version` goes up.
 
