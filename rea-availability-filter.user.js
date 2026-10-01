@@ -2865,6 +2865,95 @@
   };
   const windowEnd = (days, now = new Date()) => { const w = windowEndDate(days, now); return w ? ymdLocal(w) : ''; };
 
+  // REA's own search filters, read from its search URL and written back (docs/REA-SEARCH-URLS.md).
+  // Undocumented: anything not recognised is kept as it was, never dropped or guessed at.
+  const steps = (from, to, by) => Array.from({ length: (to - from) / by + 1 }, (_, i) => from + i * by);
+  const REA_RENT_STEPS = [...steps(50, 750, 25), ...steps(800, 1000, 50), ...steps(1100, 2000, 100), ...steps(2500, 5000, 500)];
+  const REA_TYPES = { house: 'House', townhouse: 'Townhouse', 'unit+apartment': 'Apartment & Unit', villa: 'Villa' };
+  const TYPE_TO_REA = { House: 'house', Townhouse: 'townhouse', Villa: 'villa', Apartment: 'unit+apartment', Unit: 'unit+apartment' }; // REA's listing type names
+  const REA_MISC = { 'pets-allowed': 'pets considered', furnished: 'furnished', 'ex-deposit-taken': 'no deposit taken' };
+  const REA_TRACKING = ['source', 'sourcePage', 'sourceElement'];
+  const REA_MAX_COUNT = 6, REA_BEFORE_DAYS = 42; // REA's dropdowns: 6+ rooms, about six weeks of dates
+  const REA_SEG = /^(?:property-(.+?)-)?(?:with-(studio|\d+)(?:-bedrooms?)?-)?(?:between-(any|\d+)-(any|\d+)-)?in-(.+)$/;
+  const reaFiltersOf = (href) => {
+    let u, seg;
+    try { u = new URL(href); seg = decodeURIComponent(u.pathname.split('/')[2] || ''); } catch { return null; }
+    const m = /^\/rent\//.test(u.pathname) && seg.match(REA_SEG);
+    if (!m) return null;
+    const q = u.searchParams, n = (k) => (/^\d+$/.test(q.get(k) || '') ? +q.get(k) : null);
+    const list = (k) => (q.get(k) || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const types = m[1] ? m[1].split('-') : [];
+    const end = (v) => (v && v !== 'any' ? +v : null);
+    return {
+      places: m[5], typesRaw: m[1] || '', types: types.every((t) => REA_TYPES[t]) ? types : null, // null: a type this doesn't know
+      bedsMin: m[2] == null ? null : m[2] === 'studio' ? 0 : +m[2], bedsMax: n('maxBeds'),
+      priceMin: end(m[3]), priceMax: end(m[4]), baths: n('numBaths'), cars: n('numParkingSpaces'),
+      before: /^\d{4}-\d{2}-\d{2}$/.test(q.get('availableBefore') || '') ? q.get('availableBefore') : '',
+      surrounding: q.get('includeSurrounding') !== 'false',
+      misc: list('misc'), features: list('checkedFeatures'), keywords: list('keywords').filter((k) => !list('checkedFeatures').includes(k)),
+    };
+  };
+  // The toolkit's types as REA's slugs; null when one has no REA equivalent (REA's are then kept).
+  const reaTypeSlugs = (type) => { const t = typeList(type).map((x) => TYPE_TO_REA[x]); return t.every(Boolean) ? [...new Set(t)] : null; };
+  // The last day the toolkit's "to" or "within" lets in (the earlier of the two), or ''.
+  const toolkitEnd = (cfg, now) => [cfg.to, windowEnd(cfg.withinDays, now)].filter(Boolean).sort()[0] || '';
+  // What REA's search narrows by, each with whether it hides listings your own filters would keep
+  // (REA has dropped them before the toolkit sees them).
+  const reaChips = (f, cfg = {}, now = new Date()) => {
+    if (!f) return [];
+    const c = { ...DEFAULT_CFG, ...cfg }, mine = (k) => num(c[k]) || 0, out = [];
+    const add = (key, label, narrower) => out.push({ key, label, narrower: !!narrower });
+    if (f.typesRaw) {
+      const slugs = reaTypeSlugs(c.type);
+      add('type', f.types ? f.types.map((t) => REA_TYPES[t]).join(', ') : f.typesRaw.replace(/-/g, ', '), !f.types || !slugs || !slugs.length || slugs.some((t) => !f.types.includes(t)));
+    }
+    if (f.priceMin != null || f.priceMax != null) {
+      const $ = (v) => money(v);
+      add('price', f.priceMin != null && f.priceMax != null ? `${$(f.priceMin)}–${$(f.priceMax)}` : f.priceMin != null ? `${$(f.priceMin)}+` : `up to ${$(f.priceMax)}`,
+        (f.priceMin || 0) > mine('priceMin') || (f.priceMax != null && (!mine('priceMax') || f.priceMax < mine('priceMax'))));
+    }
+    if (f.bedsMin != null || f.bedsMax != null) {
+      const b = (v) => (v === 0 ? 'studio' : String(v));
+      add('beds', f.bedsMin != null && f.bedsMax != null ? `${b(f.bedsMin)}–${b(f.bedsMax)} beds` : f.bedsMin != null ? `${b(f.bedsMin)}+ beds` : `up to ${b(f.bedsMax)} beds`,
+        (f.bedsMin || 0) > mine('bedsMin') || f.bedsMax != null);
+    }
+    if (f.baths) add('baths', `${f.baths}+ bath`, f.baths > mine('bathsMin'));
+    if (f.cars) add('cars', `${f.cars}+ car`, f.cars > mine('carsMin'));
+    if (f.before) { const end = toolkitEnd(c, now); add('before', `available before ${shortDate(f.before)}`, !end || end >= f.before); }
+    if (!f.surrounding) add('surrounding', 'no surrounding suburbs', !c.exactOnly);
+    for (const k of f.misc) add(`misc:${k}`, REA_MISC[k] || k, !(k === 'ex-deposit-taken' && c.hideTaken));
+    for (const k of [...f.features, ...f.keywords]) add(`kw:${k}`, k, true); // REA's matching isn't the toolkit's: always its own narrowing
+    return out;
+  };
+  // REA's URL for this search with the toolkit's filters that REA can apply itself: rent (widened
+  // to REA's steps, so nothing the toolkit keeps is lost), beds, baths, cars, type, available-to,
+  // surrounding suburbs and taken listings. The rest of REA's own filters (amenities, keywords,
+  // sort) are kept. Page 1, REA's tracking left off. null when the URL isn't a search this reads.
+  const reaUrlFor = (href, cfg, now = new Date()) => {
+    const f = reaFiltersOf(href);
+    if (!f) return null;
+    const c = { ...DEFAULT_CFG, ...cfg }, u = new URL(href);
+    const lo = num(c.priceMin), hi = num(c.priceMax);
+    const pMin = lo > 0 ? [...REA_RENT_STEPS].reverse().find((v) => v <= lo) ?? null : null;
+    const pMax = hi > 0 ? REA_RENT_STEPS.find((v) => v >= hi) ?? null : null;
+    const slugs = reaTypeSlugs(c.type), beds = Math.min(num(c.bedsMin) || 0, REA_MAX_COUNT);
+    const types = slugs === null ? f.typesRaw : slugs.join('-');
+    u.pathname = `/rent/${[types && `property-${types}`, beds && `with-${beds}-bedrooms`, (pMin || pMax) && `between-${pMin ?? 'any'}-${pMax ?? 'any'}`, `in-${f.places}`].filter(Boolean).join('-')}/list-1`;
+    const q = u.searchParams;
+    for (const k of [...REA_TRACKING, 'maxBeds', 'numBaths', 'numParkingSpaces', 'availableBefore', 'includeSurrounding']) q.delete(k);
+    for (const [k, key] of [['numBaths', 'bathsMin'], ['numParkingSpaces', 'carsMin']]) { const v = Math.min(num(c[key]) || 0, REA_MAX_COUNT); if (v) q.set(k, String(v)); }
+    // REA's "before" a day after your last day (whether REA counts the day itself isn't known), and
+    // only within the dates its own menu offers.
+    const end = toolkitEnd(c, now);
+    if (end) { const d = ymdStart(end); d.setDate(d.getDate() + 1); if ((d - now) / DAY_MS <= REA_BEFORE_DAYS) q.set('availableBefore', ymdLocal(d)); }
+    if (c.exactOnly) q.set('includeSurrounding', 'false');
+    const misc = f.misc.filter((k) => k !== 'ex-deposit-taken').concat(c.hideTaken ? ['ex-deposit-taken'] : []);
+    if (misc.length) q.set('misc', misc.join(',')); else q.delete('misc');
+    return u.href;
+  };
+  // Same REA search either way (REA's tracking fields aside).
+  const sameReaSearch = (a, b) => { const k = (h) => { const u = new URL(h); for (const t of REA_TRACKING) u.searchParams.delete(t); u.searchParams.sort(); return pageUrl(u.href, 1); }; try { return k(a) === k(b); } catch { return false; } };
+
   const startOfDay = (d = new Date()) => { const t = new Date(d); t.setHours(0, 0, 0, 0); return t; };
   const isFresh = (r) => !!(r.isNew || r.sinceLast); // new: REA-dated recently, or since the last visit
   const priceDir = (r) => (r.priceDelta < 0 ? 'down' : 'up');
@@ -3767,6 +3856,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   if (typeof window === 'undefined') {
     module.exports = {
+      reaFiltersOf, reaChips, reaUrlFor, sameReaSearch,
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
       fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, agencyDrops, negotiateFacts, inOrder, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
@@ -3964,6 +4054,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-price{font-weight:650;margin-top:1px}
   .rf-addr{margin-top:1px}
   .rf-meta{color:var(--rf-soft);font-size:12px;margin-top:3px}
+  .rf-rea{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:0 0 8px;font-size:12px} .rf-rea .rf-label{margin-right:2px} .rf-rea-chips{display:contents}
+  .rf-rea-chip{padding:1px 7px;border-radius:999px;border:1px solid var(--rf-line);color:var(--rf-fg)} .rf-rea-chip.rf-rea-narrow{border-color:var(--rf-up);color:var(--rf-up)}
+  .rf-rea-apply{font-size:12px;padding:3px 10px}
   .rf-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--rf-tag);
     color:var(--rf-muted);font-size:10px;font-weight:600;text-transform:uppercase;vertical-align:1px}
   .rf-tabs{display:flex;gap:4px;padding:6px 16px 0;border-bottom:1px solid var(--rf-line)}
@@ -4369,6 +4462,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     </div>
     <div class="rf-controls">
       <button type="button" class="rf-btn sec rf-unfold" aria-expanded="false" hidden></button>
+      <div class="rf-rea" hidden><span class="rf-label">On REA's search</span><span class="rf-rea-chips"></span>
+        <button type="button" class="rf-btn sec rf-rea-apply" hidden title="Opens REA's search with your rent, rooms, type, dates, surrounding-suburb and taken filters, so REA has fewer pages to read">Use my filters on REA</button></div>
       <div class="rf-dates">
         <label>Available from<input type="date" id="rf-from"></label>
         <label>Available to<input type="date" id="rf-to"></label>
@@ -5252,7 +5347,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       market: panel.querySelector('.rf-market-btn'),
       map: panel.querySelector('.rf-map-btn'),
       list: panel.querySelector('.rf-list'),
+      reaBox: panel.querySelector('.rf-rea'),
+      reaApply: panel.querySelector('.rf-rea-apply'),
     };
+    ui.reaApply.addEventListener('click', () => { if (!ui.reaTo) return; setStatus("Opening REA's search with your filters…"); location.assign(ui.reaTo); });
 
     // Inputs map 1:1 to cfg keys via their id (rf-<key>); exactOnly keeps its legacy id.
     const fields = Object.keys(DEFAULT_CFG).map((k) => [k, panel.querySelector(`#rf-${k === 'exactOnly' ? 'exact' : k}`)]);
@@ -5469,6 +5567,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       }
       const wasRemember = cfg.remember;
       cfg = next;
+      paintRea();
       panel.classList.toggle('rf-compact', !!cfg.compact);
       applyTheme();
       sortDir.setAttribute('aria-pressed', String(!!cfg.sortDesc));
@@ -6303,6 +6402,19 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (!top.length) return;
     setEmpty(`Nothing matches those filters. Try dropping one:<br>${top.map(({ c, i }) =>
       `<button type="button" class="rf-chip" data-drop-chip="${i}">${esc(c.label)} <span>+${c.removes}</span></button>`).join(' ')}`);
+  }
+
+  // REA's own filters for this search (docs/REA-SEARCH-URLS.md): marked where REA leaves out
+  // listings your filters here would keep, and a way to put yours on REA's search instead.
+  function paintRea() {
+    const f = reaFiltersOf(location.href), chips = reaChips(f, cfg);
+    const to = f ? reaUrlFor(location.href, cfg) : null;
+    ui.reaTo = to && !sameReaSearch(to, location.href) ? to : null;
+    ui.reaApply.hidden = !ui.reaTo;
+    ui.reaBox.hidden = !chips.length && !ui.reaTo;
+    setHtml(ui.reaBox.querySelector('.rf-rea-chips'), chips.length ? chips.map((c) => (c.narrower
+      ? `<span class="rf-rea-chip rf-rea-narrow" title="REA leaves out listings your filters here would keep">${esc(c.label)}<span class="rf-sr"> (leaves out listings your filters keep)</span></span>`
+      : `<span class="rf-rea-chip">${esc(c.label)}</span>`)).join('') : '<span class="rf-rea-chip">none</span>');
   }
 
   // Chips for active filters with how many listings each removes; click to drop that filter.
@@ -7409,6 +7521,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       const active = isSearchPage(location.href);
       if (active && mirrorHeld && !ui.pendingRestore && typeof indexedDB !== 'undefined') offerMirror(); // started on a listing page: ask here
       ui.launch.hidden = !active && !ui.pendingShare; // an unanswered share offer stays reachable
+      paintRea(); // another search, or REA's filters changed
       if (!active && !ui.pendingShare) ui.setOpen(false);
       const tip = document.getElementById('rf-remind');
       if (tip) tip.hidden = !active; // the reminder is about searches: back when one is
@@ -7518,7 +7631,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function start() {
     step('build', build);
     if (ui?.ready) { // only wire the rest if build() completed
-      step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); setExport(!cache); }); // nothing searched: Bulk, Market, Map and exports hidden
+      step('launch', () => { paintRea(); ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); setExport(!cache); }); // nothing searched: Bulk, Market, Map and exports hidden
       // The rest in a second task, so page load isn't one long (50 ms+) task: reading page 1's
       // listings and your marks is most of it. Order within is unchanged.
       setTimeout(() => {

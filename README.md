@@ -92,6 +92,7 @@ Updates install automatically when `@version` goes up.
 - **Inspections I can make**: keep only listings with an open home on a weekend, after 5pm, or at **your own times** (type days and hours, eg `Sat 9-13, Sun, weekdays 17:30-`; read in the listing's time zone).
 - **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, Shift+1–5 your rating, o or Enter open, t Results/Shortlist, m market view, v map, f filters, d compact, e expand, / keywords, ? help, Esc close; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
+- **On REA's search**: the filters set on REA itself (type, rent, rooms, dates, surrounding suburbs, pets, features…) show above the toolkit's, in orange where they leave out listings your filters here would keep. **Use my filters on REA** opens REA's search with your rent, rooms, type, available-to, surrounding-suburb and taken filters (rent widened to REA's steps), so REA has fewer pages to read and big searches aren't cut off.
 
 **On REA's own result cards**
 - Badges: availability, next inspection, $/bed, distance, pets, shortlisted, new, price changed.

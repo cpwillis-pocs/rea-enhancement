@@ -1625,3 +1625,51 @@ test('nextSteps: approved somewhere and notice not given: your notice date and w
   assert.equal(core.nextSteps([{ appStatus: 'approved' }], { ...cfg, leaseEnd: '2026-01-31' }, now), null, 'a lease already over: no notice to give');
   assert.ok(core.nextSteps([{ appStatus: 'approved', gone: true }], cfg, now), 'the approved listing taken down by REA is still yours');
 });
+
+// URLs as REA's own Filters dialog wrote them (docs/REA-SEARCH-URLS.md), tracking fields included.
+const REA = 'https://www.realestate.com.au/rent/';
+test('reaFiltersOf: REA search URLs read as filters; unknown types kept raw; not a search is null', () => {
+  const f = core.reaFiltersOf(`${REA}property-unit+apartment-with-2-bedrooms-between-500-900-in-bondi,+nsw+2026/list-1?numParkingSpaces=1&numBaths=1&maxBeds=3&availableBefore=2026-10-31&misc=pets-allowed&keywords=dishwasher%2Cair+conditioning%2Cbalcony&checkedFeatures=dishwasher%2Cair+conditioning&source=refinement`);
+  assert.deepEqual({ ...f }, {
+    places: 'bondi,+nsw+2026', typesRaw: 'unit+apartment', types: ['unit+apartment'], bedsMin: 2, bedsMax: 3, priceMin: 500, priceMax: 900, baths: 1, cars: 1,
+    before: '2026-10-31', surrounding: true, misc: ['pets-allowed'], features: ['dishwasher', 'air conditioning'], keywords: ['balcony'],
+  });
+  const g = core.reaFiltersOf(`${REA}property-house-townhouse-villa-with-studio-in-bondi,+nsw+2026;+manly,+nsw+2095/list-3?includeSurrounding=false&misc=ex-deposit-taken%2Cfurnished`);
+  assert.deepEqual([g.places, g.types, g.bedsMin, g.priceMin, g.surrounding, g.misc], ['bondi,+nsw+2026;+manly,+nsw+2095', ['house', 'townhouse', 'villa'], 0, null, false, ['ex-deposit-taken', 'furnished']]);
+  assert.deepEqual([core.reaFiltersOf(`${REA}between-any-900-in-bondi,+nsw+2026/list-1`).priceMax, core.reaFiltersOf(`${REA}between-500-any-in-bondi,+nsw+2026/list-1`).priceMin], [900, 500]);
+  const odd = core.reaFiltersOf(`${REA}property-duplex+semi-detached-in-bondi,+nsw+2026/list-1`);
+  assert.equal(odd.types, null, 'a type this does not know');
+  assert.equal(odd.typesRaw, 'duplex+semi-detached');
+  assert.equal(core.reaFiltersOf('https://www.realestate.com.au/buy/in-bondi/list-1'), null);
+  assert.equal(core.reaFiltersOf('not a url'), null);
+});
+
+test('reaChips: what REA narrows by, marked where it hides listings your filters keep', () => {
+  const f = core.reaFiltersOf(`${REA}property-unit+apartment-with-2-bedrooms-between-500-900-in-bondi,+nsw+2026/list-1?numBaths=1&availableBefore=2026-10-31&includeSurrounding=false&misc=ex-deposit-taken`);
+  const now = new Date(2026, 9, 1);
+  const chips = (cfg) => core.reaChips(f, cfg, now).map((c) => `${c.label}${c.narrower ? '*' : ''}`).join(' | ');
+  assert.equal(chips({}), 'Apartment & Unit* | $500–$900* | 2+ beds* | 1+ bath* | available before 31 Oct* | no surrounding suburbs* | no deposit taken*');
+  assert.equal(chips({ type: 'Apartment,Unit', priceMin: '500', priceMax: '900', bedsMin: '2', bathsMin: '1', to: '2026-10-20', exactOnly: true, hideTaken: true }),
+    'Apartment & Unit | $500–$900 | 2+ beds | 1+ bath | available before 31 Oct | no surrounding suburbs | no deposit taken', 'REA no narrower than yours');
+  assert.equal(chips({ priceMax: '1000', type: 'House' }).split(' | ')[1], '$500–$900*', 'REA stops below your max');
+  assert.deepEqual(core.reaChips(null), []);
+});
+
+test('reaUrlFor: your filters on REA (rent widened to its steps), the rest of REA kept, page 1, no tracking', () => {
+  const now = new Date(2026, 9, 1, 10);
+  const base = `${REA}property-unit+apartment-with-2-bedrooms-between-500-900-in-bondi,+nsw+2026;+manly,+nsw+2095/list-4?maxBeds=3&numBaths=2&misc=pets-allowed&keywords=pool&checkedFeatures=pool&activeSort=price-asc&source=refinement&sourcePage=x`;
+  const u = new URL(core.reaUrlFor(base, { priceMin: '520', priceMax: '1050', bedsMin: '3', type: 'House,Apartment', carsMin: '1', to: '2026-10-20', exactOnly: true, hideTaken: true }, now));
+  assert.equal(decodeURIComponent(u.pathname), '/rent/property-house-unit+apartment-with-3-bedrooms-between-500-1100-in-bondi,+nsw+2026;+manly,+nsw+2095/list-1');
+  assert.deepEqual(Object.fromEntries(u.searchParams), { misc: 'pets-allowed,ex-deposit-taken', keywords: 'pool', checkedFeatures: 'pool', activeSort: 'price-asc', numParkingSpaces: '1', availableBefore: '2026-10-21', includeSurrounding: 'false' });
+  // Nothing set here: REA's own rent, rooms and types go (it shows everything), its amenities stay.
+  const all = new URL(core.reaUrlFor(base, {}, now));
+  assert.equal(decodeURIComponent(all.pathname), '/rent/in-bondi,+nsw+2026;+manly,+nsw+2095/list-1');
+  assert.deepEqual(Object.fromEntries(all.searchParams), { misc: 'pets-allowed', keywords: 'pool', checkedFeatures: 'pool', activeSort: 'price-asc' });
+  // A type REA has no slug for keeps REA's types; dates past REA's menu and huge rents are left off.
+  const kept = new URL(core.reaUrlFor(base, { type: 'Duplex/semi-detached', priceMax: '9000', to: '2027-03-01' }, now));
+  assert.match(kept.pathname, /^\/rent\/property-unit\+apartment-in-/);
+  assert.equal(kept.searchParams.get('availableBefore'), null);
+  assert.equal(core.reaUrlFor('https://www.realestate.com.au/buy/in-bondi/list-1', {}), null);
+  assert.ok(core.sameReaSearch(`${REA}in-bondi,+nsw+2026/list-3?b=2&a=1&source=x`, `${REA}in-bondi,+nsw+2026/list-1?a=1&b=2`));
+  assert.ok(!core.sameReaSearch(`${REA}in-bondi,+nsw+2026/list-1?maxBeds=3`, `${REA}in-bondi,+nsw+2026/list-1`));
+});

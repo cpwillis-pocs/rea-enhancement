@@ -2684,6 +2684,29 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 77. REA's own filters in its search URL show as "On REA's search", marked where they leave
+  // out listings your filters keep; "Use my filters on REA" opens REA's search with yours.
+  await block('77', async () => {
+    const ctx = await browser.newContext();
+    const url = `${ORIGIN}/rent/property-unit+apartment-with-2-bedrooms-between-500-900-in-bondi,+nsw+2026/list-1?maxBeds=3&misc=pets-allowed&source=refinement`;
+    const page = await open(ctx, url);
+    await page.click('#rf-launch');
+    assert.equal(await page.isVisible('.rf-rea'), true);
+    assert.deepEqual(await page.$$eval('.rf-rea-chip', (e) => e.map((x) => x.textContent)), [
+      'Apartment & Unit (leaves out listings your filters keep)', '$500–$900 (leaves out listings your filters keep)',
+      '2–3 beds (leaves out listings your filters keep)', 'pets considered (leaves out listings your filters keep)']);
+    await page.click('#rf-more summary');
+    await page.fill('#rf-priceMax', '1050'); await page.dispatchEvent('#rf-priceMax', 'change');
+    await page.fill('#rf-bedsMin', '2'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    assert.equal(await page.isVisible('.rf-rea-apply'), true, 'yours differ from REA\'s: offered');
+    await Promise.all([page.waitForURL(/with-2-bedrooms-between-any-1100-in-bondi/), page.click('.rf-rea-apply')]);
+    const to = new URL(page.url());
+    assert.equal(decodeURIComponent(to.pathname), '/rent/with-2-bedrooms-between-any-1100-in-bondi,+nsw+2026/list-1', 'rent widened to REA\'s steps, REA\'s type and max beds gone');
+    assert.deepEqual(Object.fromEntries(to.searchParams), { misc: 'pets-allowed' }, 'REA\'s own amenity kept, tracking dropped');
+    console.log('REA filters read and applied: ok');
+    await page.close(); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
