@@ -68,7 +68,11 @@ const html = (n) => {
   await page.waitForSelector('#rf-launch:not([hidden])', { timeout: 5000 }); // built after REA's pushState returns
   assert.equal(await page.$eval('#rf-launch', (b) => b.hidden), false, 'launcher shown after SPA nav');
 
-  hits.length = 0; // woken on /rent/, it may fetch that page for badges before the reload below: counts start here
+  // Woken on /rent/ with no page data of its own (it loaded on the home page), it reads the page for badges.
+  await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached', timeout: 5000 });
+  for (let i = 0; i < 100 && !hits.includes(1); i++) await page.waitForTimeout(50);
+  assert.deepEqual(hits, [1], 'woken: page 1 read for the badges');
+  hits.length = 0; // counts start with the reload below
   await page.goto(SEARCH);
   await page.addScriptTag({ content: SCRIPT });
 
