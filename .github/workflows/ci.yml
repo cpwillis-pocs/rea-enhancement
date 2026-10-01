@@ -129,7 +129,8 @@ jobs:
           version: ${{ env.PLAYWRIGHT_VERSION }}
       - name: axe-core (a11y only)
         if: matrix.file == 'a11y'
-        run: npm install --no-save --no-audit --no-fund "axe-core@$AXE_VERSION"
+        # With Playwright in the same install: a --no-save install on its own prunes the other.
+        run: npm install --no-save --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION" "axe-core@$AXE_VERSION"
       - name: e2e ${{ matrix.file }} (x${{ inputs.repeat || '1' }})
         run: |
           n=${{ inputs.repeat || '1' }}
