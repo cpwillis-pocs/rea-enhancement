@@ -612,6 +612,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await presetSave(page, 'c:bind', 'Bondi pets');
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
+    await settle(page); // a visit of its own: navigations in one task are one (they're merged)
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
     await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 8000 });
     assert.match(await page.textContent('.rf-preset option'), /Preset: Bondi pets/);
@@ -669,6 +670,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await presetSave(page, 'c:bind', 'Bondi pets');
     await page.click('.rf-clear');
     await page.evaluate(() => history.pushState({}, '', '/rent/in-manly,+nsw+2095/list-1'));
+    await settle(page); // a visit of its own: navigations in one task are one (they're merged)
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
     await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 8000 });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
