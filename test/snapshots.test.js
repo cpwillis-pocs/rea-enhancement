@@ -91,8 +91,21 @@ test('snapshotStore: storage full gives up gone lists first, then older searches
   assert.ok(st.get(other) ? st.get(KEY).gone.length === 0 : true, 'its gone list went first; the older search only if that wasn\'t enough');
   quota = 10; // nothing fits now
   t += 2 * H;
+  const before = m.get('rea-avail-filter/snapshots/v1');
   const out = st.save(KEY, [row('146500004')], false);
   assert.equal(out.quota, true, 'reported as storage, not the search limit');
+  assert.equal(out.refused, true, 'not kept');
+  assert.equal(m.get('rea-avail-filter/snapshots/v1'), before, 'and nothing else given up for it: what was stored stays');
+});
+
+test('snapshotStore: a restored row is re-typed field by field; an impossible inspection time is dropped', () => {
+  const st = core.snapshotStore(mem(), () => Date.now());
+  const n = st.importData({ [KEY]: { at: Date.now(), rows: [{ id: '146500095', url: 'https://www.realestate.com.au/property-x-146500095', address: 12, available: 3, bond: 4, beds: 2, floorplan: 'yes',
+    inspections: [{ at: 1e16, label: 'Sat 10am' }] }] } });
+  assert.equal(n, 1);
+  const r = st.get(KEY).rows[0];
+  assert.deepEqual([r.address, r.available, r.bond, r.beds, r.floorplan], ['', '', '', 2, null]);
+  assert.equal(r.inspections[0]?.at ?? null, null, 'a time no Date can hold');
 });
 
 test('snapshotStore: amenity states survive the round trip even when text is clipped', () => {

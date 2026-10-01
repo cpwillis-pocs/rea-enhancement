@@ -55,7 +55,7 @@
   const COMPARE_MAX = 6;
   const PAGE_MEMO_MAX = 12; // raw REA page results are large (~0.3-1MB parsed); keep a few
   const ROWS_PREFIX = `${TOOL_PREFIX}rows/`;
-  const ROWS_VERSION = 14; // bump when toRow() shape changes
+  const ROWS_VERSION = 15; // bump when toRow() shape changes
   // Row fields derived at runtime (marks, scores, distances, medians): not worth caching.
   const ROW_RUNTIME = ['_worst', '_worstFor', 'rating', 'fit', 'moveExtra', 'rentNow', 'starred', 'hidden', 'relisted', 'priceHistory', 'note', 'appStatus', 'appAt', 'agencyHidden', 'suburbHidden', 'firstSeen',
     'openedAt', 'reviewedAt', 'hideReason', 'cheaperBy', 'resurfaced', 'checks', 'isNew', 'prevPrice', 'priceDelta', 'prevAvail', 'availDir', 'featChange', 'sinceLast', 'score', 'scoreWhy',
@@ -238,8 +238,10 @@
   const perBed = (priceNum, beds) => (isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +beds || 0)) : Infinity);
   // Past sessions drop out (stored summaries age), so later ones aren't crowded out by the cap.
   // `max`: the shortlist copy keeps INSPECT_KEEP; remembered searches and comparisons keep more.
+  const MAX_TIME = 8.64e15; // the furthest a Date can hold
+  const okTime = (v) => (typeof v === 'number' && Math.abs(v) <= MAX_TIME ? v : null);
   const cleanInspections = (a, max = INSPECT_KEEP) => (Array.isArray(a) ? a : [])
-    .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }))
+    .map((i) => ({ at: okTime(i?.at), label: clip(i?.label, 80) }))
     .filter((i) => i.label && (i.at == null || i.at >= Date.now() - INSPECT_GRACE_MS)).slice(0, max);
   const SNAP_INSPECT_MAX = 12; // sessions a remembered search keeps per listing
   const clip = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : '');
@@ -463,11 +465,12 @@
       }
     };
     // Pruning walks everything, so it runs every PRUNE_EVERY writes (or when over the cap).
-    const save = () => {
+    // `choice`: a change you made (not a sighting from a page read), stamped for the safety copy.
+    const save = (choice = true) => {
       countMemo = null;
       try {
         if (writes++ % PRUNE_EVERY === 0 || Object.keys(data.m).length > MARKS_MAX) prune();
-        data.w = now(); // when these marks were last written (the safety copy compares with it)
+        if (choice) data.w = now(); // when you last changed these marks (the safety copy compares with it)
         const out = JSON.stringify(data);
         storage.setItem(MARKS_KEY, out);
         raw = out;
@@ -589,7 +592,7 @@
             if (full || !prev || batch.has(prev) || !m[prev]) d.ad[ak] = r.id; // a partial view doesn't move the address on
           }
         }
-        save();
+        save(false); // sightings, not your choices
       },
       decorate(rows) {
         const { m, ag, sb } = load();
@@ -735,19 +738,19 @@
           if (!isListingId(id) || !e || typeof e !== 'object') continue;
           const seenHere = m[id]?.l; // before entry() creates it: a new entry isn't a sighting
           const cur = entry(m, id);
-          if (e.s) { cur.s = 1; cur.st = +e.st || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
+          if (e.s) { cur.s = 1; cur.st = okTime(e.st) || now(); if (e.d && typeof e.d === 'object') cur.d = summary(fromSummary(e.d)); }
           if (e.h) { cur.h = 1; if (HIDE_REASONS.includes(e.hr)) cur.hr = e.hr; }
-          if (typeof e.x === 'number' && !(seenHere > e.x)) cur.x = e.x; // seen live here since: not gone
+          if (okTime(e.x) != null && !(seenHere > e.x)) cur.x = e.x; // seen live here since: not gone
           if (typeof e.n === 'string' && e.n.trim()) cur.n = clip(e.n.trim(), NOTE_MAX);
-          if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = +e.ast || now(); }
+          if (APP_STATUSES.includes(e.as) && e.as) { cur.as = e.as; cur.ast = okTime(e.ast) || now(); }
           if (cur.as === 'declined' && DECLINE_REASONS.includes(e.dr)) cur.dr = e.dr; else if (cur.as !== 'declined') delete cur.dr;
           if (Number.isInteger(e.rt) && e.rt >= 1 && e.rt <= 5) cur.rt = e.rt;
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           const qa = cleanQa(e.qa); if (Object.keys(qa).length) cur.qa = { ...cleanQa(cur.qa), ...qa };
           if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
-          for (const k of ['nd', 'li', 'rv']) if (typeof e[k] === 'number') cur[k] = Math.max(cur[k] || 0, e[k]);
-          if (e.h && typeof e.ht === 'number') { cur.ht = e.ht; if (typeof e.hp === 'number') cur.hp = e.hp; }
-          if (Array.isArray(e.ic) && typeof e.ic[0] === 'number' && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80), typeof e.ic[2] === 'number' ? e.ic[2] : null];
+          for (const k of ['nd', 'li', 'rv']) if (okTime(e[k]) != null) cur[k] = Math.max(cur[k] || 0, e[k]);
+          if (e.h && okTime(e.ht) != null) { cur.ht = e.ht; if (typeof e.hp === 'number') cur.hp = e.hp; }
+          if (Array.isArray(e.ic) && okTime(e.ic[0]) != null && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80), typeof e.ic[2] === 'number' ? e.ic[2] : null];
           n++;
         }
         for (const f of Object.keys(NAMED)) {
@@ -820,6 +823,9 @@
   // longer listed.
   const SNAP_FIELDS = ['id', 'url', 'address', 'suburb', 'price', 'priceNum', 'ppb', 'available', 'bond', 'beds', 'baths',
     'cars', 'type', 'img', 'surrounding', 'agency', 'lat', 'lng', 'photos', 'floorplan', 'watch', 'applyVia', 'lease', 'availFromText', 'taken', 'byAppt', 'sqm', 'sqmFromText', 'applyBy']; // inspect/nextInspect: re-derived on load
+  // Not text: `count` is a number or REA's own text for it ("4+").
+  const SNAP_TYPES = { priceNum: 'number', ppb: 'number', lat: 'number', lng: 'number', photos: 'number', sqm: 'number', beds: 'count', baths: 'count', cars: 'count',
+    surrounding: 'boolean', floorplan: 'boolean', byAppt: 'boolean', sqmFromText: 'boolean', availFromText: 'boolean', id: 'count' };
   const slimRow = (r) => {
     const o = {};
     for (const k of SNAP_FIELDS) o[k] = typeof r[k] === 'string' ? clip(r[k], SNAP_TEXT_MAX) : r[k];
@@ -836,7 +842,14 @@
   // Also the sanitiser for imported snapshots: every field re-typed, URLs re-checked.
   const fatRow = (o) => {
     const r = {};
-    for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], SNAP_TEXT_MAX) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
+    // Each field its own type: a number where text is read (a crafted or broken backup) would
+    // throw in every later draw of that search.
+    for (const k of SNAP_FIELDS) {
+      const v = o?.[k], t = SNAP_TYPES[k] || 'string';
+      r[k] = typeof v === 'string' && (t === 'string' || t === 'count') ? clip(v, SNAP_TEXT_MAX)
+        : typeof v === 'number' && Number.isFinite(v) && (t === 'number' || t === 'count') ? v
+          : typeof v === 'boolean' && t === 'boolean' ? v : '';
+    }
     for (const k of ROW_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
     if (r.avail && r.avail < startOfDay(new Date())) r.avail = startOfDay(new Date()); // "now" on the day it was saved is now today
     r.url = reaUrl(r.url); // REA's links and REA's CDN only: a crafted backup can't link or load elsewhere
@@ -999,7 +1012,10 @@
           if (withGone.length) { for (const k of withGone) { d.s[k].gone = []; entryJson.delete(d.s[k]); } continue; }
           if (!evict) break;
           const k = ks.sort((a, b) => (d.s[a].pin ? 1 : 0) - (d.s[b].pin ? 1 : 0) || (a === newest) - (b === newest) || d.s[a].at - d.s[b].at)[0];
+          // Down to the one just saved: it can't fit even alone, so nothing is written and what's
+          // stored (the others, and its own last copy) stays as it was.
           if (!k) break;
+          if (k === newest) return { evicted: [], ok: false, quota, kept: false };
           delete d.s[k]; evicted.push(k);
         }
       }
@@ -1085,9 +1101,10 @@
         // Trimming and writing wait for `later` when given: the diff is all this run needs now.
         const done = (d2) => {
           fitBudget(entry);
-          const { evicted, quota } = persist(d2);
-          // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
-          return { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key), quota };
+          const { evicted, quota, ok, kept } = persist(d2);
+          // `refused`: every slot is pinned, or storage is full even for this search alone, so it
+          // wasn't kept (its diff still applies to this run).
+          return { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) || (!ok && kept === false), quota };
         };
         if (!later) { const res = done(d); return Object.assign(view(entry), res); }
         const out = view(entry);
@@ -1123,7 +1140,7 @@
         if (!src || typeof src !== 'object') return 0;
         flush();
         const d = load();
-        let n = 0;
+        const got = [];
         const okIds = (a) => (Array.isArray(a) ? a.map(String).filter(isListingId) : null);
         for (const [k, raw] of Object.entries(src)) {
           if (!isSearchKey(k) || !raw || typeof raw !== 'object' || typeof raw.at !== 'number') continue;
@@ -1137,10 +1154,11 @@
             ...(e.pin ? { pin: 1 } : {}), ...(e.lite ? { lite: 1 } : {}), trend: cleanTrend(e.trend), // lite: its text was trimmed before
           };
           fitBudget(d.s[k]);
-          n++;
+          got.push(k);
         }
-        persist(d);
-        return n;
+        // Counted as kept: one that storage had no room for (evicted at once) wasn't restored.
+        const { evicted } = persist(d);
+        return got.filter((k) => !evicted.includes(k)).length;
       },
     };
   };
@@ -1225,7 +1243,8 @@
     // "Available now" up front is today; a "now" later on ("14th Nov - apply now!", "6 weeks from
     // now") is a call to action, so a date in the phrase wins and "now" is only the fallback.
     const NOW = /\b(?:now|immediately|immediate|vacant)\b/i;
-    if (/^\W*(?:available\s*|availability\s*)?(?:from\s*|:\s*)?(?:now|immediately|immediate|vacant)\b/i.test(display)) return today;
+    // ("Vacant possession 1st Nov" is the date: vacant on its own is only the fallback.)
+    if (/^\W*(?:available\s*|availability\s*)?(?:from\s*|:\s*)?(?:now|immediately|immediate)\b/i.test(display)) return today;
     const d = parseAvailDate(display, today, clamp);
     return d !== undefined ? d : NOW.test(display) && !/\bfrom now\b/i.test(display) ? today : null;
   };
@@ -1251,7 +1270,8 @@
     // "12th Oct 2026", "1st of December", "October 12, 2026". Every candidate is tried so
     // words like "Available" (-> "ava") or weekdays don't shadow the real month.
     const cands = [
-      ...[...display.matchAll(/(\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+([a-z]{3,})\.?(?:,?\s+(\d{4}))?/gi)].map((m) => [m[1], m[2], m[3]]),
+      // "1-Nov-2026", "01-Nov-26": a two-digit year only after a dash ("1 Nov 12 month lease" isn't 2012).
+      ...[...display.matchAll(/(\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?(?:\s+|-)([a-z]{3,})\.?(?:,?\s+(\d{4})|-(\d{4}|\d{2})\b)?/gi)].map((m) => [m[1], m[2], m[3] || (m[4] && (m[4].length === 2 ? `20${m[4]}` : m[4]))]),
       ...[...display.matchAll(/\b([a-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/gi)].map((m) => [m[2], m[1], m[3]]),
     ];
     for (const [day, word, yr] of cands) {
@@ -1262,6 +1282,14 @@
       const d = new Date(+yr, month, +day);
       return d.getDate() !== +day ? null : clamp(d); // 31 Feb, 29 Feb in a non-leap year
     }
+    // A month alone ("Available from December", "available Jan 2027"): its 1st.
+    for (const mo of display.matchAll(/\b(?:available|availability|avail\.|from|in)(?:\s+(?:from|in))?\s*:?\s+([a-z]{3,9})\.?(?:\s+(\d{4}))?\b/gi)) {
+      const w = mo[1].toLowerCase();
+      // "may" only as a month when nothing follows it ("available in May", not "in may be").
+      if (w === 'may' && !mo[2] && /^\s*[a-z]/i.test(display.slice(mo.index + mo[0].length))) continue;
+      const mi = MONTH_NAMES.findIndex((n) => n.startsWith(w) && (w.length === 3 || n === w));
+      if (mi >= 0) return mo[2] ? clamp(new Date(+mo[2], mi, 1)) : yearless(1, mi, today, clamp);
+    }
     // Last resort, yearless "1/11" (d/m) and only at the start: slash only ("6-12" is a lease,
     // "1.5" a bathroom count), not "x/7" (a schedule), and not "2/3 bed", "1/2 price", "12/7 days".
     const dm = display.match(/^\W*(?:available\s*)?(?:from\s+|on\s+|date:?\s*)?(\d{1,2})\/(\d{1,2})\b(?![/.-]?\d)(?!\s*(?:days?|price|bed|bath|car|br|off)\b)/i);
@@ -1269,11 +1297,22 @@
     return undefined; // no date in it (null: one that isn't a real date)
   };
 
+  // Period words and what they make a weekly figure. A bare "month" / "fortnight" counts only right
+  // after the figure ("$2,600 month"): later on it's a lease or a promotion ("- 12 month lease").
+  const PRICE_PERIODS = [
+    [/\b(?:pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(?:ee)?k\b/i, 1],
+    [/\b(?:per\s*(?:calend[ae]r\s*)?(?:month|mth|mnth|mo)|p\.?\s*c\.?\s*m|pcm|p\.?m\.?|p\/m|monthly|a\s*month)(?![a-z])|\/\s*m(?:on)?(?:th)?\b|\/\s*mo\b|^\s*(?:\/|each)?\s*(?:calend[ae]r\s*)?(?:month|mth)\b/i, 12 / 52],
+    [/\b(?:per\s*(?:annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(?:ea)?r\b/i, 1 / 52],
+    [/\b(?:per\s*fortnight|per\s*(?:2|two)\s*weeks|p\.?\s*f\.?|p\/f|pf|fortnightly|a\s*fortnight)\b|\/\s*f(?:ort)?n(?:igh)?t\b|^\s*(?:\/|each)?\s*fortnight\b/i, 1 / 2],
+    [/\b(?:per\s*night|p\.?\s*n\.?|pn|nightly|a\s*night)\b|\/\s*n(?:igh)?t\b/i, 7], // short stays
+    [/\bper\s*day\b|\/\s*day\b/i, 7],
+  ];
   // Weekly rent as a number. Ranges take the lower bound; monthly/annual figures are
   // converted so mixed listings sort and filter on one scale. Unparseable -> Infinity.
   const parsePrice = (display) => {
     const s = (display || '').replace(/,/g, '');
-    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k\b)?/i);
+    // A figure with "$", or one with a period right after it ("650 per week", "Rent: 650pw").
+    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k\b)?/i) || s.match(/(?<![\d.])(\d{2,5}(?:\.\d+)?)()(?=\s*(?:pw|p\/w|per\s*(?:week|month|calend[ae]r|fortnight)|pcm|weekly|\/\s*w(?:ee)?k))/i);
     if (!m) return Infinity;
     let v = +m[1] * (m[2] ? 1000 : 1);
     // Period is read from the text after this figure, up to the next $ amount, so
@@ -1282,15 +1321,10 @@
     const parts = s.slice(m.index + m[0].length).split('$');
     // A time ("open Sat 1 pm") isn't a period: taken out before "pm" can read as per month.
     const tail = (/^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0]).replace(/\b\d{1,2}(?:[:.]\d\d)?\s*[ap]\.?m\b\.?/gi, ' ');
-    const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
-    if (!weekly) {
-      // A bare "month" / "fortnight" counts only right after the figure ("$2,600 month"): later on
-      // it's a lease or a promotion ("- 12 month lease", "1 month free").
-      if (/\b(per\s*(?:calendar\s*)?(?:month|mth|mo)|p\.?\s*c\.?\s*m|pcm|p\.?m\.?|p\/m|monthly|a\s*month)(?![a-z])|\/\s*m(on)?(th)?\b/i.test(tail) || /^\s*(?:\/|each)?\s*(?:calendar\s*)?(?:month|mth)\b/i.test(tail)) v = (v * 12) / 52;
-      else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(ea)?r\b/i.test(tail)) v /= 52;
-      else if (/\b(per\s*fortnight|p\.?\s*f\.?|pf|fortnightly|a\s*fortnight)\b|\/\s*f(ort)?n(igh)?t\b/i.test(tail) || /^\s*(?:\/|each)?\s*fortnight\b/i.test(tail)) v /= 2;
-      else if (/\b(per\s*night|p\.?\s*n\.?|pn|nightly|a\s*night)\b|\/\s*n(igh)?t\b/i.test(tail)) v *= 7; // short stays
-    }
+    // The first period named wins: "$2,600 pcm (600 pw)" is monthly, "$600 pw, 1 month free" weekly.
+    let at = Infinity, f = 1;
+    for (const [re, k] of PRICE_PERIODS) { const i = tail.search(re); if (i >= 0 && i < at) { at = i; f = k; } }
+    v *= f;
     return Math.round(v);
   };
 
@@ -1629,7 +1663,7 @@
   // #region text heuristics
   const AMENITIES = [
     { id: 'pets', label: 'Pets', yes: 'Pets OK',
-      neg: /\bpets?\s*(?:allowed\s*)?[:?]\s*no\b|\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
+      neg: /\bpets?\s*(?:allowed\s*)?(?:[:?]|\s[-–]|\s=)\s*no\b(?! (?:problems?|worries|issues?))|\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bno (?:smoking|parties)(?:,? or|,? and|,)? pets\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
       pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b|\bpets?\s*:\s*yes\b/ },
     { id: 'furnished', label: 'Furnished', yes: 'Furnished', neg: /(?<!\bor )\bunfurnished\b(?! or furnished)|\bnot furnished\b/,
       pos: /\b(?:fully |partly |partially |semi[- ])?furnished\b/ },
@@ -1650,9 +1684,9 @@
     { id: 'study', label: 'Study', yes: 'Study', neg: /\bno (?:study|home office)\b/,
       pos: /\b(?<!\b(?:to|and|or|while you|students who) )(?:study(?: room| nook| area)?|home office)\b(?! (?:at|nearby|precinct|centre))/ },
     { id: 'ensuite', label: 'Ensuite', yes: 'Ensuite', neg: /\bno en[- ]?suite\b/, pos: /\ben[- ]?suited?\b/ },
-    { id: 'heating', label: 'Heating', yes: 'Heating', neg: /\bno heat(?:ing|er)\b/,
+    { id: 'heating', label: 'Heating', yes: 'Heating', neg: /\bno heat(?:ing|er)\b(?! (?:bills?|costs?|charges?))/,
       pos: /\b(?<!water )(?:ducted |gas |hydronic |underfloor |floor |split[- ]system |panel )?heat(?:ing|ers?)\b(?! (?:bill|costs?))|\b(?:open |gas |wood )?fireplace\b|\breverse[- ]cycle\b/ },
-    { id: 'gas', label: 'Gas cooking', yes: 'Gas cooking', neg: /\bno gas\b|\belectric (?:cooking|cooktop|stove) only\b/,
+    { id: 'gas', label: 'Gas cooking', yes: 'Gas cooking', neg: /\bno gas\b(?! (?:bills?|costs?|charges?|connection))|\belectric (?:cooking|cooktop|stove) only\b/,
       pos: /\bgas (?:cooking|cook ?top|stove|hob|oven|burners?|kitchen|appliances)\b/ },
     { id: 'lift', label: 'Lift', yes: 'Lift', neg: /\bno (?:lift|elevator)\b|\bwalk[- ]up\b|\bstairs only\b/,
       pos: /\blift (?:access|in (?:the )?building|to all (?:levels|floors)|serviced)\b|\blift[- ]serviced\b|\belevators?\b/ },
@@ -1749,8 +1783,9 @@
     })).map((w) => w.id);
   };
   // Availability from the description when REA's field is missing: "Available from 1st Nov",
-  // "available now", "Availability: 12/11/2026". Not "available for inspection", "available to view".
-  const AVAIL_TEXT = /\b(?:availab(?:le|ility)\b|avail\.)\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d)){3,32})/i; // a dot between digits is a date ("12.11.2026")
+  // "available now", "Availability: 12/11/2026", "available for lease from 1 Nov". Not "available for
+  // inspection", "available to view" (the lookahead also refuses a space, so the gap can't shrink past it).
+  const AVAIL_TEXT = /\b(?:availab(?:le|ility)\b|avail\.)\s*(?:for\s+(?:lease|rent(?:al)?|occupancy)\b\s*)?(?:(?:from|on|date|as\s+(?:of|from))\b\s*)?:?\s*(?!\s|for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d)){3,32})/i; // a dot between digits is a date ("12.11.2026")
   // Something else being available (an inspection, the agent, parking) isn't the move-in date.
   const AVAIL_NOT_HOME = /\b(?:inspections?|agents?|viewings?|appointments?|parking|car ?spaces?|garages?|storage|lock-?up|keys?|furniture|nbn|internet)\s*(?:is|are)?\s*$/i;
   const AVAIL_TEXT_G = new RegExp(AVAIL_TEXT.source, 'gi');
@@ -1783,7 +1818,8 @@
       const clause = tail.replace(/^((?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|noon|midday|cob)),\s*(?=(?:mon|tue|wed|thu|fri|sat|sun|\d))/i, '$1 ') // "5pm, Thursday 8 October"
         .replace(/^((?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\s+|noon\s+|midday\s+|cob\s+)?(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*)\.?,?(?=\s+\d)/i, '$1') // "Thu. 8 Oct", "Fri, 3 Oct" (a date follows)
         .split(/\.(?!\d)|[;,\n]|\s[-–]\s/)[0].trim();
-      let d = parseAvail(`Available ${clause}`, now, { keepPast: true });
+      // A weekday before a yearless d/m ("Tues 6/10"): the d/m form is only read at the start.
+      let d = parseAvail(`Available ${clause.replace(/^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+(?=\d{1,2}\/\d{1,2}\b)/i, '')}`, now, { keepPast: true });
       const wd = !d && clause.match(WEEKDAY_ONLY);
       if (wd && listedAt instanceof Date && !isNaN(listedAt)) {
         d = startOfDay(listedAt);
@@ -1836,16 +1872,23 @@
   // ("available in 2 months, 12 month lease" is 12; "renovated 3 months ago, lease..." is nothing).
   const LEASE_RES = (() => {
     const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)', range = '(\\d{1,2})\\s*(?:-|–|to|or|\\/)\\s*(\\d{1,2})';
-    return [`\\b${range}${mo}${gap}${word}`, `${word}\\b${gap}\\b${range}${mo}`, `\\b(\\d{1,2})${mo}${gap}${word}`, `${word}\\b${gap}\\b(\\d{1,2})${mo}`].map((p) => new RegExp(p));
+    // Lists: "6 month or 12 month lease", "6, 12 or 24 month lease"; "Lease: 6 months, 12 months".
+    const n = '\\d{1,2}', item = `(?:${n}\\s*,|${n}(?:${mo})?\\s*(?:or|\\/))\\s*`, after = `${n}(?:${mo})?\\s*(?:,|or|and|\\/)\\s*`;
+    return [`\\b${range}${mo}${gap}${word}`, `${word}\\b${gap}\\b${range}${mo}`, `\\b(\\d{1,2})${mo}${gap}${word}`, `${word}\\b${gap}\\b(\\d{1,2})${mo}`,
+      `\\b((?:${item})+${n})${mo}${gap}${word}`, `${word}(?:\\s+terms?)?\\s*:?\\s*((?:${after})+${n})${mo}`, `\\b(\\d{2,3})\\s*-?\\s*weeks?\\b${gap}${word}`].map((p) => new RegExp(p));
   })();
   const leaseTermOf = (text) => {
     const t = String(text || '').toLowerCase();
     if (/\bflexible (?:lease|term)s?\b|\blease (?:terms?|length) (?:is )?(?:flexible|negotiable)\b/.test(t)) return { flexible: true };
-    const [rangeA, rangeB, oneA, oneB] = LEASE_RES;
-    let m = t.match(rangeA) || t.match(rangeB);
+    const [rangeA, rangeB, oneA, oneB, listA, listB, weeks] = LEASE_RES;
+    let m = t.match(listA) || t.match(listB);
+    if (m) { const v = m[1].match(/\d+/g).map(Number).filter((x) => x >= 1 && x <= 60); if (v.length) return { min: Math.min(...v), max: Math.max(...v) }; }
+    m = t.match(rangeA) || t.match(rangeB);
     if (m) return { min: Math.min(+m[1], +m[2]), max: Math.max(+m[1], +m[2]) };
     m = t.match(oneA) || t.match(oneB);
     if (m && +m[1] >= 1 && +m[1] <= 60) return { min: +m[1], max: +m[1] };
+    m = t.match(weeks); // "52 week lease"
+    if (m && +m[1] >= 4 && +m[1] <= 260) { const v = Math.round(+m[1] / (52 / 12)); return { min: v, max: v }; }
     m = t.match(/\b(\d)\s*(?:-|–|to|or|\/)\s*(\d)\s*-?\s*(?:years?|yrs?)\b[^.;,\d]{0,12}?\b(?:lease|tenancy|term)/); // "1-2 year lease"
     if (m) return { min: Math.min(+m[1], +m[2]) * 12, max: Math.max(+m[1], +m[2]) * 12 };
     m = t.match(/\b(\d)\s*-?\s*(?:years?|yrs?)\b[^.;,\d]{0,12}?\b(?:lease|tenancy|term)/) || t.match(/\b(?:lease|tenancy|term)\b[^.;,\d]{0,12}?\b(\d)\s*-?\s*(?:years?|yrs?)\b/);
@@ -2333,7 +2376,8 @@
 
   // Keyword: space-separated terms, all must match; "-term" excludes; "quoted phrase" kept whole.
   // Lowercase without accents, so "cafe" finds "café" (row text is stored folded).
-  const fold = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  // Accents off and curly quotes straight: "O’Connell" matches o'connell.
+  const fold = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\u2018\u2019\u02bc`]/g, "'").toLowerCase();
   // "Inspections I can make": a weekend, or 5pm or later, in the listing's own time zone.
   const INSPECT_WHEN = { weekend: 'Inspect on a weekend', evening: 'Inspect after 5pm', either: 'Weekend or after 5pm', mine: 'Inspect at my times' };
   // "My times": comma- or line-separated entries of days and an optional time range, eg
@@ -2363,12 +2407,17 @@
   const parseFreeTimes = (text) => {
     const out = [];
     // En and em dashes and "to" are ranges too ("Sat 9am–1pm", "Mon to Fri", what {mytimes} writes).
-    const norm = String(text || '').replace(/[–—−]/g, '-').replace(/\s+to\s+/gi, '-');
+    // Also what freeTimesText writes back: "noon", "after 5:30pm", "before 6am", "Sat 9am-1pm or Sun"
+    // ("or" after a time starts another slot; between days it's "and").
+    const norm = String(text || '').replace(/[–—−]/g, '-').replace(/\s+to\s+/gi, '-')
+      .replace(/\b(?:noon|midday)\b/gi, '12pm').replace(/\bmidnight\b/gi, '12am')
+      .replace(/\bafter\s+(\d[\d:.]*\s*(?:am|pm)?)/gi, '$1-').replace(/\bbefore\s+(\d[\d:.]*\s*(?:am|pm)?)/gi, '-$1')
+      .replace(/(\d\s*(?:am|pm)?|-)\s+or\s+/gi, '$1,');
     for (const raw of norm.split(/[,;\n]/).map((x) => x.trim().toLowerCase()).filter(Boolean)) {
       const t = raw.match(TIME_RANGE), hasRange = !!t && !!(t[1] || t[2]);
       const dayText = (hasRange ? raw.slice(0, t.index) : raw).replace(/\s*-\s*/g, '-').trim();
       const days = new Set();
-      for (const w of dayText.split(/\s*(?:&|\/|\band\b|\s)\s*/).filter(Boolean)) if (!dayToken(w, days)) return null;
+      for (const w of dayText.split(/\s*(?:&|\/|\band\b|\bor\b|\s)\s*/).filter(Boolean)) if (!dayToken(w, days)) return null;
       let from = hasRange ? clockMin(t[1]?.trim(), 0) : 0;
       let to = hasRange ? clockMin(t[2]?.trim(), 1440) : 1440;
       if (to === 0) to = 1440; // "6pm-12am" ends at midnight
@@ -3346,7 +3395,7 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
 
   // Shortlist search: every word must appear in the address, note, agency, suburb, price or status.
   const textMatch = (r, q) => {
-    const norm = (v) => fold(v).replace(/[’‘`]/g, "'"); // "cafe" finds "Café", "o'connell" finds "O’Connell"
+    const norm = fold; // "cafe" finds "Café", "o'connell" finds "O’Connell"
     const terms = norm(q).split(/\s+/).filter(Boolean);
     if (!terms.length) return true;
     const hay = norm([r.address, r.note, r.agency, r.suburb, r.price, r.appStatus, r.type].filter(Boolean).join(' '));
@@ -4460,10 +4509,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const rec = await idbDo('readonly', (st) => st.get('copy')).catch(() => { failed = true; return null; });
     if (failed) { mirrorHeld = true; if (mirrorRetries++ < 3) setTimeout(offerMirror, 30000); return; }
     const here = marks.exportData(), lost = mirrorLost(rec?.data, here);
-    // Marks written since the copy was (a change just made, then a reload before the copy caught
+    // Marks you changed since the copy was (a change just made, then a reload before the copy caught
     // up) mean the difference is yours, not a loss. Only an emptied or older store is offered it.
     // (A store made after the copy, ie storage cleared and then a new star, is still a loss.)
-    const ownChange = mirrorWeight(here) && marks.createdAt() && marks.createdAt() < (rec?.at || 0) && marks.writtenAt() > (rec?.at || 0);
+    const ownChange = marks.createdAt() && marks.createdAt() < (rec?.at || 0) && marks.writtenAt() > (rec?.at || 0);
     if (!lost || ownChange) { if (mirrorHeld) releaseMirror(); return; }
     mirrorHeld = true;
     if (!isSearchPage(location.href) || !ui.offerRestore) return; // the offer lives in the drawer: the next search page asks
@@ -4740,6 +4789,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     // Undo puts the three stores and the settings back exactly as they were.
     const ls = storageOr('localStorage'), keys = [MARKS_KEY, SNAP_KEY, PRESETS_KEY];
     const before = keys.map((k) => { try { return ls.getItem(k); } catch { return null; } }), cfgBefore = { ...cfg };
+    const putBack = () => {
+      keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
+      marks.invalidate(true);
+      ui.applyCfg(cfgBefore);
+      fillPresets(); renderSaved(); refreshMarks();
+    };
     try {
       const n = marks.importJson(data);
       // The copy's own offer answered: copies resume (refreshMarks below writes one). A file restored
@@ -4747,21 +4802,23 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (fromMirror) mirrorHeld = false; else if (mirrorHeld) setTimeout(offerMirror, 0);
       const c = backupCfg(data.cfg);
       if (Object.keys(c).length) ui.applyCfg({ ...cfg, ...c });
+      const localKeys = Object.keys(snaps.exportData());
       const k = cfg.remember ? snaps.importData(data.snapshots) : 0;
+      const pushedOut = localKeys.filter((key) => !snaps.exportData()[key]); // made room for the backup's
       presets.importData(data.presets);
       fillPresets();
       renderSaved();
       refreshMarks();
-      offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.`, () => {
-        keys.forEach((k2, i) => { try { if (before[i] == null) ls.removeItem(k2); else ls.setItem(k2, before[i]); } catch { /* blocked */ } });
-        marks.invalidate(true);
+      offerUndo(`Restored ${plural(n, 'listing')}${k ? `, ${plural(k, 'saved search', 'es')}` : ''}${Object.keys(c).length ? ' and your settings' : ''} from backup.${pushedOut.length ? ` No longer remembered here: ${pushedOut.map(searchLabel).join(', ')}.` : ''}`, () => {
         if (fromMirror) mirrorHeld = true; // the copy still holds what the undo took away: offer it again
-        ui.applyCfg(cfgBefore);
-        fillPresets(); renderSaved(); refreshMarks();
+        putBack();
         setStatus('Restore undone.');
         if (fromMirror) offerMirror();
       }, 'rf-undo-restore');
-    } catch (err) { setStatus(err.message, true); logError(`restore: ${err.message}`); } // merging a checked backup failed: worth a report
+    } catch (err) { // merging a checked backup failed: nothing half-restored is kept, and it's worth a report
+      try { putBack(); } catch { /* the error below is the news */ }
+      setStatus(`Restore failed, nothing was changed: ${err.message}`, true); logError(`restore: ${err.message}`);
+    }
   });
   }
 
@@ -5726,11 +5783,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (pause.until()) return setStatus(pausedErr(pause.until()).message, true);
     const ctrl = ui.savedCtrl = startJob(btn);
     pageMemo.clear(); // "new since" must mean now, not the pages cached a few minutes ago
-    const out = [];
+    const out = [], dropped = [];
+    // Every baseline read first: near the quota, one search's save can evict one not checked yet.
+    const base = snaps.exportData();
+    let full = false;
     try {
       for (const [i, key] of keys.entries()) {
+        if (full) break; // storage full: checking the rest would only push out more of them
         const label = searchLabel(key);
-        const before = new Set(snaps.exportData()[key]?.ids || []);
+        const before = new Set(base[key]?.ids || []);
         let res;
         try {
           res = await fetchAllPages(key, (m) => setStatus(`Checking ${label} (${i + 1} of ${keys.length}): ${m}`), {
@@ -5763,13 +5824,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
         store.set(key, res.rows, res.truncated);
         const snap = snaps.save(key, res.rows, res.truncated);
+        if (snap.quota) { full = true; dropped.push(...snap.evicted.map(searchLabel)); if (snap.refused) dropped.push(label); }
         if (key === (currentKey() ?? cacheKey)) adopt(key, res.rows, res.truncated, '', snap, true);
         else learn(res.rows, true, true);
         ui.savedResult.set(key, found);
         out.push(`${label}: ${found.added} new${found.match != null ? ` (${found.match} match ${found.by})` : ''}${found.gone ? `, ${found.gone} gone` : ''}`);
         if (i < keys.length - 1) await sleep(jitter(PAGE_DELAY_MS), ctrl.signal);
       }
-      setStatus(`Checked ${plural(keys.length, 'saved search', 'es')}. ${out.join(' · ')}.`);
+      setStatus(`Checked ${plural(out.length, 'saved search', 'es')}. ${out.join(' · ')}.`);
+      if (full) setWarn('saved', `This browser's storage is full: ${dropped.length ? `stopped remembering ${[...new Set(dropped)].join(', ')}, and ` : ''}the check stopped there. Delete saved searches or turn off Remember results to make room.`);
     } catch (err) {
       // Aborted by navigation or opting out: whoever aborted has already said why.
       if (!ctrl.signal.aborted && err?.name !== 'AbortError') { setStatus(`Check failed: ${err.message}`, true); logError(`saved: ${err.message}`); }
@@ -6355,7 +6418,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const PRESET_VISIT_KEY = `${TOOL_PREFIX}preset-visit`;
   const PLACE_KEY = `${TOOL_PREFIX}place`; // sessionStorage: where you were in each search's results
   const PRESET_PREV_KEY = `${TOOL_PREFIX}preset-prev/v1`;
-  const prevKey = keyStore(storageOr('sessionStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
+  const prevKey = keyStore(storageOr('localStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
   const prevStore = {
     get() { const v = prevKey.getJson(); return isObj(v) ? sanitizeCfg(v) : null; },
     set: (v) => prevKey.setJson(v),

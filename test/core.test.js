@@ -925,6 +925,34 @@ test('2.35.2 audit: an earlier session added is not a cancellation; remembered s
   assert.ok(bad.sizes()[0].lite, 'trimmed text stays marked');
 });
 
+test('2.35.4 audit: periods, dates, leases, amenities and free times as listings write them', () => {
+  const pp = { '$2,600 pcm (600 pw)': 600, '$2,800 per month including weekly cleaning': 646, '$650 pw ($2,817 pcm)': 650, '$2,600/mo': 600, '$2,600 per calender month': 600,
+    '$1,300 p/f': 650, '$1,300 per 2 weeks': 650, '$95 per day': 665, '650 per week': 650, 'Rent: 650pw': 650, 'Contact agent': Infinity };
+  for (const [t, v] of Object.entries(pp)) assert.equal(core.parsePrice(t), v, t);
+  const now = new Date(2026, 8, 23), ymd = (d) => d && `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  assert.equal(ymd(core.availFromText('Available for inspection Sat 10 Oct. Available 1 Dec.', now)), '2026-12-1', 'an inspection is not the move-in date');
+  assert.equal(ymd(core.availFromText('Available to view Sat 3rd Oct; available 1 Dec', now)), '2026-12-1');
+  assert.equal(ymd(core.availFromText('Available for lease from 1 Nov', now)), '2026-11-1');
+  assert.equal(ymd(core.availFromText('Available as of 1 Nov', now)), '2026-11-1');
+  const av = { 'Available 1-Nov-2026': '2026-11-1', 'Available 01-Nov-26': '2026-11-1', 'Available from December': '2026-12-1', 'Available Jan 2027': '2027-1-1',
+    'Vacant possession 1st Nov': '2026-11-1', 'Available in May': '2027-5-1', 'Available in may be possible': null };
+  for (const [t, v] of Object.entries(av)) assert.equal(ymd(core.parseAvail(t, now)), v, t);
+  const lt = { '6 month or 12 month lease': [6, 12], 'Lease: 6 months, 12 months': [6, 12], 'Lease: 6, 12 or 24 months': [6, 24], '52 week lease': [12, 12], 'available in 2 months, 12 month lease': [12, 12] };
+  for (const [t, [a, b]] of Object.entries(lt)) assert.deepEqual(core.leaseTermOf(t), { min: a, max: b }, t);
+  const am = (t) => core.amenitiesOf({ features: [], amenText: t.toLowerCase() });
+  assert.equal(am('No smoking or pets').pets, 'no');
+  assert.equal(am('Pets - No').pets, 'no');
+  assert.equal(am('Pets - no problem').pets, null);
+  assert.equal(am('Gas cooktop. Solar panels mean no gas bills').gas, 'yes');
+  assert.equal(am('Ducted heating, so no heating bills').heating, 'yes');
+  assert.equal(core.applyByOf('Applications close Tues 6/10', now), '2026-10-06');
+  const slots = (t) => core.parseFreeTimes(t)?.map((w) => `${[...w.days].join('')}:${w.from}-${w.to}`).join(' ');
+  assert.equal(slots('weekends 8am-noon'), '06:480-720');
+  const said = core.freeTimesText('Sat 9am-1pm, weekdays after 5:30pm').replace(/^I can inspect |\.$/g, '');
+  assert.equal(slots(said), slots('Sat 9am-1pm, weekdays 5:30pm-'), `what it writes reads back: ${said}`);
+  assert.equal(core.keywordTest("o'connell")(core.toRow(listing({ description: 'Close to O’Connell St' }), false).text), true, 'curly apostrophes fold');
+});
+
 test('2.35.3 audit: real listing phrasing', () => {
   for (const v of ['$650 - 12 month lease', '$650 | 1 month free', '$650 neg. Min 6 mth lease', '$650 - fortnight free']) assert.equal(core.parsePrice(v), 650, v);
   assert.equal(core.parsePrice('$2850 p.m.'), 658);

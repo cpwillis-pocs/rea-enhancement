@@ -62,11 +62,12 @@ All keys start with `TOOL_PREFIX = 'rea-avail-filter/'`. The lint rule enforces 
 | `presets/v1` | localStorage | Named filter presets, and the search each is bound to | none |
 | `health/v1` | localStorage | Moving average of how often each field is filled, for drift warnings | none |
 | `rows/<search>` | sessionStorage | This tab's results cache, versioned by `ROWS_VERSION` | 2 searches, 10 minutes |
-| `preset-visit`, `preset-prev/v1` | sessionStorage | "Bound preset applies once per visit", and the filters it replaced | none |
+| `preset-visit` | sessionStorage | "Bound preset applies once per visit" | none |
+| `preset-prev/v1` | localStorage | The filters a bound preset replaced (shared like cfg, so a new tab still puts them back) | none |
 | `place` | sessionStorage | Per search (and one for the Shortlist tab): the listing you were on, how many were shown, and the filters it applies to | 10 entries |
 | `lbar-min`, `wide`, `width`, `seen-version`, `remind-at` | localStorage | Listing bar minimised, expanded drawer, drawer width, last what's-new version, saved-search reminder time | none |
 | `paused` | localStorage | When fetching may resume after a bot check, for every tab (`storage` events update the others); removed once past | one timestamp |
-| `mirror` (IndexedDB database `rea-avail-filter/mirror`, store `kv`, key `copy`) | IndexedDB | A safety copy of what a backup holds (marks you chose, presets, settings), written 2 s after a change, never overwritten with an empty shortlist; offered back when marks are found empty; Cancel or Delete all my data deletes it | one copy |
+| `mirror` (IndexedDB database `rea-avail-filter/mirror`, store `kv`, key `copy`) | IndexedDB | A safety copy of what a backup holds (marks you chose, presets, settings), written 2 s after a change you make (emptying the shortlist yourself writes an empty copy); offered back when marks are found emptied or missing entries you didn't remove; Cancel or Delete all my data deletes it | one copy |
 | `backup-at`, `backup-nudge-at` | localStorage | When you last downloaded a backup, and when the "no backup" reminder last showed | none |
 | `ics/v1` | localStorage | The last Shortlist calendar export's events (`{ u: uid, s: DTSTART line }`), so the next export sends what dropped off as cancelled | 300 events |
 
@@ -104,7 +105,7 @@ The install and update links serve the raw file from `main`, so they only work w
 |---|---|---|
 | `// @version` (header) | Any change to the script | Tampermonkey only auto-updates to a higher version. CI's version-bump job checks it on PRs, and lint checks CHANGELOG.md has a section for it. |
 | `WHATS_NEW.version` | A release users should hear about | Shows the one-time "Updated to…" note. Lint keeps it no higher than `@version` and with a CHANGELOG section. |
-| `ROWS_VERSION` (14) | `toRow()` output changes shape | Invalidates old tab caches |
+| `ROWS_VERSION` (15) | `toRow()` output changes shape | Invalidates old tab caches |
 | `FEAT_V` | `AMENITIES` or `WATCHOUTS` detection changes | Old feature signatures aren't compared, so no false "details changed". Only append to those lists: signatures are bit positions. |
 
 `test/versions.test.js` catches a forgotten `ROWS_VERSION` or `FEAT_V` bump; after bumping, refresh its record with `UPDATE_VERSIONS=1 node --test test/versions.test.js`. `npm run release x.y.z` bumps `@version` and prints the rest.
