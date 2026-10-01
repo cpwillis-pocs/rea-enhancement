@@ -7432,94 +7432,110 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const fail = (e) => { console.warn(`[reaFilter] ${name}:`, e); logError(`${name}: ${e?.message || e}`); };
     try { const r = fn(); if (r?.catch) r.catch(fail); } catch (e) { fail(e); }
   };
-  step('build', build);
-  if (ui?.ready) { // only wire the rest if build() completed
-    step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); setExport(!cache); }); // nothing searched: Bulk, Market, Map and exports hidden
-    // The rest in a second task, so page load isn't one long (50 ms+) task: reading page 1's
-    // listings and your marks is most of it. Order within is unchanged.
-    setTimeout(() => {
-      step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
-      step('pause', showPause);
-      step('navigation', watchNavigation);
-      step('cards', watchCards);
-      step('card actions', watchCardActions);
-      step('opens', watchOpens);
-      step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
-        : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
-      const syncMarks = () => {
-        ui.marksStale = false;
-        if (document.getElementById('rf-lbar')) renderListingBar();
-        // A note being typed in the drawer: its save redraws everything, so wait for it.
-        if (!ui.list.querySelector('.rf-note-edit')) keepingUndo(() => refreshMarks());
-      };
-      step('sync stale', () => document.addEventListener('visibilitychange', guard('other tab', () => { if (!document.hidden && ui.marksStale) syncMarks(); })));
-      step('sync', () => window.addEventListener('storage', guard('other tab', (e) => {
-        // Another tab changed the shortlist/hidden/notes: pick it up here.
-        if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
-        if (e.key === PRESETS_KEY || e.key === null) fillPresets(); // a preset saved in another tab
-        if (e.key === SNAP_KEY || e.key === null) renderSaved(); // another tab's search or Check all
-      // A restore's Undo puts back what was stored before it: after another tab has written, that
-      // would silently undo the other tab too, so the offer goes.
-      if (e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) ui.status.querySelector('.rf-undo-restore')?.remove();
-      // Sightings only (another tab read a page, opened a listing): nothing of yours changed, so no
-      // re-read or redraw here; this tab's next write still re-reads storage first (fresh()).
-      if (e.key === MARKS_KEY && marks.sameChoices(e.newValue)) return;
-      if (e.key === MARKS_KEY || e.key === null) {
-        marks.invalidate();
-        // A tab in the background redraws once when it's looked at again, not on every change made elsewhere.
-        if (document.hidden) ui.marksStale = true; else syncMarks();
-      }
-        // Settings saved in another tab: take its display settings (places, checklist, weights,
-        // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
-        if (e.key === CFG_KEY) {
-          const stored = { ...DEFAULT_CFG, ...loadCfg() };
-          const moved = DISPLAY_PREFS.filter((k) => k !== 'sort' && k !== 'sortDesc' && stored[k] !== cfg[k]); // each tab keeps its own sort
-          if (!moved.length) return;
-          for (const k of moved) cfgBase[k] = stored[k];
-          if (moved.length === 1 && moved[0] === 'theme') { // nothing to re-render
-            cfg = { ...cfg, theme: stored.theme };
-            const sel = ui.panel.querySelector('#rf-theme'); if (sel) sel.value = stored.theme;
-            return applyTheme();
-          }
-          // Shortlist-only (ticks, its order, the visit stamp): taken quietly, redrawn only on the Shortlist,
-          // so another tab's tick doesn't move this tab's Results.
-          if (moved.every((k) => SL_ONLY.includes(k))) {
-            cfg = { ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) };
-            for (const k of moved) { const el = ui.panel.querySelector(`#rf-${k}`); if (el) el.value = stored[k]; }
-            if (ui.view === 'shortlist') renderShortlist();
-            return;
-          }
-          ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
-          if (document.getElementById('rf-lbar')) renderListingBar(); // its checklist, deadline and notice follow too
-        }
-      })));
-      step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
-      step('share', () => {
-        if (!new RegExp(`[#&]${SHARE_PARAM}=`).test(location.hash)) return;
-        const rows = shareFromHash(location.hash);
-        history.replaceState(history.state, '', location.pathname + location.search); // don't keep it in history
-        if (rows?.length) { ui.offerShare(rows); return; }
-        ui.launch.hidden = false;
-        ui.setOpen(true);
-        setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
-      });
-      // Restoring remembered results (parse, rebuild rows, render) is the rest of the cost: its own task too.
+  // REA pages that aren't a rent search, a listing or a share link (home, buy, agents) only get a
+  // history hook: the drawer, its styles and the stores are built on the first navigation to one.
+  const wanted = (href) => { const u = new URL(href); return /^\/rent\//.test(u.pathname) || isListingPage(href) || new RegExp(`[#&]${SHARE_PARAM}=`).test(u.hash); };
+  function start() {
+    step('build', build);
+    if (ui?.ready) { // only wire the rest if build() completed
+      step('launch', () => { ui.launch.hidden = !isSearchPage(location.href); ui.view = 'results'; updateCounts(); setExport(!cache); }); // nothing searched: Bulk, Market, Map and exports hidden
+      // The rest in a second task, so page load isn't one long (50 ms+) task: reading page 1's
+      // listings and your marks is most of it. Order within is unchanged.
       setTimeout(() => {
-        step('restore', restore);
-        step('launch to-do', () => { ui.countTodo = true; setLaunchCount(ui.launchN ?? null); });
-        step('listing bar', () => {
-          renderListingBar();
-          window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
+        step('boot', () => { if (boot) learn(rowsFrom(boot.results)); });
+        step('pause', showPause);
+        step('navigation', watchNavigation);
+        step('cards', watchCards);
+        step('card actions', watchCardActions);
+        step('opens', watchOpens);
+        step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
+          : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
+        const syncMarks = () => {
+          ui.marksStale = false;
+          if (document.getElementById('rf-lbar')) renderListingBar();
+          // A note being typed in the drawer: its save redraws everything, so wait for it.
+          if (!ui.list.querySelector('.rf-note-edit')) keepingUndo(() => refreshMarks());
+        };
+        step('sync stale', () => document.addEventListener('visibilitychange', guard('other tab', () => { if (!document.hidden && ui.marksStale) syncMarks(); })));
+        step('sync', () => window.addEventListener('storage', guard('other tab', (e) => {
+          // Another tab changed the shortlist/hidden/notes: pick it up here.
+          if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
+          if (e.key === PRESETS_KEY || e.key === null) fillPresets(); // a preset saved in another tab
+          if (e.key === SNAP_KEY || e.key === null) renderSaved(); // another tab's search or Check all
+        // A restore's Undo puts back what was stored before it: after another tab has written, that
+        // would silently undo the other tab too, so the offer goes.
+        if (e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) ui.status.querySelector('.rf-undo-restore')?.remove();
+        // Sightings only (another tab read a page, opened a listing): nothing of yours changed, so no
+        // re-read or redraw here; this tab's next write still re-reads storage first (fresh()).
+        if (e.key === MARKS_KEY && marks.sameChoices(e.newValue)) return;
+        if (e.key === MARKS_KEY || e.key === null) {
+          marks.invalidate();
+          // A tab in the background redraws once when it's looked at again, not on every change made elsewhere.
+          if (document.hidden) ui.marksStale = true; else syncMarks();
+        }
+          // Settings saved in another tab: take its display settings (places, checklist, weights,
+          // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
+          if (e.key === CFG_KEY) {
+            const stored = { ...DEFAULT_CFG, ...loadCfg() };
+            const moved = DISPLAY_PREFS.filter((k) => k !== 'sort' && k !== 'sortDesc' && stored[k] !== cfg[k]); // each tab keeps its own sort
+            if (!moved.length) return;
+            for (const k of moved) cfgBase[k] = stored[k];
+            if (moved.length === 1 && moved[0] === 'theme') { // nothing to re-render
+              cfg = { ...cfg, theme: stored.theme };
+              const sel = ui.panel.querySelector('#rf-theme'); if (sel) sel.value = stored.theme;
+              return applyTheme();
+            }
+            // Shortlist-only (ticks, its order, the visit stamp): taken quietly, redrawn only on the Shortlist,
+            // so another tab's tick doesn't move this tab's Results.
+            if (moved.every((k) => SL_ONLY.includes(k))) {
+              cfg = { ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) };
+              for (const k of moved) { const el = ui.panel.querySelector(`#rf-${k}`); if (el) el.value = stored[k]; }
+              if (ui.view === 'shortlist') renderShortlist();
+              return;
+            }
+            ui.applyCfg({ ...cfg, ...Object.fromEntries(moved.map((k) => [k, stored[k]])) });
+            if (document.getElementById('rf-lbar')) renderListingBar(); // its checklist, deadline and notice follow too
+          }
+        })));
+        step('presets', () => { fillPresets(); enterSearchPresets(currentKey()); });
+        step('share', () => {
+          if (!new RegExp(`[#&]${SHARE_PARAM}=`).test(location.hash)) return;
+          const rows = shareFromHash(location.hash);
+          history.replaceState(history.state, '', location.pathname + location.search); // don't keep it in history
+          if (rows?.length) { ui.offerShare(rows); return; }
+          ui.launch.hidden = false;
+          ui.setOpen(true);
+          setStatus('This share link is incomplete or damaged (it may have been cut off when pasted). Ask for it again.', true);
         });
-        step('saved', renderSaved);
-        step('remind', remindSaved);
-        step('backup nudge', nudgeBackup);
-        step('safety copy', () => (typeof indexedDB === 'undefined' ? null : offerMirror()));
-        step('annotate', ensureVisiblePage);
-        ui.panel.dataset.rfReady = '1'; // every startup step has run (tests wait on it)
-        if (ui.openWhenReady) { ui.openWhenReady = false; ui.launch.click(); }
+        // Restoring remembered results (parse, rebuild rows, render) is the rest of the cost: its own task too.
+        setTimeout(() => {
+          step('restore', restore);
+          step('launch to-do', () => { ui.countTodo = true; setLaunchCount(ui.launchN ?? null); });
+          step('listing bar', () => {
+            renderListingBar();
+            window.addEventListener('rf:navigate', () => setTimeout(() => renderListingBar({ onlyIfMoved: true }), NAV_SETTLE_MS));
+          });
+          step('saved', renderSaved);
+          step('remind', remindSaved);
+          step('backup nudge', nudgeBackup);
+          step('safety copy', () => (typeof indexedDB === 'undefined' ? null : offerMirror()));
+          step('annotate', ensureVisiblePage);
+          ui.panel.dataset.rfReady = '1'; // every startup step has run (tests wait on it)
+          if (ui.openWhenReady) { ui.openWhenReady = false; ui.launch.click(); }
+        }, 0);
       }, 0);
-    }, 0);
+    }
+  }
+  if (wanted(location.href)) start();
+  else {
+    let awake = false;
+    // After REA's own pushState returns, not inside it: building is the heavy part.
+    const wake = () => { if (awake || !wanted(location.href)) return; awake = true; window.removeEventListener('popstate', wake); setTimeout(start, 0); };
+    for (const fn of ['pushState', 'replaceState']) {
+      const orig = history[fn];
+      history[fn] = function (...args) { const r = orig.apply(this, args); wake(); return r; };
+    }
+    window.addEventListener('popstate', wake);
   }
   // #endregion
 })();

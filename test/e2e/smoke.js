@@ -60,8 +60,12 @@ const html = (n) => {
   // Enter via the homepage: script loads there dormant, then activates on SPA nav to /rent/.
   await page.goto(`${ORIGIN}/`);
   await page.addScriptTag({ content: SCRIPT });
-  assert.equal(await page.$eval('#rf-launch', (b) => b.hidden), true, 'launcher hidden off /rent/');
+  assert.equal(await page.$('#rf-launch, #rf-panel'), null, 'nothing built off /rent/');
+  await page.evaluate(() => history.pushState({}, '', '/buy/in-bondi/list-1'));
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 0)));
+  assert.equal(await page.$('#rf-launch'), null, 'still dormant on another non-rent page');
   await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
+  await page.waitForSelector('#rf-launch:not([hidden])', { timeout: 5000 }); // built after REA's pushState returns
   assert.equal(await page.$eval('#rf-launch', (b) => b.hidden), false, 'launcher shown after SPA nav');
 
   await page.goto(SEARCH);
