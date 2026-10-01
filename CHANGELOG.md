@@ -2,6 +2,19 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.0
+
+- **Results as they're read:** a search shows each page as soon as it's in (the first listings straight away, not after the last page), with "Reading page 3 of 20… 42 of 75 so far match". The list grows where you are, and a Refresh keeps the full list until it's done.
+- **Faster:**
+  - With the drawer closed, a star or hide on REA's cards (or a change in another tab) updates only the launcher; the list is drawn when you open it.
+  - Reading a page, reloading or opening a listing no longer rewrites your stored marks when nothing changed, and other REA tabs no longer redraw for it.
+  - REA pages that aren't a rent search, a listing or a share link (home, buy, agents) only get a small hook until you reach one.
+  - Following REA's own links: the script's work waits until REA's page change is done, once per change. A freshly loaded search badges its cards before remembered results are restored.
+  - A note, hide reason or Undo redraws only that listing; coming back to Results from the Shortlist doesn't rebuild the list; the map isn't redrawn when nothing on it changed; Tab on a phone and loading more listings do less work.
+  - Remembered searches load about a third faster (only the one you open is unpacked); the safety copy isn't rewritten on every page view; a listing page reads only the part of REA's data that holds the listing.
+  - After a page served from memory, the next page isn't held back by the polite pause.
+- **Compact list:** a listing's buttons show over its card on hover instead of pushing the list down.
+
 ## 2.35.5
 
 - **Pets read right again:** "No smoking, pets considered" (and "No parties, pets negotiable") had been read as no pets since 2.35.4. "Pets - negotiable" and "Pets - not allowed" are now read too.

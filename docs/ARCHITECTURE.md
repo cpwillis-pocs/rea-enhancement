@@ -133,8 +133,8 @@ These are all pure and unit-tested, and all can be wrong. Each has a negative-ca
 
 ## Tests at a glance
 
-- **Unit:** `test/*.test.js` (250 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
-- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (84 blocks, numbered 1–70 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
+- **Unit:** `test/*.test.js` (253 tests): pure functions and stores, with a frozen clock (`test/clock.js`) and `memStorage` (`test/helpers.js`). They pass in any time zone; CI runs the Node 20 job in Los Angeles time.
+- **E2E:** `test/e2e/smoke.js` covers the main flow, including 150-listing chunked rendering. `test/e2e/edge.js` has one numbered block per feature or edge path (88 blocks, numbered 1–74 with lettered sub-blocks such as 24l). Run just some with `E2E_ONLY=24l,35`, or several at once with `E2E_JOBS=4` (`npm run e2e:fast`; CI uses 3).
 - **Coverage:** `npm run coverage` merges the UI-half line coverage from both e2e files; `COVERAGE_MIN=98` (set by the on-demand CI coverage job, not on PRs) fails the run below 98%.
 - **Shapes:** `test/shapes.test.js` rebuilds a listing from each `test/shapes/*.json` (`reaFilter.shape()` output) and checks it still parses.
 - **Live:** `npm run live` (`test/live.js`) runs one real search locally and saves a fresh shape. Never in CI; lint enforces that.
