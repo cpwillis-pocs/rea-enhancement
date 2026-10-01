@@ -3742,10 +3742,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ['e', 'expand / shrink the drawer', ['e']], ['f', 'back to the filters', ['f']], ['d', 'compact list on/off', ['d']], ['?', 'this help', ['?']],
     ['Esc', 'close', ['Escape']], ['Alt+Shift+F', 'open / close from anywhere on REA', []],
   ];
-  // Plain links shown in the help panel; the script never fetches them (lint allows exactly these).
+  // Plain links at the foot of the drawer and in the help panel; the script never fetches them (lint allows exactly these).
   const ABOUT_LINKS = [
     ['Source', 'https://github.com/cpwillis-pocs/rea-enhancement'], ['Terms', 'https://cpwillis.dev/terms'], ['Privacy', 'https://cpwillis.dev/privacy'],
   ];
+  const aboutHtml = () => ABOUT_LINKS.map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`).join(' · ');
   // `total`: listings on the list (to say when only some are compared); `picked`: ticked ones.
   function compareHtml(rows, cfg, { total = rows.length, picked = false } = {}) {
     const best = (score) => {
@@ -3891,13 +3892,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   @media (min-width:481px){ #rf-panel.rf-full{width:calc(100vw - 32px);max-width:1600px} }
   @media (min-width:760px){
     #rf-panel.rf-full{display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);
-      grid-template-rows:auto auto auto auto auto auto auto auto minmax(0,1fr);
-      grid-template-areas:"head head" "tabs status" "ctrl news" "ctrl partial" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list"}
+      grid-template-rows:auto auto auto auto auto auto auto auto minmax(0,1fr) auto;
+      grid-template-areas:"head head" "tabs status" "ctrl news" "ctrl partial" "ctrl warn" "ctrl share" "ctrl help" "ctrl active" "ctrl list" "foot list"}
     .rf-full>.rf-head{grid-area:head} .rf-full>.rf-tabs{grid-area:tabs} .rf-full>.rf-sl-bar{grid-area:ctrl;align-self:stretch;align-content:flex-start} /* one of the two shows */
     .rf-full>.rf-controls{grid-area:ctrl;max-height:none;min-height:0;align-content:start;border-bottom:0;border-right:1px solid var(--rf-line)}
     .rf-full>.rf-help{grid-area:help} .rf-full>.rf-share-in,.rf-full>.rf-restore-in{grid-area:share} .rf-full>.rf-warnbar{grid-area:warn}
     .rf-full>.rf-status{grid-area:status;display:flex;align-items:center} .rf-full>.rf-partial{grid-area:partial} .rf-full>.rf-news{grid-area:news} .rf-full>.rf-active{grid-area:active} .rf-full>.rf-list{grid-area:list;min-height:0}
     .rf-full>.rf-tabs,.rf-full>.rf-sl-bar{border-right:1px solid var(--rf-line)}
+    .rf-full>.rf-foot{grid-area:foot;border-right:1px solid var(--rf-line)}
     .rf-full .rf-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));align-content:start;gap:4px 12px;padding:8px 12px}
     .rf-full .rf-list>:not(.rf-item){grid-column:1/-1}
   }
@@ -3916,6 +3918,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-help dt{font:600 11px ui-monospace,monospace;color:var(--rf-fg)}
   .rf-help dd{margin:0;color:var(--rf-muted)}
   .rf-about{margin:8px 0 0;color:var(--rf-muted)} .rf-about a{color:inherit;text-decoration:underline}
+  .rf-foot{margin:0;padding:8px 16px 12px;font-size:12px;text-align:center}
   .rf-item:focus{outline:2px solid var(--rf-accent-fg);outline-offset:-2px;border-radius:8px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
   .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;grid-template-columns:minmax(0,1fr);gap:10px;overflow-x:hidden;max-height:60vh;overflow-y:auto}
@@ -4486,13 +4489,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     <div class="rf-help" id="rf-help" hidden>
       <strong>Keyboard</strong>
       <dl>${KEY_HELP.map(([k, what]) => `<dt>${esc(k)}</dt><dd>${esc(what)}</dd>`).join('')}</dl>
-      <p class="rf-about">rea-enhancement: ${ABOUT_LINKS.map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`).join(' · ')}. Provided as is, without warranty or support; how you use it is up to you.</p>
+      <p class="rf-about">rea-enhancement: ${aboutHtml()}. Provided as is, without warranty or support; how you use it is up to you.</p>
     </div>
     <div class="rf-peek" hidden role="dialog" aria-label="Photo"><img alt=""><div class="rf-peek-cap"></div></div>
     <div class="rf-status" role="status" aria-live="polite"></div>
     <div class="rf-partial" hidden><span class="rf-partial-msg"></span> <button type="button" class="rf-btn sec" data-resume>Resume</button></div>
     <div class="rf-active" hidden aria-label="Active filters"></div>
-    <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>`;
+    <div class="rf-list" id="rf-list" role="tabpanel" aria-labelledby="rf-tab-results"><div class="rf-empty">${EMPTY_INTRO}</div></div>
+    <p class="rf-about rf-foot">${aboutHtml()}</p>`;
 
   // Wiring kept out of build(): each only needs the panel (and the phone media query).
   function wireResize(panel, narrow) {

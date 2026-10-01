@@ -240,6 +240,12 @@ const html = (n) => {
   assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), true);
   assert.equal(await page.getAttribute('#rf-launch', 'aria-expanded'), 'false');
 
+  assert.deepEqual(await page.$$eval('.rf-foot a', (a) => a.map((x) => `${x.textContent} ${x.href} ${x.target} ${x.rel}`)), [
+    'Source https://github.com/cpwillis-pocs/rea-enhancement _blank noopener noreferrer',
+    'Terms https://cpwillis.dev/terms _blank noopener noreferrer',
+    'Privacy https://cpwillis.dev/privacy _blank noopener noreferrer',
+  ], 'source, terms and privacy at the foot of the drawer');
+
   const probed = await page.evaluate(() => window.reaFilter.probe());
   assert.equal(probed['availableDate.display'] !== '(missing)', true);
 
