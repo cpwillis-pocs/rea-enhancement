@@ -4852,6 +4852,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         if (fromMirror) offerMirror();
       }, 'rf-undo-restore');
     } catch (err) { // merging a checked backup failed: nothing half-restored is kept, and it's worth a report
+      if (fromMirror) mirrorHeld = true; // the copy is still the only record of what was lost: not overwritten
       try { putBack(); } catch { /* the error below is the news */ }
       setStatus(`Restore failed, nothing was changed: ${err.message}`, true); logError(`restore: ${err.message}`);
     }
@@ -4876,7 +4877,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   };
   const listKeys = (e) => {
     const items = listItems();
-    if (!items.length) return false;
+    if (!items.length && e.key !== 'u') return false; // Undo still works when the action emptied the list
     const cur = document.activeElement?.closest?.('.rf-item');
     const i = cur ? items.indexOf(cur) : -1;
     const move = (d) => { const n = items[Math.max(0, Math.min(items.length - 1, i + d))] || items[0]; n.focus(); n.scrollIntoView({ block: 'nearest' }); if (ui.peekId) ui.showPeek(n); };
@@ -4962,7 +4963,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (e.key === 'v' && ui.view !== 'shortlist' && !ui.map.disabled) { e.preventDefault(); ui.map.click(); ui.map.focus(); return; }
       if (e.key === '/' && ui.view === 'shortlist') { e.preventDefault(); ui.slQuery.focus(); return; }
       if (e.key === '/' && ui.view !== 'shortlist') { e.preventDefault(); ui.fold?.(false); ui.more.open = true; panel.querySelector('#rf-keyword').focus(); return; }
-      if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item')) {
+      if (!document.activeElement.closest('button, a, summary') || document.activeElement.closest('.rf-item') || (e.key === 'u' && ui.status.contains(document.activeElement))) {
         if (listKeys(e)) { e.preventDefault(); return; }
       }
     }
@@ -5495,6 +5496,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       const msg = fn(v, rows);
       refreshMarks();
       if (msg) offerUndo(msg, () => { marks.restoreDump(before); refreshMarks(); }, 'rf-undo-restore'); // puts entries back wholesale: gone once another tab writes
+      if (sel.disabled && [ui.status, document.body].includes(document.activeElement)) ui.status.querySelector('[data-undo]')?.focus({ preventScroll: true }); // emptied the list: Undo is next
     });
     bulk(ui.bulk, (v, rows) => {
       if (v === 'star') {
@@ -5579,7 +5581,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     });
     wireShortlistBar(panel);
     wireTicks();
-    ui.run.addEventListener('click', () => busy || run());
+    ui.run.addEventListener('click', () => (busy && !runCtrl?.job) || run()); // a search here takes over from Check all / Re-check
     ui.partial.querySelector('[data-resume]').addEventListener('click', () => busy || run(true, { resume: true }));
     ui.refresh.addEventListener('click', () => busy || run(true));
     wireExports();
@@ -6018,7 +6020,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     // Saved at once; the redraw waits for a press under way (a click on this listing's Shortlist).
     ta.addEventListener('blur', () => setTimeout(() => {
       if (!done) marks.setNote(id, ta.value);
-      (ui.afterPress || ((fn) => fn()))(() => finish(true));
+      // What the press said (Hidden + Undo, Rated…) outlives the redraw that closes the note.
+      const said = ui.status.textContent;
+      (ui.afterPress || ((fn) => fn()))(() => (ui.status.textContent !== said ? keepingStatus(() => finish(true)) : finish(true)));
     }, 0));
   }
 
@@ -6118,6 +6122,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // Another tab's write redraws this one: an Undo offered in the last UNDO_KEEP_MS stays put
   // (with its hide reasons) instead of turning into "N of M match".
   const UNDO_KEEP_MS = 30000;
+  // Keeps whatever the status line says now through `fn` (and focus on it).
+  const keepingStatus = (fn) => {
+    const keep = [...ui.status.childNodes], err = ui.status.classList.contains('err'), had = ui.status.contains(document.activeElement) ? document.activeElement : null;
+    fn();
+    ui.status.replaceChildren(...keep); ui.status.classList.toggle('err', err);
+    if (had && document.activeElement !== had) had.focus({ preventScroll: true });
+  };
   const keepingUndo = (fn) => {
     const keep = ui.status.querySelector('[data-undo]') && Date.now() - (ui.undoAt || 0) < UNDO_KEEP_MS ? [...ui.status.childNodes] : null;
     const err = ui.status.classList.contains('err'), had = keep && ui.status.contains(document.activeElement) ? document.activeElement : null;
@@ -6129,10 +6140,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // Before there's anything to act on, these aren't shown at all (a row of greyed-out buttons on
   // first open said little); the Shortlist's own export menu is separate.
   const setExport = (disabled) => {
+    const f = document.activeElement; // before disabling it moves focus to the page
     for (const b of ui.exports) b.disabled = disabled;
     ui.bulk.disabled = disabled; ui.market.disabled = disabled; ui.map.disabled = disabled;
     ui.panel.querySelector('.rf-controls .rf-exports').hidden = disabled && !cache && ui.view !== 'shortlist';
     for (const el of [ui.bulk, ui.market, ui.map]) el.hidden = disabled && !cache; // nothing searched yet: hidden; an empty result: disabled, in place
+    // Disabling the focused control (Bulk hid every listing) would drop focus to the page.
+    if (disabled && f && f !== document.activeElement && ui.panel.contains(f) && (f.disabled || f.hidden)) (ui.status.querySelector('[data-undo]') || ui.status).focus({ preventScroll: true });
   };
 
   // Data-format warnings sit in their own banner, so the status line keeps "N of M match".
@@ -6969,14 +6983,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     bar._editing = true;
     ta.focus();
     // :active isn't set yet when the press's blur runs: the press is noted here instead.
-    let pressed = false;
-    const down = (e) => { pressed = e.target !== ta; };
+    // `held`: the pointer is still down (on touch, pointerup comes before the blur).
+    let pressed = false, held = false;
+    const down = (e) => { pressed = e.target !== ta; held = true; };
+    const up = () => { held = false; };
     bar.addEventListener('pointerdown', down, true);
+    document.addEventListener('pointerup', up, true);
+    document.addEventListener('pointercancel', up, true);
     const finish = (save, refocus) => {
       if (!bar._editing) return;
       bar._editing = false;
       bar._finishEdit = null;
       bar.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('pointerup', up, true);
+      document.removeEventListener('pointercancel', up, true);
       if (save && ta.value !== (r.note || '')) { marks.setNote(id, ta.value); mirrorSoon(); }
       renderListingBar();
       if (refocus) bar.querySelector('[data-l=n]')?.focus(); // not when you clicked away
@@ -6992,6 +7012,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ta.addEventListener('blur', () => {
       if (!pressed) return finish(true, false);
       if (ta.value !== (r.note || '')) { marks.setNote(id, ta.value); mirrorSoon(); }
+      if (!held) return setTimeout(() => finish(true, false), 0); // already up: after this tap's click
       const later = () => { document.removeEventListener('pointerup', later, true); document.removeEventListener('pointercancel', later, true); setTimeout(() => finish(true, false), 0); };
       document.addEventListener('pointerup', later, true);
       document.addEventListener('pointercancel', later, true);
@@ -7268,6 +7289,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       cacheKey = null;
       renderActive(); // the old search's filter chips (eg a Building one) go with it
       if (!job) setBusy(false);
+      else ui.run.setAttribute('aria-disabled', 'false'); // Check all goes on, but Run here can stop it
       ui.refresh.hidden = true;
       setExport(true);
       ui.fold?.(false); // Search is needed again: not folded away
