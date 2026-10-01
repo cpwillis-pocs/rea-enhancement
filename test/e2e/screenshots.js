@@ -101,6 +101,13 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     await page.fill('#rf-bedsMin', '2'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.selectOption('#rf-sort', 'ppb');
   } });
+  // REA's own filters on its search, marked where they leave out listings these filters keep.
+  await shot('rea-filters', { url: `${ORIGIN}/rent/property-unit+apartment-with-2-bedrooms-between-500-900-in-bondi,+nsw+2026/list-1?maxBeds=3&misc=pets-allowed`, act: async (page) => {
+    await page.click('#rf-launch');
+    await page.click('#rf-more summary'); await page.waitForTimeout(50);
+    await page.fill('#rf-priceMax', '1050'); await page.dispatchEvent('#rf-priceMax', 'change');
+    await page.click('#rf-more summary'); await page.waitForTimeout(50);
+  } });
   await shot('dimmed', { act: async (page) => {
     await search(page); await setFrom(page, '2026-10-10');
     await page.click('.rf-x');

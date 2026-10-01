@@ -31,23 +31,23 @@ Updates install automatically when `@version` goes up.
 </tr>
 <tr>
 <td width="50%" align="center"><img src="docs/screenshots/filters.jpg" alt="Filters and active-filter chips"><br><sub>Filters and active-filter chips</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/rea-filters.jpg" alt="REA's own filters, and yours put on its search"><br><sub>REA's own filters, and yours put on its search</sub></td>
+</tr>
+<tr>
 <td width="50%" align="center"><img src="docs/screenshots/shortlist.jpg" alt="Shortlist and price-change tags"><br><sub>Shortlist and price-change tags</sub></td>
-</tr>
-<tr>
 <td width="50%" align="center"><img src="docs/screenshots/shortlist-tab.jpg" alt="Shortlist across searches"><br><sub>Shortlist across searches</sub></td>
+</tr>
+<tr>
 <td width="50%" align="center"><img src="docs/screenshots/compare.jpg" alt="Compare shortlisted listings"><br><sub>Compare shortlisted listings</sub></td>
-</tr>
-<tr>
 <td width="50%" align="center"><img src="docs/screenshots/market.jpg" alt="Market view"><br><sub>Market view</sub></td>
+</tr>
+<tr>
 <td width="50%" align="center"><img src="docs/screenshots/map.jpg" alt="Map view"><br><sub>Map view</sub></td>
-</tr>
-<tr>
 <td width="50%" align="center"><img src="docs/screenshots/listing-bar.jpg" alt="Bar on a listing page"><br><sub>Bar on a listing page</sub></td>
-<td width="50%" align="center"><img src="docs/screenshots/drawer-dark.jpg" alt="Dark mode"><br><sub>Dark mode</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="docs/screenshots/mobile.jpg" width="45%" alt="Mobile width"><br><sub>Mobile width</sub></td>
-<td width="50%"></td>
+<td width="50%" align="center"><img src="docs/screenshots/drawer-dark.jpg" alt="Dark mode"><br><sub>Dark mode</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/mobile.jpg" width="62%" alt="Phone layout"><br><sub>Phone layout</sub></td>
 </tr>
 </table>
 
