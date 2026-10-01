@@ -68,6 +68,7 @@ const html = (n) => {
   await page.waitForSelector('#rf-launch:not([hidden])', { timeout: 5000 }); // built after REA's pushState returns
   assert.equal(await page.$eval('#rf-launch', (b) => b.hidden), false, 'launcher shown after SPA nav');
 
+  hits.length = 0; // woken on /rent/, it may fetch that page for badges before the reload below: counts start here
   await page.goto(SEARCH);
   await page.addScriptTag({ content: SCRIPT });
 
