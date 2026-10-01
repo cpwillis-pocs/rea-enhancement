@@ -6224,7 +6224,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.fold?.(ui.panel.querySelector('.rf-controls').classList.contains('rf-folded')); // keep its count and sort current
     renderActive();
     if (!rows.length) suggestDrops();
-    if (crawl?.id === runId) return setStatus(partialStatus()); // still reading: not "N of M match" until every page is in
+    // To the top of the new list once the chips and status above it are drawn (one layout, measured
+    // right); a redraw in place (refreshMarks) keeps the scroll.
+    const top = () => { if (rows.length && !ui.keepShown) toListTop(); };
+    if (crawl?.id === runId) { setStatus(partialStatus()); return top(); } // still reading: not "N of M match" until every page is in
     const st = diffStats(cache);
     const matchHint = (cfg.sort === 'match' && !rows.some((r) => r.score != null)
       ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '')
@@ -6239,6 +6242,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       (note ? ` ${note}` : '') + matchHint);
     const warn = schemaWarnings(cache);
     setWarn('schema', warn.length ? `REA's data format may have changed (${warn.join('; ')}). Copy report, then paste it into an issue on the script's GitHub page.` : '');
+    top();
   }
 
   // Nothing matches: offer the filters whose removal brings back the most listings.
@@ -6274,7 +6278,6 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (!rows.length) return setEmpty('Nothing matches those filters.');
     if (ui.mapOn) { const h = mapHtml(rows, cfg); if (h !== ui.mapDrawn || !ui.list.querySelector(':scope > .rf-map')) { ui.list.innerHTML = h; ui.mapDrawn = h; } } // the same map: kept (and its focus)
     else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : '', { records: agencyRecord(marks.shortlist()), hiddenAg: new Set(marks.hiddenAgencies().map(agencyKey)) }); else paintList(rows);
-    if (!ui.keepShown) toListTop(); // a redraw in place (refreshMarks) keeps the scroll: no layout to force
   }
 
   // Drawer renders in chunks: 500 cards at once is a ~80ms long task on every filter change.
