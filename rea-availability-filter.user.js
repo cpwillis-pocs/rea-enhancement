@@ -2239,7 +2239,9 @@
   // read, plus `failed: { page, max, message }`, instead of throwing it all away. `isCached(url)`
   // skips the polite pause before a page that won't be fetched (eg on Resume). `onPage(rows, page, max)`
   // after each page read, with the rows so far, so a caller can show them before the last page.
-  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal, keepPartial = false, isCached = () => false, onPage = null } = {}) {
+  // `lastFetchAt()`: when the caller's last real request ended; the pause counts from then (a page
+  // served from memory isn't a request to space out from).
+  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal, keepPartial = false, isCached = () => false, onPage = null, lastFetchAt = null } = {}) {
     const rows = [];
     const key = searchKey(base);
     let page = 1, max = 1, total = 1, sample = null, paging = '';
@@ -2275,7 +2277,10 @@
       onPage?.(rows, page, max);
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
-      if (page <= max && !seeded && !nextSeeded && !isCached(pageUrl(base, page))) await wait(jitter(PAGE_DELAY_MS), signal);
+      if (page <= max && !seeded && !nextSeeded && !isCached(pageUrl(base, page))) {
+        const gap = jitter(PAGE_DELAY_MS) - (lastFetchAt ? Date.now() - lastFetchAt() : 0);
+        if (gap > 0) await wait(gap, signal);
+      }
     } while (page <= max);
     return { rows, truncated: total > MAX_PAGES, sample, ...(paging ? { paging } : {}) };
   }
@@ -6769,7 +6774,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       // Refresh means "newer than what I'm looking at", so the load-time seed is skipped too.
       const res = await fetchAllPages(base, onProgress, {
         seed: (force && !resume) || Date.now() - bootAt > ROWS_TTL_MS ? null : boot,
-        signal: ctrl.signal, keepPartial: true, isCached: memoFresh, onPage,
+        signal: ctrl.signal, keepPartial: true, isCached: memoFresh, onPage, lastFetchAt: () => lastFetchEnd,
         getPage: (url) => getPage(url, { signal: ctrl.signal, onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
@@ -6854,13 +6859,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // A page that loaded but has no data where the script reads it: say so (with Copy report)
   // rather than pause, which would look like a bot check and never get reported.
   const formatWarn = (msg) => { logError(`format: ${msg}`); setWarn('format', `${msg} Copy report, then paste it into an issue on the script's GitHub page.`); };
+  let lastFetchEnd = 0; // when REA last answered a request of ours (fetchAllPages spaces requests from it)
   const getPage = (url, opts) => {
     const hit = pageMemo.get(url);
     // An entry whose run was aborted is about to reject; don't hand it to a new caller.
     if (hit && !hit.signal?.aborted && Date.now() - hit.at < ROWS_TTL_MS) return hit.p;
     const until = pause.until();
     if (until) return Promise.reject(pausedErr(until));
-    const p = fetchResults(url, opts).catch((e) => { if (pageMemo.get(url)?.p === p) pageMemo.delete(url); tripPause(e); throw e; });
+    const p = fetchResults(url, opts).finally(() => { lastFetchEnd = Date.now(); }).catch((e) => { if (pageMemo.get(url)?.p === p) pageMemo.delete(url); tripPause(e); throw e; });
     pageMemo.delete(url); // re-insert so Map order stays oldest-first for eviction
     pageMemo.set(url, { at: Date.now(), p, signal: opts?.signal });
     if (pageMemo.size > PAGE_MEMO_MAX) pageMemo.delete(pageMemo.keys().next().value);

@@ -62,6 +62,17 @@ test('fetchAllPages: onPage gets the rows so far after each page, before the pau
   assert.deepEqual(log, ['fetch', 'page', 'wait', 'fetch', 'page', 'wait', 'fetch', 'page']);
 });
 
+test('fetchAllPages: the pause counts from the last real request', async () => {
+  const waits = [];
+  const fetchImpl = async (u) => resp(200, page(results({ exact: [listing({ id: `p${u.match(/list-(\d+)/)[1]}` })], maxPage: 2 })));
+  const wait = async (ms) => waits.push(ms);
+  await core.fetchAllPages(BASE, () => {}, { fetchImpl, wait, lastFetchAt: () => Date.now() - 60e3 }); // page 1 answered long ago (eg from memory)
+  assert.deepEqual(waits, [], 'no pause owed');
+  await core.fetchAllPages(BASE, () => {}, { fetchImpl, wait, lastFetchAt: () => Date.now() });
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0] >= 400 && waits[0] <= 900, 'a request just now: the whole pause');
+});
+
 test('fetchAllPages: stops when REA repeats a page, says when the page count is missing', async () => {
   const same = async () => resp(200, page(results({ exact: [listing({ id: 'a' }), listing({ id: 'b' })], maxPage: 5 })));
   let n = 0;
