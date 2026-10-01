@@ -2707,6 +2707,24 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.close(); await ctx.close();
   });
 
+  // 78. The same search with REA's tracking fields on (its Filters dialog adds them) is the same
+  // search: what's read stays, and searching again fetches nothing.
+  await block('78', async () => {
+    const ctx = await browser.newContext();
+    const hits = [];
+    const page = await open(ctx, SEARCH, { route: serve(hits) });
+    await run(page);
+    const before = hits.length;
+    await page.evaluate((u) => history.pushState({}, '', u), `${SEARCH}?source=refinement&sourcePage=rea%3Arent&sourceElement=search-box-search`);
+    await settle(page); await settle(page);
+    assert.doesNotMatch(await status(page), /Search changed/);
+    await page.click('#rf-run');
+    await waitStatus(page, /^18 of 18 listings match\..* Refresh fetches current listings\./);
+    assert.equal(hits.length, before, 'nothing fetched');
+    console.log('tracking fields ignored: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);

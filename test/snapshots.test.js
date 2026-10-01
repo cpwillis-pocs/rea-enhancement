@@ -253,3 +253,27 @@ test('snapshotStore: a deferred save is readable at once and written by whatever
   await x.saved;
   assert.equal(Object.keys(st.exportData()).length, 2, 'import kept the pending save');
 });
+
+test('search keys: REA tracking fields and filter order are not part of a search; old keys are merged', () => {
+  const tagged = 'https://www.realestate.com.au/rent/in-bondi/list-3?maxBeds=3&source=refinement&sourcePage=rea%3Arent&sourceElement=search-box-search&misc=pets-allowed';
+  assert.equal(core.searchKey(tagged), 'https://www.realestate.com.au/rent/in-bondi/list-1?maxBeds=3&misc=pets-allowed');
+  assert.equal(core.searchKey(tagged), core.searchKey('https://www.realestate.com.au/rent/in-bondi/list-1?misc=pets-allowed&maxBeds=3'));
+  assert.equal(core.searchKey(KEY), KEY, 'a plain search keeps its key');
+  // Stored under the old keys (tagged and untagged): one search, the newer copy kept.
+  const storage = mem();
+  const old = core.snapshotStore(storage, () => 1e12);
+  old.save('https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement', [row('146500001')], false);
+  const raw = JSON.parse(storage.getItem('rea-avail-filter/snapshots/v1'));
+  const entry = raw.s[Object.keys(raw.s)[0]];
+  raw.s = { 'https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement': { ...entry, at: 1e12 + 5 }, [KEY]: { ...entry, at: 1e12 } };
+  storage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify(raw));
+  const st = core.snapshotStore(storage, () => 1e12 + 10);
+  assert.deepEqual(Object.keys(st.exportData()), [KEY]);
+  assert.equal(st.exportData()[KEY].at, 1e12 + 5, 'the newer copy');
+  assert.equal(st.importData({ 'https://www.realestate.com.au/rent/in-manly/list-1?sourceElement=x': { ...entry, at: 1e12 } }), 1);
+  assert.ok('https://www.realestate.com.au/rent/in-manly/list-1' in st.exportData(), 'a backup imports under the key without tracking');
+  // A preset bound to the old key still applies to the search.
+  const presets = mem();
+  presets.setItem('rea-avail-filter/presets/v1', JSON.stringify({ v: 1, list: [{ name: 'Mine', cfg: { priceMax: '900' }, key: 'https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement' }] }));
+  assert.equal(core.presetStore(presets).forSearch(KEY)?.name, 'Mine');
+});

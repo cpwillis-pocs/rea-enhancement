@@ -993,11 +993,16 @@
       try {
         const d = JSON.parse(raw);
         if (isObj(d) && isObj(d.s)) {
+          const s = {};
           for (const [k, raw] of Object.entries(d.s)) {
-            if (!isSearchKey(k) || !isObj(raw) || okTime(raw.at) == null) { delete d.s[k]; continue; }
-            const e = d.s[k] = lazyEntry(raw);
+            if (!isSearchKey(k) || !isObj(raw) || okTime(raw.at) == null) continue;
+            // Stored before keys left out REA's tracking: the same search under two keys keeps its newer copy.
+            const key = searchKey(k);
+            if (s[key] && s[key].at >= raw.at) continue;
+            const e = s[key] = lazyEntry(raw);
             for (const f of ['ids', 'baseIds']) if (e[f] != null && !Array.isArray(e[f])) e[f] = f === 'ids' ? [] : null;
           }
+          d.s = s;
           return d;
         }
       } catch { /* corrupt */ }
@@ -1183,8 +1188,9 @@
         const d = load();
         const got = [];
         const okIds = (a) => (Array.isArray(a) ? a.map(String).filter(isListingId) : null);
-        for (const [k, raw] of Object.entries(src)) {
-          if (!isSearchKey(k) || !raw || typeof raw !== 'object' || okTime(raw.at) == null) continue;
+        for (const [key, raw] of Object.entries(src)) {
+          if (!isSearchKey(key) || !raw || typeof raw !== 'object' || okTime(raw.at) == null) continue;
+          const k = searchKey(key); // a backup from before keys left out REA's tracking
           const e = unpackEntry(raw); // a pasted stored copy is packed
           if (d.s[k] && d.s[k].at >= e.at) continue; // keep the newer copy
           const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, IMPORT_ROWS_MAX).map(fatRow).filter((r) => r.url);
@@ -1219,7 +1225,11 @@
     const load = () => {
       try {
         const d = JSON.parse(storage.getItem(PRESETS_KEY));
-        if (Array.isArray(d?.list)) { d.list = d.list.filter((p) => isObj(p) && typeof p.name === 'string' && p.name && isObj(p.cfg)); return d; }
+        if (Array.isArray(d?.list)) {
+          d.list = d.list.filter((p) => isObj(p) && typeof p.name === 'string' && p.name && isObj(p.cfg));
+          for (const p of d.list) if (isSearchKey(p.key)) p.key = searchKey(p.key); // bound before keys left out REA's tracking
+          return d;
+        }
       } catch { /* corrupt */ }
       return { v: 1, list: [] };
     };
@@ -1522,8 +1532,11 @@
     return u.href;
   };
 
-  // Identity of a search regardless of which page / view is showing.
-  const searchKey = (href) => pageUrl(href, 1);
+  // REA's analytics fields on a search URL (its own Filters dialog adds them): not part of which search it is.
+  const REA_TRACKING = ['source', 'sourcePage', 'sourceElement'];
+  // Identity of a search regardless of which page / view is showing, how REA's links tagged it, or
+  // the order of its filters.
+  const searchKey = (href) => { const u = new URL(pageUrl(href, 1)); for (const t of REA_TRACKING) u.searchParams.delete(t); u.searchParams.sort(); return u.href; };
   const isSearchPage = (href) => /^\/rent\/[^/]/.test(new URL(href).pathname);
   const pageNum = (href) => +(new URL(href).pathname.match(PAGE_SEG)?.[1] || 1);
 
@@ -2872,7 +2885,6 @@
   const REA_TYPES = { house: 'House', townhouse: 'Townhouse', 'unit+apartment': 'Apartment & Unit', villa: 'Villa' };
   const TYPE_TO_REA = { House: 'house', Townhouse: 'townhouse', Villa: 'villa', Apartment: 'unit+apartment', Unit: 'unit+apartment' }; // REA's listing type names
   const REA_MISC = { 'pets-allowed': 'pets considered', furnished: 'furnished', 'ex-deposit-taken': 'no deposit taken' };
-  const REA_TRACKING = ['source', 'sourcePage', 'sourceElement'];
   const REA_MAX_COUNT = 6, REA_BEFORE_DAYS = 42; // REA's dropdowns: 6+ rooms, about six weeks of dates
   const REA_SEG = /^(?:property-(.+?)-)?(?:with-(studio|\d+)(?:-bedrooms?)?-)?(?:between-(any|\d+)-(any|\d+)-)?in-(.+)$/;
   const reaFiltersOf = (href) => {
@@ -2952,7 +2964,7 @@
     return u.href;
   };
   // Same REA search either way (REA's tracking fields aside).
-  const sameReaSearch = (a, b) => { const k = (h) => { const u = new URL(h); for (const t of REA_TRACKING) u.searchParams.delete(t); u.searchParams.sort(); return pageUrl(u.href, 1); }; try { return k(a) === k(b); } catch { return false; } };
+  const sameReaSearch = (a, b) => { try { return searchKey(a) === searchKey(b); } catch { return false; } };
 
   const startOfDay = (d = new Date()) => { const t = new Date(d); t.setHours(0, 0, 0, 0); return t; };
   const isFresh = (r) => !!(r.isNew || r.sinceLast); // new: REA-dated recently, or since the last visit

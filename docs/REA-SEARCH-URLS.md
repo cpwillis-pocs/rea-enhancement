@@ -25,7 +25,7 @@ Spike notes (2026-10-01) for reading REA's own search filters and writing them b
 | Features | query | `checkedFeatures=` comma list of labels, lower case; also copied into `keywords` | `checkedFeatures=dishwasher,air conditioning` |
 | Keywords | query | `keywords=` comma list (typed words; ticked features too) | `keywords=balcony` |
 | Sort | query | `activeSort=` | `activeSort=price-asc` |
-| Tracking | query | `source`, `sourcePage`, `sourceElement`: REA's analytics, safe to drop | |
+| Tracking | query | `source`, `sourcePage`, `sourceElement`: REA's analytics, safe to drop; `searchKey` leaves them out (and sorts the rest), so a search is one search however it was reached | |
 
 ## Control values REA offers
 
