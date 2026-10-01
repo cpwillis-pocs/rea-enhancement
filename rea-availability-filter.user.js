@@ -496,7 +496,7 @@
         lastInspect: Math.max(typeof e.li === 'number' ? e.li : 0, lastPast(d.in, now())) || null,
         inspectAnswered: typeof e.nd === 'number' ? e.nd : 0,
         inspectCancelled: Array.isArray(e.ic) && now() - e.ic[0] < CANCEL_SHOW_MS ? clip(e.ic[1], 80) : '',
-        inspectCancelledAt: Array.isArray(e.ic) && typeof e.ic[2] === 'number' ? e.ic[2] : null, // so a calendar can cancel it
+        inspectCancelledAt: Array.isArray(e.ic) ? okTime(e.ic[2]) : null, // so a calendar can cancel it
         // When it last changed, for "since your last visit": price (and which way), availability, features, cancellation.
         priceAt: typeof e.pt === 'number' ? e.pt : null, priceDir: typeof e.p === 'number' && typeof e.pp === 'number' && e.p !== e.pp ? (e.p < e.pp ? 'down' : 'up') : '',
         availAt: typeof e.avt === 'number' ? e.avt : null, featAt: typeof e.fst === 'number' ? e.fst : null, cancelledAt: Array.isArray(e.ic) && typeof e.ic[0] === 'number' ? e.ic[0] : null,
@@ -747,10 +747,10 @@
           if (Number.isInteger(e.rt) && e.rt >= 1 && e.rt <= 5) cur.rt = e.rt;
           const ck = cleanChecks(e.ck); if (Object.keys(ck).length) cur.ck = ck;
           const qa = cleanQa(e.qa); if (Object.keys(qa).length) cur.qa = { ...cleanQa(cur.qa), ...qa };
-          if (typeof e.o === 'number') cur.o = Math.max(cur.o || 0, e.o);
+          if (okTime(e.o) != null) cur.o = Math.max(cur.o || 0, e.o);
           for (const k of ['nd', 'li', 'rv']) if (okTime(e[k]) != null) cur[k] = Math.max(cur[k] || 0, e[k]);
           if (e.h && okTime(e.ht) != null) { cur.ht = e.ht; if (typeof e.hp === 'number') cur.hp = e.hp; }
-          if (Array.isArray(e.ic) && okTime(e.ic[0]) != null && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80), typeof e.ic[2] === 'number' ? e.ic[2] : null];
+          if (Array.isArray(e.ic) && okTime(e.ic[0]) != null && typeof e.ic[1] === 'string') cur.ic = [e.ic[0], clip(e.ic[1], 80), okTime(e.ic[2])];
           n++;
         }
         for (const f of Object.keys(NAMED)) {
@@ -977,7 +977,7 @@
         const d = JSON.parse(raw);
         if (isObj(d) && isObj(d.s)) {
           for (const [k, raw] of Object.entries(d.s)) {
-            if (!isSearchKey(k) || !isObj(raw) || typeof raw.at !== 'number') { delete d.s[k]; continue; }
+            if (!isSearchKey(k) || !isObj(raw) || okTime(raw.at) == null) { delete d.s[k]; continue; }
             const e = d.s[k] = unpackEntry(raw);
             for (const f of ['rows', 'gone']) e[f] = Array.isArray(e[f]) ? e[f].filter(isObj) : [];
             for (const f of ['ids', 'baseIds']) if (e[f] != null && !Array.isArray(e[f])) e[f] = f === 'ids' ? [] : null;
@@ -997,8 +997,8 @@
     // `evict`: false for a pin, which may trim gone rows to fit but never drops another search.
     const persist = (d, evict = true) => {
       const order = () => Object.keys(d.s).sort((a, b) => (d.s[b].pin ? 1 : 0) - (d.s[a].pin ? 1 : 0) || d.s[b].at - d.s[a].at);
-      const evicted = order().slice(SNAP_MAX);
-      for (const k of evicted) delete d.s[k];
+      const evicted = order().slice(SNAP_MAX), removed = {}, goneWas = new Map();
+      for (const k of evicted) { removed[k] = d.s[k]; delete d.s[k]; }
       // Storage full: give up the cheapest first, one step at a time: gone rows, then unpinned
       // searches (oldest first, the one just saved last), then pinned ones. `quota` says it was
       // storage, not the 3-search limit.
@@ -1009,14 +1009,19 @@
           quota = true;
           const ks = Object.keys(d.s), newest = ks.reduce((a, k) => (!a || d.s[k].at > d.s[a].at ? k : a), '');
           const withGone = ks.filter((k) => d.s[k].gone?.length);
-          if (withGone.length) { for (const k of withGone) { d.s[k].gone = []; entryJson.delete(d.s[k]); } continue; }
+          if (withGone.length) { for (const k of withGone) { goneWas.set(d.s[k], d.s[k].gone); d.s[k].gone = []; entryJson.delete(d.s[k]); } continue; }
           if (!evict) break;
           const k = ks.sort((a, b) => (d.s[a].pin ? 1 : 0) - (d.s[b].pin ? 1 : 0) || (a === newest) - (b === newest) || d.s[a].at - d.s[b].at)[0];
           // Down to the one just saved: it can't fit even alone, so nothing is written and what's
           // stored (the others, and its own last copy) stays as it was.
           if (!k) break;
-          if (k === newest) return { evicted: [], ok: false, quota, kept: false };
-          delete d.s[k]; evicted.push(k);
+          if (k === newest) {
+            // `d` is put back as it came, so a caller can drop that one and try the rest again.
+            Object.assign(d.s, removed);
+            for (const [e, g] of goneWas) { e.gone = g; entryJson.delete(e); }
+            return { evicted: [], ok: false, quota, kept: false };
+          }
+          removed[k] = d.s[k]; delete d.s[k]; evicted.push(k);
         }
       }
       return { evicted, ok: false, quota };
@@ -1143,12 +1148,12 @@
         const got = [];
         const okIds = (a) => (Array.isArray(a) ? a.map(String).filter(isListingId) : null);
         for (const [k, raw] of Object.entries(src)) {
-          if (!isSearchKey(k) || !raw || typeof raw !== 'object' || typeof raw.at !== 'number') continue;
+          if (!isSearchKey(k) || !raw || typeof raw !== 'object' || okTime(raw.at) == null) continue;
           const e = unpackEntry(raw); // a pasted stored copy is packed
           if (d.s[k] && d.s[k].at >= e.at) continue; // keep the newer copy
           const rows = (Array.isArray(e.rows) ? e.rows : []).slice(0, IMPORT_ROWS_MAX).map(fatRow).filter((r) => r.url);
           d.s[k] = {
-            at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
+            at: Math.min(e.at, now()), baseAt: okTime(e.baseAt), baseIds: okIds(e.baseIds), // a clock far ahead elsewhere isn't "checked just now" for ever
             ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
             gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
             ...(e.pin ? { pin: 1 } : {}), ...(e.lite ? { lite: 1 } : {}), trend: cleanTrend(e.trend), // lite: its text was trimmed before
@@ -1156,9 +1161,17 @@
           fitBudget(d.s[k]);
           got.push(k);
         }
-        // Counted as kept: one that storage had no room for (evicted at once) wasn't restored.
-        const { evicted } = persist(d);
-        return got.filter((k) => !evicted.includes(k)).length;
+        // Counted as kept: one storage had no room for (evicted at once, or refused) wasn't restored.
+        // A refused one is the newest: it's dropped and the rest tried again, so a smaller one still fits.
+        let res = persist(d);
+        const notKept = [];
+        while (res.kept === false) {
+          const newest = Object.keys(d.s).reduce((a, k) => (!a || d.s[k].at > d.s[a].at ? k : a), '');
+          if (!newest || !got.includes(newest)) break; // one of ours already stored: leave storage as it is
+          delete d.s[newest]; notKept.push(newest);
+          res = persist(d);
+        }
+        return got.filter((k) => !res.evicted.includes(k) && !notKept.includes(k)).length;
       },
     };
   };
@@ -5847,7 +5860,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
         store.set(key, res.rows, res.truncated);
         const snap = snaps.save(key, res.rows, res.truncated);
-        if (snap.quota) { full = true; dropped.push(...snap.evicted.map(searchLabel)); if (snap.refused) dropped.push(label); }
+        // Only a save that gave something up stops the check (trimming gone rows to fit doesn't);
+        // a refused one keeps its last copy, so it isn't "no longer remembered".
+        if (snap.quota && (snap.evicted.length || snap.refused)) { full = true; dropped.push(...snap.evicted.map(searchLabel)); }
         if (key === (currentKey() ?? cacheKey)) adopt(key, res.rows, res.truncated, '', snap, true);
         else learn(res.rows, true, true);
         ui.savedResult.set(key, found);
