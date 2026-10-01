@@ -2,6 +2,11 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.3
+
+- Fixed: on a listing page, the bar's checklist and details could fold shut just after you opened them (when the listing's own page finished loading), taking focus with them.
+- Tests: the browser tests no longer depend on timing that differs between machines and CI (a press ending a task later, two navigations in one task, macOS menus).
+
 ## 2.36.2
 
 - **On REA's search:** the filters set on REA itself (type, rent, rooms, dates, surrounding suburbs, pets, features) show above the toolkit's, in orange where they leave out listings your filters here would keep.
