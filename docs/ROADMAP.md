@@ -50,6 +50,8 @@ These were raised as questions and settled by the maintainer. Don't reopen them 
 
 ## Ideas not built yet
 
+- **Use REA's own filters** (spiked 2.36.1, see [REA-SEARCH-URLS.md](REA-SEARCH-URLS.md)): read the filters in REA's search URL as "set on REA" chips, then offer to apply the toolkit's rent, beds, baths, cars, type, available-before, surrounding and feature filters to REA's URL, so REA narrows the results before the crawl (fewer pages, fewer capped searches). Location stays REA's; not a wrapper around REA's UI.
+
 The 2.33.0 audit (its bugs, the UI/UX pass, seven ideas and the end-of-search slow spots) shipped in 2.34.0 (see the [CHANGELOG](../CHANGELOG.md#2340)). Considered then and left out:
 - Hiding Search all pages once there are results (Refresh would be the only button): 21 e2e blocks press Search after results, and both buttons read clearly enough.
 - Nested, collapsible groups for the heads-up and amenity chips in More filters: headings were added instead, and the chips stay flat so one tap reaches any of them.
