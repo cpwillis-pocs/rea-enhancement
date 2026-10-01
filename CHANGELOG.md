@@ -2,6 +2,26 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.35.5
+
+- **Pets read right again:** "No smoking, pets considered" (and "No parties, pets negotiable") had been read as no pets since 2.35.4. "Pets - negotiable" and "Pets - not allowed" are now read too.
+- **Fewer false dates and leases:**
+  - Street and place names are no longer taken as move-in months ("in Jan Juc", "in Mar St"); "Available in June" and "Sept" are read.
+  - "Level 3, 6 month lease" is a 6 month lease, not 3–6; "12 weeks rent free" isn't a lease.
+  - "Available: for inspection", "Available – to view", "Inspection times available" and "Open homes available" aren't move-in dates.
+- **Rents:** "a month free" and "monthly cleaning" no longer rescale a weekly rent; "every 2 weeks", "every fortnight" and "every month" are read; a time ("11:30 weekly") is never read as the rent.
+- **Faster:** a tab in the background no longer redraws on every change made in another tab (it catches up when you look at it), each filter pass is about twice as fast, and a status change on Results redraws only that listing and its agency's.
+- Fixed:
+  - "don’t", "isn’t", "won’t" with curly apostrophes didn't count as negations ("We don’t charge application fees" raised a fee heads-up).
+  - A deadline was beaten by a later lease date ("close 9/10 lease from 1/12/2026"); "close 5pm Tues 6/10" wasn't read.
+  - My inspection times: "Sat 9-11 or 2-4" read the second slot as 2–4am on any day; "Weekends or weekdays after 5pm" lost weekend daytime; "12 noon" and "onwards" weren't read.
+  - "No gas heating" meant no gas cooking; "No heaters" wasn't no heating.
+  - A listed date west of UTC was a day early, which moved a weekday-only deadline.
+  - Closing a note after clicking Hide wiped "Listing hidden. Undo"; on touch, tapping a listing-page button with a note open left the bar stale.
+  - Run did nothing while Check all was still going after you changed search; it now takes over.
+  - A Bulk action that hid every shown listing dropped keyboard focus to the page; focus goes to Undo, and u works.
+  - A restore near the storage limit said searches were restored when none were, and dropped ones that fitted; malformed times in a backup could break calendar export; Check all stopped after a save that only trimmed old entries.
+
 ## 2.35.4
 
 - **Rents read right:** a monthly rent with a weekly figure after it ("$2,600 pcm (600 pw)", "per month including weekly cleaning") is no longer read as weekly, which put it 4x too high. "/mo", "per mnth", "per calender month", "p/f", "per 2 weeks", "per day" and a rent with no "$" ("650 per week") are read too.
