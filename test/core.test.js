@@ -887,6 +887,44 @@ test('copied report: short street numbers and bracketed landlines are left out; 
   assert.equal(core.noticeBy('2026-02-31', 21), '');
 });
 
+test('2.35.2 audit: text and parsing edge cases', () => {
+  assert.equal(core.applyByOf('Applications close Friday 3rd October', new Date(2026, 11, 5)), '', 'an old deadline with no year is not rolled ten months ahead');
+  assert.equal(core.applyByOf('Applications close Friday 3rd October', new Date(2026, 8, 23)), '2026-10-03');
+  assert.ok(core.parseFreeTimes('Sat 9am–1pm'), 'en dash: what {mytimes} writes');
+  assert.ok(core.parseFreeTimes('Mon to Fri 17:30-'));
+  assert.equal(core.parseFreeTimes(core.freeTimesText('Sat 9-13').replace(/^I can inspect |\.$/g, ''))?.length, 1, 'round trip');
+  assert.equal(core.parsePrice('$3,000 per mth'), 692);
+  assert.equal(core.parsePrice('$2,600 month'), 600);
+  assert.equal(core.parsePrice('$1,200 fortnight'), 600);
+  assert.deepEqual(core.leaseTermOf('1-2 year lease'), { min: 12, max: 24 });
+  assert.deepEqual(core.leaseTermOf('6/12 month lease'), { min: 6, max: 12 });
+  assert.equal(core.parsePlaces('https://www.google.com/maps/@x!3d-33.8688!4d151.2093')[0]?.label, 'Place 1', 'a link is not a label');
+  assert.equal(core.availFromText('Available on 12.11.2026', new Date(2026, 9, 1))?.getDate(), 12);
+  const sh = (v) => core.shapeOf({ price: { display: v } }).price.display;
+  for (const v of ['3 The Esplanade, Manly', '5550 0123', '12 Ocean Grove']) assert.match(sh(v), /^string\(\d+\)$/, v);
+});
+
+test('2.35.2 audit: an earlier session added is not a cancellation; remembered searches keep more sessions and safe fields', () => {
+  let t = new Date(2026, 8, 20).getTime();
+  const st = core.marksStore(require('./helpers').memStorage(), () => t);
+  const at = (d) => new Date(2026, 9, d, 10).getTime();
+  const ses = (...ds) => ds.map((d) => ({ at: at(d), label: `Sat ${d} Oct` }));
+  const r = { id: '146500091', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500091', address: '1 A St', price: '$600', inspections: ses(3, 4, 5, 6) };
+  st.observe([r], { full: true });
+  st.toggle(r.id, 's', r);
+  t += 3600e3;
+  st.observe([{ ...r, inspections: ses(2, 3, 4, 5, 6) }], { full: true });
+  assert.equal(st.shortlist()[0].inspectCancelled, '', 'session 6 is still on');
+  const row = core.snapshotStore(require('./helpers').memStorage(), () => t);
+  row.save('https://www.realestate.com.au/rent/in-bondi/list-1', [{ ...r, priceNum: 600, inspections: ses(2, 3, 4, 5, 6) }], false);
+  assert.equal(row.get('https://www.realestate.com.au/rent/in-bondi/list-1').rows[0].inspections.length, 5);
+  const bad = core.snapshotStore(require('./helpers').memStorage(), () => t);
+  bad.importData({ 'https://www.realestate.com.au/rent/in-manly/list-1': { at: t, ids: ['146500092'], lite: 1, rows: [{ id: '146500092', url: 'https://www.realestate.com.au/property-unit-nsw-manly-146500092', applyBy: '2099-01-01\r\nATTACH:x', taken: 'toString' }] } });
+  const got = bad.get('https://www.realestate.com.au/rent/in-manly/list-1');
+  assert.deepEqual([got.rows[0].applyBy, got.rows[0].taken], ['', ''], 'only real dates and known codes');
+  assert.ok(bad.sizes()[0].lite, 'trimmed text stays marked');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

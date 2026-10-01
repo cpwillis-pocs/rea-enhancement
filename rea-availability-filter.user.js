@@ -237,9 +237,11 @@
   };
   const perBed = (priceNum, beds) => (isFinite(priceNum) ? Math.round(priceNum / Math.max(1, +beds || 0)) : Infinity);
   // Past sessions drop out (stored summaries age), so later ones aren't crowded out by the cap.
-  const cleanInspections = (a) => (Array.isArray(a) ? a : [])
+  // `max`: the shortlist copy keeps INSPECT_KEEP; remembered searches and comparisons keep more.
+  const cleanInspections = (a, max = INSPECT_KEEP) => (Array.isArray(a) ? a : [])
     .map((i) => ({ at: typeof i?.at === 'number' ? i.at : null, label: clip(i?.label, 80) }))
-    .filter((i) => i.label && (i.at == null || i.at >= Date.now() - INSPECT_GRACE_MS)).slice(0, INSPECT_KEEP);
+    .filter((i) => i.label && (i.at == null || i.at >= Date.now() - INSPECT_GRACE_MS)).slice(0, max);
+  const SNAP_INSPECT_MAX = 12; // sessions a remembered search keeps per listing
   const clip = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : '');
   // A sparser source (eg a property page without agency or inspections) updates what it has
   // and keeps the rest of the stored summary.
@@ -389,7 +391,7 @@
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
   const fromSummary = (d) => ({
     url: reaUrl(d.u), address: d.a, price: d.p, available: d.v, img: reaImg(d.i), type: d.t, beds: d.b, baths: d.ba, cars: d.c, suburb: d.su,
-    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', applyBy: typeof d.ab === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.ab) ? d.ab : '', lease: typeof d.le === 'string' ? d.le : '', taken: TAKEN_LABELS[d.tk] ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
+    inspections: cleanInspections(d.in), watch: typeof d.w === 'string' ? d.w : '', applyVia: typeof d.ap === 'string' ? d.ap : '', applyBy: typeof d.ab === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.ab) ? d.ab : '', lease: typeof d.le === 'string' ? d.le : '', taken: typeof d.tk === 'string' && Object.hasOwn(TAKEN_LABELS, d.tk) ? d.tk : '', byAppt: d.bp === 1, bond: d.bo, lat: typeof d.la === 'number' ? d.la : null, lng: typeof d.ln === 'number' ? d.ln : null, agency: d.ag,
     // `an`: what the listing said it doesn't have (kept since 2.35; older summaries read those as unknown).
     amen: Array.isArray(d.am) ? Object.fromEntries(AMENITIES.map((a) => [a.id, d.am.includes(a.id) ? 'yes' : Array.isArray(d.an) && d.an.includes(a.id) ? 'no' : null])) : {},
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
@@ -532,9 +534,12 @@
               // inspection or a dropped clause leaves the shortlist too. (Property pages merge.)
               // A batch with no inspections at all may mean REA stopped sending them: keep what's stored.
               const fields = anyInspections ? SEARCH_COMPLETE : SEARCH_COMPLETE.filter((k) => k !== 'in');
-              const gone = anyInspections ? cancelledInspection(e.d?.in, next.in, t) : null;
+              // Compared with every session REA lists now, not the few kept: an earlier one added would
+              // push a later one out of the kept list, and it would look cancelled.
+              const all = cleanInspections(r.inspections, Infinity);
+              const gone = anyInspections ? cancelledInspection(e.d?.in, all, t) : null;
               if (gone) e.ic = [t, clip(gone.label, 80), gone.at];
-              else if (Array.isArray(e.ic) && next.in.some((i) => i.at === e.ic[2] || i.label === e.ic[1])) delete e.ic; // it came back
+              else if (Array.isArray(e.ic) && all.some((i) => i.at === e.ic[2] || i.label === e.ic[1])) delete e.ic; // it came back
               e.d = { ...mergeSummary(e.d, next), ...Object.fromEntries(fields.map((k) => [k, next[k]])) };
             } else e.d = mergeSummary(e.d, next); // keep the shortlist's copy current, never poorer
             if (li) e.li = li;
@@ -556,7 +561,7 @@
             const today = dayNum(new Date(t)), day = dayNum(r.avail);
             const av = day <= today ? 0 : day;
             // A yearless date ("20th Jul") that has passed rolls into next year: not a change either.
-            const rolled = e.av === 0 && av - today > YEARLESS_SKIP_DAYS;
+            const rolled = av - today > YEARLESS_SKIP_DAYS && (e.av === 0 || e.av <= today); // its date passed (seen as now or not)
             if (e.av != null && e.av !== av && !(av === 0 && e.av <= today) && !rolled) { e.pav = e.av; e.avt = t; e.avd = av > (e.av || today) ? 'later' : 'sooner'; }
             if (!rolled) e.av = av;
           }
@@ -816,7 +821,7 @@
     for (const k of ROW_DATES) if (k !== 'nextInspect') o[k] = r[k] instanceof Date && !isNaN(r[k]) ? r[k].getTime() : null;
     o.headline = clip(r.headline, 160);
     o.text = clip(r.text, SNAP_TEXT_MAX);
-    o.inspections = cleanInspections(r.inspections);
+    o.inspections = cleanInspections(r.inspections, SNAP_INSPECT_MAX);
     o.features = (Array.isArray(r.features) ? r.features : []).slice(0, 40).map((f) => clip(f, 80));
     // Stored as computed: the text kept here is clipped, so recomputing could miss a late "no pets".
     // Only known answers are kept (most are unknown): about a fifth of a remembered search's size.
@@ -837,7 +842,9 @@
     r.surrounding = !!o?.surrounding;
     r.headline = clip(o?.headline, 160);
     r.text = fold(clip(o?.text, SNAP_TEXT_MAX));
-    r.inspections = cleanInspections(o?.inspections).filter((i) => i.label);
+    r.inspections = cleanInspections(o?.inspections, SNAP_INSPECT_MAX).filter((i) => i.label);
+    if (!isYmd(r.applyBy || '')) r.applyBy = ''; // a calendar date or nothing (it goes into calendar files)
+    if (!Object.hasOwn(TAKEN_LABELS, r.taken || '')) r.taken = ''; // a known code, not "toString"
     if (typeof o?.taken !== 'string') r.taken = takenOf(r.headline, r.text); // saved before this was detected
     if (typeof o?.watch !== 'string') r.watch = watchOf([r.headline, r.text, ...(Array.isArray(o?.features) ? o.features : [])].join(' ')).join(','); // saved before heads-up existed
     // Stored next-inspection time and text go stale as sessions pass: derive them again.
@@ -1111,7 +1118,7 @@
             at: e.at, baseAt: typeof e.baseAt === 'number' ? e.baseAt : null, baseIds: okIds(e.baseIds),
             ids: rows.map((r) => r.id), truncated: !!e.truncated, rows: rows.map(slimRow),
             gone: (Array.isArray(e.gone) ? e.gone : []).slice(0, GONE_MAX).map(fatRow).filter((r) => r.url).map(slimRow),
-            ...(e.pin ? { pin: 1 } : {}), trend: cleanTrend(e.trend),
+            ...(e.pin ? { pin: 1 } : {}), ...(e.lite ? { lite: 1 } : {}), trend: cleanTrend(e.trend), // lite: its text was trimmed before
           };
           fitBudget(d.s[k]);
           n++;
@@ -1254,9 +1261,9 @@
     const tail = (/^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0]).replace(/\b\d{1,2}(?:[:.]\d\d)?\s*[ap]\.?m\b\.?/gi, ' ');
     const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
     if (!weekly) {
-      if (/\b(per\s*(?:calendar\s*)?month|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
+      if (/\b(per\s*(?:calendar\s*)?(?:month|mth)|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month|month|mth)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
       else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(ea)?r\b/i.test(tail)) v /= 52;
-      else if (/\b(per\s*fortnight|p\.?\s*f\.?|pf|fortnightly|a\s*fortnight)\b|\/\s*f(ort)?n(igh)?t\b/i.test(tail)) v /= 2;
+      else if (/\b(per\s*fortnight|p\.?\s*f\.?|pf|fortnightly|a\s*fortnight|fortnight)\b|\/\s*f(ort)?n(igh)?t\b/i.test(tail)) v /= 2;
       else if (/\b(per\s*night|p\.?\s*n\.?|pn|nightly|a\s*night)\b|\/\s*n(igh)?t\b/i.test(tail)) v *= 7; // short stays
     }
     return Math.round(v);
@@ -1697,7 +1704,7 @@
   };
   // Availability from the description when REA's field is missing: "Available from 1st Nov",
   // "available now", "Availability: 12/11/2026". Not "available for inspection", "available to view".
-  const AVAIL_TEXT = /\bavailab(?:le|ility)\b\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|[^.;,\n()]{3,32})/i;
+  const AVAIL_TEXT = /\bavailab(?:le|ility)\b\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d)){3,32})/i; // a dot between digits is a date ("12.11.2026")
   // Something else being available (an inspection, the agent, parking) isn't the move-in date.
   const AVAIL_NOT_HOME = /\b(?:inspections?|agents?|viewings?|appointments?|parking|car ?spaces?|garages?|storage|lock-?up|keys?|furniture|nbn|internet)\s*(?:is|are)?\s*$/i;
   const AVAIL_TEXT_G = new RegExp(AVAIL_TEXT.source, 'gi');
@@ -1737,6 +1744,9 @@
         d.setDate(d.getDate() + ((dayOf(wd[1]) - d.getDay() + 7) % 7));
       }
       if (d && d < startOfDay(now)) continue; // closed already: a later "now close …" may follow
+      // A date with no year rolled far ahead (an old "Friday 3rd October" read in December) isn't
+      // this listing's deadline. (A weekday that doesn't match is kept: agents get those wrong.)
+      if (d && !/\b20\d\d\b|\d[./]\d{1,2}[./]\d{2,4}/.test(clause) && d - startOfDay(now) > 90 * DAY_MS) continue;
       if (d) return ymdLocal(d);
     }
     return '';
@@ -1779,7 +1789,7 @@
   // The number must sit next to "lease"/"term": the gap can't cross a comma, a full stop or another number
   // ("available in 2 months, 12 month lease" is 12; "renovated 3 months ago, lease..." is nothing).
   const LEASE_RES = (() => {
-    const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)', range = '(\\d{1,2})\\s*(?:-|–|to|or)\\s*(\\d{1,2})';
+    const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)', range = '(\\d{1,2})\\s*(?:-|–|to|or|\\/)\\s*(\\d{1,2})';
     return [`\\b${range}${mo}${gap}${word}`, `${word}\\b${gap}\\b${range}${mo}`, `\\b(\\d{1,2})${mo}${gap}${word}`, `${word}\\b${gap}\\b(\\d{1,2})${mo}`].map((p) => new RegExp(p));
   })();
   const leaseTermOf = (text) => {
@@ -1790,6 +1800,8 @@
     if (m) return { min: Math.min(+m[1], +m[2]), max: Math.max(+m[1], +m[2]) };
     m = t.match(oneA) || t.match(oneB);
     if (m && +m[1] >= 1 && +m[1] <= 60) return { min: +m[1], max: +m[1] };
+    m = t.match(/\b(\d)\s*(?:-|–|to|or|\/)\s*(\d)\s*-?\s*(?:years?|yrs?)\b[^.;,\d]{0,12}?\b(?:lease|tenancy|term)/); // "1-2 year lease"
+    if (m) return { min: Math.min(+m[1], +m[2]) * 12, max: Math.max(+m[1], +m[2]) * 12 };
     m = t.match(/\b(\d)\s*-?\s*(?:years?|yrs?)\b[^.;,\d]{0,12}?\b(?:lease|tenancy|term)/) || t.match(/\b(?:lease|tenancy|term)\b[^.;,\d]{0,12}?\b(\d)\s*-?\s*(?:years?|yrs?)\b/);
     return m ? { min: +m[1] * 12, max: +m[1] * 12 } : null;
   };
@@ -1882,7 +1894,7 @@
   // Extra named places ("Work: -33.87,151.21", one per line, up to 3) shown beside the main point.
   const PLACES_MAX = 3;
   const parsePlaces = (v) => String(v || '').split(/\n+/).map((line, i) => {
-    const m = line.match(/^\s*([^:]{1,24}?)\s*:\s*(.+)$/);
+    const m = line.match(/^\s*([^:]{1,24}?)\s*:(?!\/\/)\s*(.+)$/); // a link's "://" isn't a label
     const at = parseAnchor(m ? m[2] : line);
     return at ? { label: (m ? m[1] : `Place ${i + 1}`).trim(), ...at } : null;
   }).filter(Boolean).slice(0, PLACES_MAX);
@@ -1953,7 +1965,7 @@
       if (/^https?:\/\//.test(v)) return 'url';
       if (/^\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d\d:?\d\d)?)?$/.test(v)) return 'iso-date';
       // Addresses (any street number, most street types), emails, phone numbers (incl. "(02) 5550 0123").
-      const personal = /\b\d{1,5}[a-z]?\s+(?:[\w'-]+\s+){1,3}(?:st|street|rd|road|ave|avenue|pde|parade|cres|crescent|dr|drive|ln|lane|pl|place|ct|court|hwy|highway|tce|terrace|way|cl|close|bvd|boulevard|blvd)\b|@|(?:\+?61|\b0|\(0\d\))[\s-]?\d(?:[\s-]?\d){7,}|\(0\d\)\s*\d{4}\s*\d{4}|\b\d{4}[\s-]?\d{3}[\s-]?\d{3}\b/i.test(v);
+      const personal = /\b\d{1,5}[a-z]?\s+(?:[\w'-]+\s+){1,3}(?:st|street|rd|road|ave|avenue|pde|parade|cres|crescent|dr|drive|ln|lane|pl|place|ct|court|hwy|highway|tce|terrace|way|cl|close|bvd|boulevarde?|blvd|esplanade|esp|grove|gr|rise|circuit|cct|walk|square|sq|mews|row|loop|link|vista|parkway|pkwy)\b|@|\b\d{4}\s\d{4}\b|(?:\+?61|\b0|\(0\d\))[\s-]?\d(?:[\s-]?\d){7,}|\(0\d\)\s*\d{4}\s*\d{4}|\b\d{4}[\s-]?\d{3}[\s-]?\d{3}\b/i.test(v);
       return SHAPE_KEEP.test(key) && v.length <= 40 && !personal ? v : `string(${v.length})`;
     }
     return typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : typeof v;
@@ -2303,7 +2315,9 @@
   };
   const parseFreeTimes = (text) => {
     const out = [];
-    for (const raw of String(text || '').split(/[,;\n]/).map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+    // En and em dashes and "to" are ranges too ("Sat 9am–1pm", "Mon to Fri", what {mytimes} writes).
+    const norm = String(text || '').replace(/[–—−]/g, '-').replace(/\s+to\s+/gi, '-');
+    for (const raw of norm.split(/[,;\n]/).map((x) => x.trim().toLowerCase()).filter(Boolean)) {
       const t = raw.match(TIME_RANGE), hasRange = !!t && !!(t[1] || t[2]);
       const dayText = (hasRange ? raw.slice(0, t.index) : raw).replace(/\s*-\s*/g, '-').trim();
       const days = new Set();
