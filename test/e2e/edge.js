@@ -2554,6 +2554,37 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 71. A search shows each page as it's read: the list grows, the status says "so far" (never
+  // "listings match" until the last page is in) and the end keeps your scroll. A Refresh keeps the
+  // full list until it's done.
+  await block('71', async () => {
+    const ctx = await browser.newContext();
+    let release = () => {}, gate = Promise.resolve();
+    const hold = () => { gate = new Promise((r) => { release = r; }); };
+    const base = serve();
+    hold();
+    const page = await open(ctx, SEARCH, { route: async (r) => { if (/list-3\b/.test(r.request().url())) await gate; return base(r); } });
+    await page.click('#rf-launch'); await page.click('#rf-run');
+    await waitStatus(page, /^Reading page 3 of 3… \d+ of 12 so far match\.$/);
+    assert.equal(await count(page), 12, 'pages 1 and 2 shown while page 3 is read');
+    assert.equal(await page.getAttribute('#rf-run', 'aria-disabled'), 'true', 'still busy');
+    const stay = await page.evaluate(() => { const p = document.querySelector('#rf-panel'); p.scrollTop = p.scrollHeight; return p.scrollTop; });
+    assert.ok(stay > 0, 'the drawer scrolls');
+    release();
+    await waitStatus(page, /^18 of 18 listings match\./);
+    assert.equal(await count(page), 18);
+    const after = await page.evaluate(() => document.querySelector('#rf-panel').scrollTop);
+    assert.ok(Math.abs(after - stay) < 60, `the last page went in where you were (${stay} -> ${after}), not back at the top`); // scroll anchoring may shift it by the status line
+    hold();
+    await page.click('#rf-refresh');
+    await waitStatus(page, /^Reading page 3 of 3…$/);
+    assert.equal(await count(page), 18, 'a Refresh keeps the whole list meanwhile');
+    release();
+    await waitStatus(page, /^18 of 18 listings match\./);
+    console.log('pages shown as they are read: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);

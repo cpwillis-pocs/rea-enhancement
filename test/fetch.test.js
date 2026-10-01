@@ -54,6 +54,14 @@ test('fetchAllPages: walks pages, reuses seed, flags truncation', async () => {
   assert.ok(r.rows[1].url.endsWith('seed'));
 });
 
+test('fetchAllPages: onPage gets the rows so far after each page, before the pause', async () => {
+  const seen = [], log = [];
+  const fetchImpl = async (u) => { log.push('fetch'); return resp(200, page(results({ exact: [listing({ id: `p${u.match(/list-(\d+)/)[1]}` })], maxPage: 3 }))); };
+  await core.fetchAllPages(BASE, () => {}, { fetchImpl, wait: async () => log.push('wait'), onPage: (rows, n, max) => { log.push('page'); seen.push([rows.length, n, max]); } });
+  assert.deepEqual(seen, [[1, 1, 3], [2, 2, 3], [3, 3, 3]]);
+  assert.deepEqual(log, ['fetch', 'page', 'wait', 'fetch', 'page', 'wait', 'fetch', 'page']);
+});
+
 test('fetchAllPages: stops when REA repeats a page, says when the page count is missing', async () => {
   const same = async () => resp(200, page(results({ exact: [listing({ id: 'a' }), listing({ id: 'b' })], maxPage: 5 })));
   let n = 0;

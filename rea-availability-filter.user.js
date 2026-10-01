@@ -2197,8 +2197,9 @@
   // `seed` = { key, page, results } from the already-loaded document, reused instead of refetching.
   // `keepPartial`: a page after the first that fails (not a cancel) ends the crawl with what was
   // read, plus `failed: { page, max, message }`, instead of throwing it all away. `isCached(url)`
-  // skips the polite pause before a page that won't be fetched (eg on Resume).
-  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal, keepPartial = false, isCached = () => false } = {}) {
+  // skips the polite pause before a page that won't be fetched (eg on Resume). `onPage(rows, page, max)`
+  // after each page read, with the rows so far, so a caller can show them before the last page.
+  async function fetchAllPages(base, onProgress, { seed = null, fetchImpl, wait = sleep, getPage = null, signal, keepPartial = false, isCached = () => false, onPage = null } = {}) {
     const rows = [];
     const key = searchKey(base);
     let page = 1, max = 1, total = 1, sample = null, paging = '';
@@ -2231,6 +2232,7 @@
       for (const r of got) ids.add(r.id);
       rows.push(...got);
       sample ??= sampleOf(results);
+      onPage?.(rows, page, max);
       page++;
       const nextSeeded = seed && seed.key === key && seed.page === page;
       if (page <= max && !seeded && !nextSeeded && !isCached(pageUrl(base, page))) await wait(jitter(PAGE_DELAY_MS), signal);
@@ -6058,15 +6060,15 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (cache) withBuildings(cache); // hiding one changes "N in this building"
     knownVer++;
     updateCounts();
-    const scroller = listScroller(), top = scroller.scrollTop;
-    const shown = listItems().length;
-    ui.keepShown = shown; // re-render as many as were showing, in one pass
-    if (ui.view === 'shortlist') renderShortlist();
-    else if (cache) showResults();
-    ui.keepShown = 0;
+    inPlace(() => { if (ui.view === 'shortlist') renderShortlist(); else if (cache) showResults(); });
     ui.onlyIds = null;
-    scroller.scrollTop = top;
     scheduleAnnotate();
+  }
+  // Redraw without moving: as many listings as were showing, in one pass, at the same scroll.
+  function inPlace(fn) {
+    const scroller = listScroller(), top = scroller.scrollTop;
+    ui.keepShown = listItems().length;
+    try { fn(); } finally { ui.keepShown = 0; scroller.scrollTop = top; }
   }
 
   // After a hide: Undo plus one-tap reasons, so "why did I rule this out?" has an answer later.
@@ -6191,6 +6193,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.fold?.(ui.panel.querySelector('.rf-controls').classList.contains('rf-folded')); // keep its count and sort current
     renderActive();
     if (!rows.length) suggestDrops();
+    if (crawl?.id === runId) return setStatus(partialStatus()); // still reading: not "N of M match" until every page is in
     const st = diffStats(cache);
     const matchHint = (cfg.sort === 'match' && !rows.some((r) => r.score != null)
       ? ' Best match needs two of: a max rent (or enough listings for a median), a "from" date, a distance point, known bonds.' : '')
@@ -6649,6 +6652,27 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   };
 
   let runCtrl = null; // AbortController of the in-flight search, aborted on navigation
+  // A search still reading, with the pages read so far shown: { id: its runId, note: progress }.
+  // Stale once runId moves on (navigation, another run), so it can't outlive its search.
+  let crawl = null;
+  const partialStatus = () => `${crawl.note} ${ui.rows?.length ?? 0} of ${cache?.length ?? 0} so far match.`;
+  // The rows read so far, shown but not taken in: no sightings, tab cache or remembered search
+  // until the crawl is done (adopt), so a crawl that stops partway changes nothing it shouldn't.
+  function showSoFar(key, rows, page, max) {
+    const first = !(cache && cacheKey === key);
+    crawl = { id: runId, note: `Reading page ${page + 1} of ${max}…` };
+    learn(rows, false);
+    fillTypes(rows);
+    cache = rows.slice();
+    cacheKey = key;
+    truncated = false;
+    textClipped = false;
+    withMedians(cache);
+    withBuildings(cache);
+    if (!first) return inPlace(() => showResults()); // later pages: the list grows under you, scroll kept
+    showResults();
+    ui.fold?.(true);
+  }
   // #endregion
   // #region search
   // `resume`: after a search stopped partway, fetch from where it failed (pages already read
@@ -6666,21 +6690,29 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const key = searchKey(base);
     setBusy(true);
     setExport(true);
+    // Nothing shown for this search yet: show each page as it's read. A Refresh keeps what's shown
+    // until the new crawl is done (a list shrinking to page 1 and growing back would only jump).
+    const preview = !(cache && cacheKey === key);
     try {
       if (force && !resume) pageMemo.clear();
-      const onProgress = (m) => { if (id === runId) setStatus(m); };
+      const onProgress = (m) => { if (id !== runId) return; if (crawl?.id !== id) return setStatus(m); crawl.note = m; setStatus(partialStatus()); };
+      const onPage = (rows, page, max) => { if (id === runId && preview && page < max) showSoFar(key, rows, page, max); };
       // Refresh means "newer than what I'm looking at", so the load-time seed is skipped too.
       const res = await fetchAllPages(base, onProgress, {
         seed: (force && !resume) || Date.now() - bootAt > ROWS_TTL_MS ? null : boot,
-        signal: ctrl.signal, keepPartial: true, isCached: memoFresh,
+        signal: ctrl.signal, keepPartial: true, isCached: memoFresh, onPage,
         getPage: (url) => getPage(url, { signal: ctrl.signal, onRetry: (n, ms) => onProgress(`Retrying in ${Math.round(ms / 1000)}s (attempt ${n}/${RETRIES})…`) }),
       });
       if (id !== runId) return; // search changed mid-run; navigation handler already reported it
+      // Pages were shown as they came: the whole list goes in where you are, not back at the top.
+      const shown = crawl?.id === id;
+      crawl = null;
+      const take = (...a) => (shown ? inPlace(() => adopt(...a)) : adopt(...a));
       if (res.failed) {
         // Show what was read, but don't let a part stand for the whole: no remembered snapshot
         // (unread listings would count as gone), no tab cache, no health sample, not a full crawl.
         learn(res.rows, true, false);
-        adopt(key, res.rows, res.truncated, '', null, false, false); // fresh text, just not every page
+        take(key, res.rows, res.truncated, '', null, false, false); // fresh text, just not every page
         showPartial(res.failed);
         logError(`search: page ${res.failed.page}: ${res.failed.message}`);
         return;
@@ -6688,7 +6720,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (res.paging) { // a paging guard stopped it: shown, but like a part-read, not a full crawl
         formatWarn(PAGING_MSG[res.paging]);
         learn(res.rows, true, false);
-        adopt(key, res.rows, res.truncated, '', null, false, false);
+        take(key, res.rows, res.truncated, '', null, false, false);
         textClipped = false;
         return;
       }
@@ -6706,7 +6738,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       snap?.saved.then(({ evicted, refused, quota }) => setWarn('saved', quota ? `This browser's storage is full: ${refused ? 'this search wasn\'t remembered' : 'kept this search'}${evicted.filter((k) => k !== key).length ? `, stopped remembering ${evicted.filter((k) => k !== key).map(searchLabel).join(', ')}` : ''}. Delete saved searches or turn off Remember results to make room.`
         : refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
         : evicted.length ? `Stopped remembering ${evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : ''));
-      adopt(key, res.rows, res.truncated, '', snap, true);
+      take(key, res.rows, res.truncated, '', snap, true);
       ui.newsSeen?.();
     } catch (err) {
       if (id !== runId || ctrl.signal.aborted) return;
@@ -6718,7 +6750,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       logError(`search: ${err.message}`);
       if (ui.view !== 'shortlist') setEmpty('Search failed.');
     } finally {
-      if (id === runId) setBusy(false);
+      if (id === runId) { setBusy(false); crawl = null; } // however it ended, it isn't reading any more
       if (runCtrl === ctrl) runCtrl = null;
     }
   }
