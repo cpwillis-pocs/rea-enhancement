@@ -1,7 +1,7 @@
 {
   "name": "rea-enhancement",
   "private": true,
-  "description": "Tampermonkey userscript for realestate.com.au rentals: available-from filter, every results page in one list, shortlist and exports. Runs locally.",
+  "description": "Rental Toolkit for realestate.com.au: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.",
   "scripts": {
     "lint": "node --check rea-availability-filter.user.js && node test/lint.js",
     "check": "npm run lint && node --test test/*.test.js",

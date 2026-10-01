@@ -1,6 +1,6 @@
 # rea-enhancement
 
-Tampermonkey userscript for [realestate.com.au](https://www.realestate.com.au/) rentals: an **available-from** filter, every results page in one sortable list, a shortlist across searches, and exports. Runs entirely in your browser.
+**Rental Toolkit** is a Tampermonkey userscript for [realestate.com.au](https://www.realestate.com.au/) rentals: an **available-from** filter, every results page in one sortable list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser. Not affiliated with REA Group.
 
 ![Drawer with merged, date-filtered results](docs/screenshots/drawer.jpg)
 
