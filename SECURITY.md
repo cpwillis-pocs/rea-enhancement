@@ -22,7 +22,7 @@ The script runs with `@grant none` on `realestate.com.au`, inside the page's own
 | CSV / TSV export opened in a spreadsheet | Cells starting with `=`, `+`, `@`, tab, CR or a non-numeric `-` are prefixed with `'` so they aren't run as formulas | `safeCell` |
 | Calendar export | Text escaped and folded per RFC 5545; URLs pass `safeUrl` so no CR/LF can inject properties | `icsText`, `safeUrl` |
 
-The lint (`test/lint.js`) also fails the build on `eval`/`new Function`, string timers, WebSockets, any URL outside `realestate.com.au` (bar the three plain links in the help panel: source, terms, privacy), and storage keys outside the script's prefix.
+The lint (`test/lint.js`) also fails the build on `eval`/`new Function`, string timers, WebSockets, any URL outside `realestate.com.au` (bar the three plain links at the foot of the drawer and in the help panel: source, terms, privacy), and storage keys outside the script's prefix.
 
 Examples of a valid report: markup or script injection from listing text, a share link or a backup; a spreadsheet formula surviving export; a way to make the script send data anywhere but REA; storage written outside `rea-avail-filter/`.
 

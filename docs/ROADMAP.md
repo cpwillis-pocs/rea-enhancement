@@ -74,7 +74,7 @@ Still open from 2.28.0, as not worth their risk: pruning old marks outside the p
 3. Bump `ROWS_VERSION` or `FEAT_V` if `test/versions.test.js` says so ([ARCHITECTURE.md](ARCHITECTURE.md#versions-that-must-move)).
 4. If the UI changed visibly, `npm run screenshots` and commit `docs/screenshots`.
 5. `npm run ci` (lint, unit, smoke, edge, accessibility) and `COVERAGE_MIN=98 npm run coverage` pass locally.
-6. Optional while the repo is private: `npm run live` (local only: one real search and one listing page). If it saves a shape, check it has nothing personal and commit it.
+6. Optional: `npm run live` (local only: one real search and one listing page). If it saves a shape, check it has nothing personal and commit it.
 7. Push to `main`. Installs auto-update from the raw file URL.
 
 ## Before going public

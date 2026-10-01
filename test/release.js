@@ -48,7 +48,7 @@ write('docs/ARCHITECTURE.md', read('docs/ARCHITECTURE.md')
   .replace(/\(\d+ blocks, numbered 1–\d+/, `(${blocks} blocks, numbered 1–${top}`));
 
 // Drift checks are only as good as the shapes they compare against: say when the newest real one
-// (from npm run live) is old. None yet is fine while the repo is private and live runs are optional.
+// (from npm run live) is old. None yet is fine: live runs are optional.
 const SHAPE_MAX_DAYS = 60;
 const live = fs.readdirSync(path.join(root, 'test/shapes')).map((f) => f.match(/^live-(?:listing-)?(\d{4}-\d{2}-\d{2})\.json$/)?.[1]).filter(Boolean).sort();
 const shapeNote = !live.length ? ''
