@@ -24,10 +24,32 @@ Updates install automatically when `@version` goes up.
 
 ## Screens
 
-<p><img src="docs/screenshots/badges.jpg" width="49%" alt="Badges on REA's result cards"> <img src="docs/screenshots/shortlist-tab.jpg" width="49%" alt="The Shortlist tab across searches"></p>
-<p><img src="docs/screenshots/market.jpg" width="49%" alt="Market view"> <img src="docs/screenshots/map.jpg" width="49%" alt="Map view"></p>
-<p><img src="docs/screenshots/compare.jpg" width="49%" alt="Compare shortlisted listings"> <img src="docs/screenshots/listing-bar.jpg" width="49%" alt="The bar on a listing page"></p>
-<p><img src="docs/screenshots/drawer-dark.jpg" width="64%" alt="Dark mode"> <img src="docs/screenshots/mobile.jpg" width="24%" alt="Mobile width"></p>
+<table>
+<tr>
+<td width="50%" align="center"><img src="docs/screenshots/badges.jpg" alt="Badges on REA's cards"><br><sub>Badges on REA's cards</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/dimmed.jpg" alt="Non-matching cards faded"><br><sub>Non-matching cards faded</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="docs/screenshots/filters.jpg" alt="Filters and active-filter chips"><br><sub>Filters and active-filter chips</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/shortlist.jpg" alt="Shortlist and price-change tags"><br><sub>Shortlist and price-change tags</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="docs/screenshots/shortlist-tab.jpg" alt="Shortlist across searches"><br><sub>Shortlist across searches</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/compare.jpg" alt="Compare shortlisted listings"><br><sub>Compare shortlisted listings</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="docs/screenshots/market.jpg" alt="Market view"><br><sub>Market view</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/map.jpg" alt="Map view"><br><sub>Map view</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="docs/screenshots/listing-bar.jpg" alt="Bar on a listing page"><br><sub>Bar on a listing page</sub></td>
+<td width="50%" align="center"><img src="docs/screenshots/drawer-dark.jpg" alt="Dark mode"><br><sub>Dark mode</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="docs/screenshots/mobile.jpg" width="45%" alt="Mobile width"><br><sub>Mobile width</sub></td>
+<td width="50%"></td>
+</tr>
+</table>
 
 <details>
 <summary><strong>Full feature list</strong></summary>
