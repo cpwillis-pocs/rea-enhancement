@@ -7164,6 +7164,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const info = [bar._goneId === id && 'REA says this listing is no longer listed', r.prevPrice && `was ${r.prevPrice}`, r.prevAvail && `available was ${r.prevAvail}`, r.relisted && 'relisted',
       r.firstSeen && `first seen ${ago(Date.now() - r.firstSeen)}`].filter(Boolean).join(' · ');
     const small = lbarMin.get();
+    // Open or shut as it is now: its toggle event (which records it) comes a task after the click.
+    const more = bar.querySelector('.rf-lbar-more');
+    if (more) bar._details = more.open;
     bar.classList.toggle('rf-lbar-min', small);
     bar.innerHTML = small ? `<button type="button" data-l="s" aria-pressed="${r.starred}" aria-label="${r.starred ? 'Shortlisted' : 'Shortlist'}">${r.starred ? '★' : '☆'}</button>
       <button type="button" data-l="min" aria-expanded="false" aria-label="Show listing tools">⋯</button>` : `<button type="button" data-l="s" aria-pressed="${r.starred}">${r.starred ? '★ Shortlisted' : '☆ Shortlist'}</button>
