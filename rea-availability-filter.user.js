@@ -995,8 +995,7 @@
         if (isObj(d) && isObj(d.s)) {
           for (const [k, raw] of Object.entries(d.s)) {
             if (!isSearchKey(k) || !isObj(raw) || okTime(raw.at) == null) { delete d.s[k]; continue; }
-            const e = d.s[k] = unpackEntry(raw);
-            for (const f of ['rows', 'gone']) e[f] = Array.isArray(e[f]) ? e[f].filter(isObj) : [];
+            const e = d.s[k] = lazyEntry(raw);
             for (const f of ['ids', 'baseIds']) if (e[f] != null && !Array.isArray(e[f])) e[f] = f === 'ids' ? [] : null;
           }
           return d;
@@ -1004,10 +1003,30 @@
       } catch { /* corrupt */ }
       return { v: 1, s: {} };
     };
+    // An entry as read, its rows unpacked only when something reads them (opening one search
+    // needn't unpack the other two), and its stored JSON kept for writing it back untouched.
+    const lazyEntry = (raw) => {
+      const e = { ...raw };
+      for (const f of ['rows', 'gone', 'f', 'rk']) delete e[f];
+      let full = null;
+      const unpacked = () => (full ||= unpackEntry(raw));
+      for (const f of ['rows', 'gone']) {
+        const own = (v) => Object.defineProperty(e, f, { value: v, writable: true, enumerable: true, configurable: true });
+        Object.defineProperty(e, f, { enumerable: true, configurable: true, get: () => { const v = unpacked()[f]; return own(Array.isArray(v) ? v.filter(isObj) : [])[f]; }, set: own });
+      }
+      entryJson.set(e, () => JSON.stringify(raw)); // as read, worked out only if it's written back
+      return e;
+    };
     // The stored string, built from each entry's cached JSON: a pin or a second save of one
     // search doesn't re-stringify the other two. Entries are stored packed (packEntry).
     const entryJson = new WeakMap();
-    const jsonOf = (e) => { let j = entryJson.get(e); if (j === undefined) entryJson.set(e, (j = JSON.stringify(packEntry(e)))); return j; };
+    const jsonOf = (e) => {
+      let j = entryJson.get(e);
+      if (typeof j === 'string') return j;
+      j = j ? j() : JSON.stringify(packEntry(e)); // an entry as read (lazyEntry), or built
+      entryJson.set(e, j);
+      return j;
+    };
     const stringify = (d) => `{"v":${JSON.stringify(d.v ?? 1)},"s":{${Object.entries(d.s).map(([k, e]) => `${JSON.stringify(k)}:${jsonOf(e)}`).join(',')}}}`;
     // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
     // lists, then give up. Returns the keys it stopped remembering.
