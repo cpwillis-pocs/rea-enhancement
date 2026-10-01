@@ -1,5 +1,5 @@
 {
- "ROWS_VERSION": 14,
+ "ROWS_VERSION": 15,
  "rowKeys": [
   "address",
   "agency",
@@ -42,7 +42,7 @@
   "url",
   "watch"
  ],
- "FEAT_V": 7,
+ "FEAT_V": 9,
  "amenityIds": [
   "pets",
   "furnished",
@@ -80,5 +80,5 @@
   "flight",
   "build"
  ],
- "detection": "2313a039be419aec"
+ "detection": "e5d9913269e5f75d"
 }

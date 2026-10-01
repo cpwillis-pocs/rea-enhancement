@@ -401,7 +401,7 @@
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 8; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 9; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -1271,7 +1271,7 @@
     // words like "Available" (-> "ava") or weekdays don't shadow the real month.
     const cands = [
       // "1-Nov-2026", "01-Nov-26": a two-digit year only after a dash ("1 Nov 12 month lease" isn't 2012).
-      ...[...display.matchAll(/(\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?(?:\s+|-)([a-z]{3,})\.?(?:,?\s+(\d{4})|-(\d{4}|\d{2})\b)?/gi)].map((m) => [m[1], m[2], m[3] || (m[4] && (m[4].length === 2 ? `20${m[4]}` : m[4]))]),
+      ...[...display.matchAll(/(\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?(?:\s+|-)([a-z]{3,})\.?(?:,?\s+(\d{4})|-(\d{4}|\d{2})\b(?!\s*-?\s*(?:months?|mths?|weeks?|wks?|years?|yrs?)\b))?/gi)].map((m) => [m[1], m[2], m[3] || (m[4] && (m[4].length === 2 ? `20${m[4]}` : m[4]))]),
       ...[...display.matchAll(/\b([a-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/gi)].map((m) => [m[2], m[1], m[3]]),
     ];
     for (const [day, word, yr] of cands) {
@@ -1285,9 +1285,10 @@
     // A month alone ("Available from December", "available Jan 2027"): its 1st.
     for (const mo of display.matchAll(/\b(?:available|availability|avail\.|from|in)(?:\s+(?:from|in))?\s*:?\s+([a-z]{3,9})\.?(?:\s+(\d{4}))?\b/gi)) {
       const w = mo[1].toLowerCase();
-      // "may" only as a month when nothing follows it ("available in May", not "in may be").
-      if (w === 'may' && !mo[2] && /^\s*[a-z]/i.test(display.slice(mo.index + mo[0].length))) continue;
-      const mi = MONTH_NAMES.findIndex((n) => n.startsWith(w) && (w.length === 3 || n === w));
+      // Only as the phrase's last word (or before a year, "onwards", "and"/"or"): "in May", not
+      // "in may be", "in Jan Juc", "in Mar St".
+      if (!mo[2] && !/^\s*(?:$|[.,;:!?)\-–—]|(?:onwards?|and|or)\b)/i.test(display.slice(mo.index + mo[0].length))) continue;
+      const mi = MONTH_NAMES.findIndex((n) => n.startsWith(w) && (w.length === 3 || n === w || (w === 'sept' && n === 'september')));
       if (mi >= 0) return mo[2] ? clamp(new Date(+mo[2], mi, 1)) : yearless(1, mi, today, clamp);
     }
     // Last resort, yearless "1/11" (d/m) and only at the start: slash only ("6-12" is a lease,
@@ -1301,18 +1302,20 @@
   // after the figure ("$2,600 month"): later on it's a lease or a promotion ("- 12 month lease").
   const PRICE_PERIODS = [
     [/\b(?:pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(?:ee)?k\b/i, 1],
-    [/\b(?:per\s*(?:calend[ae]r\s*)?(?:month|mth|mnth|mo)|p\.?\s*c\.?\s*m|pcm|p\.?m\.?|p\/m|monthly|a\s*month)(?![a-z])|\/\s*m(?:on)?(?:th)?\b|\/\s*mo\b|^\s*(?:\/|each)?\s*(?:calend[ae]r\s*)?(?:month|mth)\b/i, 12 / 52],
+    [/\b(?:per\s*(?:calend[ae]r\s*)?(?:month|mth|mnth|mo)|every\s*month|p\.?\s*c\.?\s*m|pcm|p\.?m\.?|p\/m|monthly|a\s*month)(?![a-z])|\/\s*m(?:on)?(?:th)?\b|\/\s*mo\b|^\s*(?:\/|each)?\s*(?:calend[ae]r\s*)?(?:month|mth)\b/i, 12 / 52],
     [/\b(?:per\s*(?:annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(?:ea)?r\b/i, 1 / 52],
-    [/\b(?:per\s*fortnight|per\s*(?:2|two)\s*weeks|p\.?\s*f\.?|p\/f|pf|fortnightly|a\s*fortnight)\b|\/\s*f(?:ort)?n(?:igh)?t\b|^\s*(?:\/|each)?\s*fortnight\b/i, 1 / 2],
+    [/\b(?:per\s*fortnight|(?:per|every)\s*(?:2|two)\s*weeks|every\s*fortnight|p\.?\s*f\.?|p\/f|pf|fortnightly|a\s*fortnight)\b|\/\s*f(?:ort)?n(?:igh)?t\b|^\s*(?:\/|each)?\s*fortnight\b/i, 1 / 2],
     [/\b(?:per\s*night|p\.?\s*n\.?|pn|nightly|a\s*night)\b|\/\s*n(?:igh)?t\b/i, 7], // short stays
     [/\bper\s*day\b|\/\s*day\b/i, 7],
   ];
+  // A promotion or a service isn't the rent's period: "a month free", "monthly cleaning".
+  const PERIOD_NOT = /^\s*(?:rent\s*)?(?:free|clean|cleaning|cleans|service|servicing|gardening|inspection|increase|rent\s*free)\b/i;
   // Weekly rent as a number. Ranges take the lower bound; monthly/annual figures are
   // converted so mixed listings sort and filter on one scale. Unparseable -> Infinity.
   const parsePrice = (display) => {
     const s = (display || '').replace(/,/g, '');
     // A figure with "$", or one with a period right after it ("650 per week", "Rent: 650pw").
-    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k\b)?/i) || s.match(/(?<![\d.])(\d{2,5}(?:\.\d+)?)()(?=\s*(?:pw|p\/w|per\s*(?:week|month|calend[ae]r|fortnight)|pcm|weekly|\/\s*w(?:ee)?k))/i);
+    const m = s.match(/\$\s*(\d+(?:\.\d+)?)\s*(k\b)?/i) || s.match(/(?<![\d.:/])(\d{2,5}(?:\.\d+)?)()(?=\s*(?:pw|p\/w|per\s*(?:week|month|calend[ae]r|fortnight)|pcm|weekly|\/\s*w(?:ee)?k))/i);
     if (!m) return Infinity;
     let v = +m[1] * (m[2] ? 1000 : 1);
     // Period is read from the text after this figure, up to the next $ amount, so
@@ -1323,7 +1326,14 @@
     const tail = (/^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0]).replace(/\b\d{1,2}(?:[:.]\d\d)?\s*[ap]\.?m\b\.?/gi, ' ');
     // The first period named wins: "$2,600 pcm (600 pw)" is monthly, "$600 pw, 1 month free" weekly.
     let at = Infinity, f = 1;
-    for (const [re, k] of PRICE_PERIODS) { const i = tail.search(re); if (i >= 0 && i < at) { at = i; f = k; } }
+    for (const [re, k] of PRICE_PERIODS) {
+      const g = new RegExp(re.source, 'gi');
+      for (let m; (m = g.exec(tail));) {
+        if (m.index >= at) break;
+        if (PERIOD_NOT.test(tail.slice(m.index + m[0].length))) { if (!m[0]) g.lastIndex++; continue; }
+        at = m.index; f = k; break;
+      }
+    }
     v *= f;
     return Math.round(v);
   };
@@ -1471,7 +1481,9 @@
     const raw = typeof v === 'object' ? v.value ?? v.iso ?? v.dateTime ?? v.date ?? null : v;
     if (raw == null) return null;
     if (typeof raw === 'number' && raw < 1e9) return null; // counts/flags, not epoch times (1e9 s = 2001)
-    const d = typeof raw === 'number' ? new Date(raw < 1e12 ? raw * 1000 : raw) : new Date(raw);
+    // A bare date is that local day (new Date('2026-10-03') is UTC midnight: the 2nd west of it).
+    const ymd = typeof raw === 'string' && raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = ymd ? new Date(+ymd[1], +ymd[2] - 1, +ymd[3]) : typeof raw === 'number' ? new Date(raw < 1e12 ? raw * 1000 : raw) : new Date(raw);
     return isNaN(d) || !/\d{4}/.test(String(raw)) && typeof raw !== 'number' ? null : d;
   };
 
@@ -1663,8 +1675,8 @@
   // #region text heuristics
   const AMENITIES = [
     { id: 'pets', label: 'Pets', yes: 'Pets OK',
-      neg: /\bpets?\s*(?:allowed\s*)?(?:[:?]|\s[-–]|\s=)\s*no\b(?! (?:problems?|worries|issues?))|\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bno (?:smoking|parties)(?:,? or|,? and|,)? pets\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
-      pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b|\bpets?\s*:\s*yes\b/ },
+      neg: /\bpets?\s*(?:allowed\s*)?(?:[:?]|\s[-–]|\s=)\s*no\b(?! (?:problems?|worries|issues?))|\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bno (?:smoking|parties)(?:,? or|,? and|,)? pets\b(?!,? (?:are |is )?(?:allowed|welcome|considered|negotiable|ok|okay|permitted|accepted|friendly|on|by|upon|subject)\b)|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b|\bpets?\s*[-–:]\s*not (?:allowed|permitted|accepted)\b/,
+      pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b|\bpets?\s*(?:[-–:]|\s=)\s*(?:yes|negotiable|allowed|welcome|considered|ok|okay)\b/ },
     { id: 'furnished', label: 'Furnished', yes: 'Furnished', neg: /(?<!\bor )\bunfurnished\b(?! or furnished)|\bnot furnished\b/,
       pos: /\b(?:fully |partly |partially |semi[- ])?furnished\b/ },
     { id: 'aircon', label: 'Air con', yes: 'Air con', neg: /\bno (?:air[- ]?con|a\/c)/,
@@ -1684,9 +1696,9 @@
     { id: 'study', label: 'Study', yes: 'Study', neg: /\bno (?:study|home office)\b/,
       pos: /\b(?<!\b(?:to|and|or|while you|students who) )(?:study(?: room| nook| area)?|home office)\b(?! (?:at|nearby|precinct|centre))/ },
     { id: 'ensuite', label: 'Ensuite', yes: 'Ensuite', neg: /\bno en[- ]?suite\b/, pos: /\ben[- ]?suited?\b/ },
-    { id: 'heating', label: 'Heating', yes: 'Heating', neg: /\bno heat(?:ing|er)\b(?! (?:bills?|costs?|charges?))/,
-      pos: /\b(?<!water )(?:ducted |gas |hydronic |underfloor |floor |split[- ]system |panel )?heat(?:ing|ers?)\b(?! (?:bill|costs?))|\b(?:open |gas |wood )?fireplace\b|\breverse[- ]cycle\b/ },
-    { id: 'gas', label: 'Gas cooking', yes: 'Gas cooking', neg: /\bno gas\b(?! (?:bills?|costs?|charges?|connection))|\belectric (?:cooking|cooktop|stove) only\b/,
+    { id: 'heating', label: 'Heating', yes: 'Heating', neg: /\bno heat(?:ing|ers?)\b(?! (?:bills?|costs?|charges?))/,
+      pos: /\b(?<!water )(?:ducted |gas |hydronic |underfloor |floor |split[- ]system |panel )?heat(?:ing|ers?)\b(?! (?:bills?|costs?|charges?))|\b(?:open |gas |wood )?fireplace\b|\breverse[- ]cycle\b/ },
+    { id: 'gas', label: 'Gas cooking', yes: 'Gas cooking', neg: /\bno gas\b(?! (?:bills?|costs?|charges?|connection|heating|heaters?|hot water))|\belectric (?:cooking|cooktop|stove) only\b/,
       pos: /\bgas (?:cooking|cook ?top|stove|hob|oven|burners?|kitchen|appliances)\b/ },
     { id: 'lift', label: 'Lift', yes: 'Lift', neg: /\bno (?:lift|elevator)\b|\bwalk[- ]up\b|\bstairs only\b/,
       pos: /\blift (?:access|in (?:the )?building|to all (?:levels|floors)|serviced)\b|\blift[- ]serviced\b|\belevators?\b/ },
@@ -1785,9 +1797,9 @@
   // Availability from the description when REA's field is missing: "Available from 1st Nov",
   // "available now", "Availability: 12/11/2026", "available for lease from 1 Nov". Not "available for
   // inspection", "available to view" (the lookahead also refuses a space, so the gap can't shrink past it).
-  const AVAIL_TEXT = /\b(?:availab(?:le|ility)\b|avail\.)\s*(?:for\s+(?:lease|rent(?:al)?|occupancy)\b\s*)?(?:(?:from|on|date|as\s+(?:of|from))\b\s*)?:?\s*(?!\s|for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d)){3,32})/i; // a dot between digits is a date ("12.11.2026")
+  const AVAIL_TEXT = /\b(?:availab(?:le|ility)\b|avail\.)\s*(?:for\s+(?:lease|rent(?:al)?|occupancy)\b\s*)?(?:(?:from|on|date|as\s+(?:of|from)|in(?=\s+(?:(?:early|mid|late)\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:\s+\d{4})?\s*(?:$|[.,;!)])))\b\s*)?[:\-–—]?\s*(?![\s:\-–—]|for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d|\s\d{4}\b)){3,32})/i; // a dot between digits is a date ("12.11.2026"), one before a year an abbreviation ("Sept. 2027")
   // Something else being available (an inspection, the agent, parking) isn't the move-in date.
-  const AVAIL_NOT_HOME = /\b(?:inspections?|agents?|viewings?|appointments?|parking|car ?spaces?|garages?|storage|lock-?up|keys?|furniture|nbn|internet)\s*(?:is|are)?\s*$/i;
+  const AVAIL_NOT_HOME = /\b(?:inspections?(?: times?)?|open homes?|open for inspection|agents?|viewings?|appointments?|parking|car ?spaces?|garages?|storage|lock-?up|keys?|furniture|nbn|internet)\s*(?:is|are)?\s*$/i;
   const AVAIL_TEXT_G = new RegExp(AVAIL_TEXT.source, 'gi');
   const availFromText = (text, now = new Date()) => {
     const src = String(text || '');
@@ -1817,9 +1829,9 @@
       // the date ("Fri, 3 Oct"), and a dot between digits is a time or date ("5.30pm", "3.10.2026").
       const clause = tail.replace(/^((?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|noon|midday|cob)),\s*(?=(?:mon|tue|wed|thu|fri|sat|sun|\d))/i, '$1 ') // "5pm, Thursday 8 October"
         .replace(/^((?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\s+|noon\s+|midday\s+|cob\s+)?(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*)\.?,?(?=\s+\d)/i, '$1') // "Thu. 8 Oct", "Fri, 3 Oct" (a date follows)
-        .split(/\.(?!\d)|[;,\n]|\s[-–]\s/)[0].trim();
+        .split(/\.(?!\d)|[;,\n]|\s[-–]\s|\s(?:for\s+(?:a\s+)?|with\s+)?(?:lease|tenancy|move|moving|start|starting|from)\b/i)[0].trim(); // not "…, lease from 1/12/2026"
       // A weekday before a yearless d/m ("Tues 6/10"): the d/m form is only read at the start.
-      let d = parseAvail(`Available ${clause.replace(/^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+(?=\d{1,2}\/\d{1,2}\b)/i, '')}`, now, { keepPast: true });
+      let d = parseAvail(`Available ${clause.replace(/^(?:(?:\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|noon|midday|cob)\s+)?(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+(?=\d{1,2}\/\d{1,2}\b)/i, '')}`, now, { keepPast: true });
       const wd = !d && clause.match(WEEKDAY_ONLY);
       if (wd && listedAt instanceof Date && !isNaN(listedAt)) {
         d = startOfDay(listedAt);
@@ -1873,9 +1885,10 @@
   const LEASE_RES = (() => {
     const mo = '\\s*-?\\s*(?:months?|mths?|mo)\\b', gap = '[^.;,\\d]{0,20}?', word = '\\b(?:lease|tenancy|term)', range = '(\\d{1,2})\\s*(?:-|–|to|or|\\/)\\s*(\\d{1,2})';
     // Lists: "6 month or 12 month lease", "6, 12 or 24 month lease"; "Lease: 6 months, 12 months".
-    const n = '\\d{1,2}', item = `(?:${n}\\s*,|${n}(?:${mo})?\\s*(?:or|\\/))\\s*`, after = `${n}(?:${mo})?\\s*(?:,|or|and|\\/)\\s*`;
+    // A bare "N," counts only before more of the list and its "or" ("6, 12 or 24"; not "Level 3, 6 month").
+    const n = '\\d{1,2}', item = `(?:${n}\\s*,\\s*)*${n}(?:${mo})?\\s*(?:or|\\/)\\s*`, after = `${n}(?:${mo})?\\s*(?:,|or|and|\\/)\\s*`;
     return [`\\b${range}${mo}${gap}${word}`, `${word}\\b${gap}\\b${range}${mo}`, `\\b(\\d{1,2})${mo}${gap}${word}`, `${word}\\b${gap}\\b(\\d{1,2})${mo}`,
-      `\\b((?:${item})+${n})${mo}${gap}${word}`, `${word}(?:\\s+terms?)?\\s*:?\\s*((?:${after})+${n})${mo}`, `\\b(\\d{2,3})\\s*-?\\s*weeks?\\b${gap}${word}`].map((p) => new RegExp(p));
+      `\\b((?:${item})+${n})${mo}${gap}${word}`, `${word}(?:\\s+terms?)?\\s*:?\\s*((?:${after})+${n})${mo}`, `\\b(\\d{2,3})\\s*-?\\s*weeks?\\b(?![^.;,\\d]{0,20}?\\b(?:free|rent[- ]free)\\b)${gap}${word}`].map((p) => new RegExp(p));
   })();
   const leaseTermOf = (text) => {
     const t = String(text || '').toLowerCase();
@@ -2102,7 +2115,8 @@
     row.ppb = perBed(row.priceNum, row.beds);
     Object.assign(row, moveIn(row.bond, row.priceNum));
     row.text = fold([row.headline, str(listing.description), row.address, row.type, ...row.features].filter(Boolean).join(' '));
-    const said = [row.headline, str(listing.description), ...row.features].join(' ');
+    // Curly apostrophes straightened: every "n't" negation is written with a straight one.
+    const said = [row.headline, str(listing.description), ...row.features].join(' ').replace(/[\u2018\u2019\u02bc]/g, "'");
     row.watch = watchOf(said).join(',');
     row.applyVia = applyViaOf(said);
     row.applyBy = applyByOf(said, undefined, { listedAt: row.listed });
@@ -2116,7 +2130,7 @@
       const t = availFromText(said);
       if (t) { row.avail = t; row.available = `${dtf({ day: 'numeric', month: 'short', year: 'numeric' }).format(t)} (from text)`; row.availFromText = true; }
     }
-    row.amen = amenitiesOf({ features: row.features, amenText: [row.headline, str(listing.description)].filter(Boolean).join(' ') });
+    row.amen = amenitiesOf({ features: row.features, amenText: [row.headline, str(listing.description)].filter(Boolean).join(' ').replace(/[\u2018\u2019\u02bc]/g, "'") });
     return row;
   };
 
@@ -2410,9 +2424,14 @@
     // Also what freeTimesText writes back: "noon", "after 5:30pm", "before 6am", "Sat 9am-1pm or Sun"
     // ("or" after a time starts another slot; between days it's "and").
     const norm = String(text || '').replace(/[–—−]/g, '-').replace(/\s+to\s+/gi, '-')
-      .replace(/\b(?:noon|midday)\b/gi, '12pm').replace(/\bmidnight\b/gi, '12am')
+      .replace(/\b(?:12\s*)?(?:noon|midday)\b/gi, '12pm').replace(/\b(?:12\s*)?midnight\b/gi, '12am')
       .replace(/\bafter\s+(\d[\d:.]*\s*(?:am|pm)?)/gi, '$1-').replace(/\bbefore\s+(\d[\d:.]*\s*(?:am|pm)?)/gi, '-$1')
-      .replace(/(\d\s*(?:am|pm)?|-)\s+or\s+/gi, '$1,');
+      .replace(/(\d\s*(?:am|pm)?|-)\s+or\s+/gi, '$1,')
+      // "Weekends or weekdays after 5pm" (what freeTimesText writes): after a group of days, "or" and
+      // days with their own time are another slot. "Sat or Sun after 2pm" stays one slot.
+      .replace(/(\b(?:weekends?|weekdays?|any day|daily|every ?day))\s+or\s+(?=[a-z]+\s*\d)/gi, '$1,')
+      .replace(/(\d[\d:.]*\s*(?:am|pm)?)\s*onwards?\b/gi, '$1-');
+    let lastDays = null;
     for (const raw of norm.split(/[,;\n]/).map((x) => x.trim().toLowerCase()).filter(Boolean)) {
       const t = raw.match(TIME_RANGE), hasRange = !!t && !!(t[1] || t[2]);
       const dayText = (hasRange ? raw.slice(0, t.index) : raw).replace(/\s*-\s*/g, '-').trim();
@@ -2423,8 +2442,12 @@
       if (to === 0) to = 1440; // "6pm-12am" ends at midnight
       if (hasRange && t[2] && !/[ap]m/.test(t[2]) && (/[ap]m/.test(t[1] || '') || from <= 720) && to <= from && to + 720 > from) to += 720; // "10am-2", "6pm-9": the end is later the same day
       if (hasRange && t[1] && !/[ap]m/.test(t[1]) && /pm/.test(t[2] || '') && from < 720 && from + 720 < to) from += 720; // "6-8pm" is 6pm to 8pm
+      // Bare small hours ("2-4", "1-3") are the afternoon: nobody inspects at 2am.
+      if (hasRange && t[1] && t[2] && !/[ap]m/.test(t[1] + t[2]) && from >= 60 && from < 420 && to > from && to + 720 <= 1440) { from += 720; to += 720; }
       if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || (!days.size && !hasRange)) return null;
-      out.push({ days: days.size ? days : new Set(WEEKDAYS.map((_, d) => d)), from, to });
+      // A time alone after another slot ("Sat 9-11 or 2-4") is on that slot's days.
+      out.push({ days: days.size ? days : lastDays ? new Set(lastDays) : new Set(WEEKDAYS.map((_, d) => d)), from, to });
+      if (days.size) lastDays = days;
     }
     return out.length ? out : null;
   };
