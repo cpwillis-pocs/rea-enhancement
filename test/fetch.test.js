@@ -176,6 +176,16 @@ test('pauseGate: trips for PAUSE_MS, then lifts; bad or past values mean not pau
   g.trip(5); g.clear(); assert.equal(g.until(), 0);
 });
 
+test('pauseGate: with storage full, this tab still pauses (in memory) until the time', () => {
+  const full = { getItem: () => null, setItem() { throw new Error('QuotaExceededError'); }, removeItem() {} };
+  let now = 1000;
+  const g = core.pauseGate(full, () => now);
+  const t = g.trip();
+  assert.equal(g.until(), t, 'paused though nothing was stored');
+  now = t; assert.equal(g.until(), 0, 'and lifts at the time');
+  g.trip(); g.clear(); assert.equal(g.until(), 0);
+});
+
 test('classifyPage: one answer for every fetcher, a removed listing is not a bot check', () => {
   const blob = page(results());
   const t = (o) => core.classifyPage(o);

@@ -271,7 +271,9 @@
   const APP_STATUSES = ['', 'to inspect', 'inspected', 'applied', 'approved', 'declined'];
   const CHECKLIST_DEFAULT = 'Damp or mould, Water pressure, Phone signal, Natural light, Noise, Storage';
   const checklistItems = (v) => [...new Set(String(v || CHECKLIST_DEFAULT).split(/[,\n]/).map((x) => clip(x.trim(), 30)).filter(Boolean))].slice(0, CHECK_MAX);
-  const checkSummary = (r, items) => items.filter((k) => r.checks?.[k]).map((k) => `${r.checks[k] === 'y' ? '✓' : '✗'} ${k}`).join(', ');
+  // An object's own value only: a checklist item called "constructor" isn't Object.prototype's.
+  const own = (o, k) => (o && Object.hasOwn(o, k) ? o[k] : undefined);
+  const checkSummary = (r, items) => items.filter((k) => own(r.checks, k)).map((k) => `${r.checks[k] === 'y' ? '✓' : '✗'} ${k}`).join(', ');
   const HIDE_REASONS = ['too small', 'location', 'condition', 'price', 'other'];
   // Why an application was declined (optional, your guess or what the agent said): counted per agency.
   const DECLINE_REASONS = ['another applicant', 'income', 'rental history', 'pets', 'no reply'];
@@ -465,6 +467,7 @@
       countMemo = null;
       try {
         if (writes++ % PRUNE_EVERY === 0 || Object.keys(data.m).length > MARKS_MAX) prune();
+        data.w = now(); // when these marks were last written (the safety copy compares with it)
         const out = JSON.stringify(data);
         storage.setItem(MARKS_KEY, out);
         raw = out;
@@ -506,9 +509,9 @@
       const name = clip(raw, NAMED[f]), k = agencyKey(name);
       if (!k) return false;
       const b = bag(fresh(), f);
-      if (b[k]) delete b[k]; else b[k] = name;
+      if (Object.hasOwn(b, k)) delete b[k]; else b[k] = name;
       save();
-      return !!b[k];
+      return Object.hasOwn(b, k);
     };
     return {
       // `expected`: this script is emptying storage itself (Undo of a restore), not a wipe.
@@ -603,8 +606,8 @@
           r.rating = e?.rt >= 1 && e.rt <= 5 ? e.rt : 0;
           r.appAt = e?.as && e.ast ? e.ast : null;
           r.declineReason = e?.as === 'declined' && DECLINE_REASONS.includes(e.dr) ? e.dr : '';
-          r.agencyHidden = !!(r.agency && ag?.[agencyKey(r.agency)]);
-          r.suburbHidden = !!(r.suburb && sb?.[agencyKey(r.suburb)]);
+          r.agencyHidden = !!(r.agency && ag && Object.hasOwn(ag, agencyKey(r.agency))); // own keys: "Constructor" isn't Object.prototype's
+          r.suburbHidden = !!(r.suburb && sb && Object.hasOwn(sb, agencyKey(r.suburb)));
           r.firstSeen = e?.f ? new Date(e.f) : null;
           r.openedAt = e?.o ? new Date(e.o) : null;
           r.reviewedAt = e?.rv ? new Date(e.rv) : null;
@@ -620,7 +623,7 @@
           const availMoved = e && e.pav != null && e.avt && t - e.avt < PRICE_CHANGE_MS && e.pav !== e.av;
           r.prevAvail = availMoved ? (e.pav === 0 ? 'now' : dtf({ day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(e.pav * DAY_MS))) : '';
           r.availDir = availMoved ? e.avd || ((e.av || 0) > (e.pav || 0) ? 'later' : 'sooner') : '';
-          r.featChange = e?.pfs && e.fs && e.fst && t - e.fst < PRICE_CHANGE_MS ? featDiff(e.pfs, e.fs) : '';
+          r.featChange = e?.pfs && e.fs && e.fst && t - e.fst < PRICE_CHANGE_MS && e.pfs.split(':')[0] === e.fs.split(':')[0] ? featDiff(e.pfs, e.fs) : ''; // same detector only
         }
         return rows;
       },
@@ -689,6 +692,8 @@
       // Shortlisted listings from every search, newest-starred first, as drawer rows.
       // Rows are reused while their stored mark is unchanged (and within the same minute, since
       // "past" inspections depend on the time): the Shortlist tab and the listing bar ask often.
+      writtenAt: () => +load().w || 0,
+      createdAt: () => +load().c || 0,
       shortlist() {
         const { m } = load();
         const minute = Math.floor(now() / 60000), seen = new Set();
@@ -834,8 +839,8 @@
     for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], SNAP_TEXT_MAX) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
     for (const k of ROW_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
     if (r.avail && r.avail < startOfDay(new Date())) r.avail = startOfDay(new Date()); // "now" on the day it was saved is now today
-    r.url = safeUrl(r.url);
-    r.img = safeUrl(r.img);
+    r.url = reaUrl(r.url); // REA's links and REA's CDN only: a crafted backup can't link or load elsewhere
+    r.img = reaImg(r.img);
     r.id = isListingId(o?.id) ? String(o.id) : listingId(r.url);
     r.priceNum = typeof o?.priceNum === 'number' ? o.priceNum : parsePrice(r.price);
     r.ppb = typeof o?.ppb === 'number' ? o.ppb : perBed(r.priceNum, r.beds);
@@ -885,7 +890,7 @@
   // One string value in a storage area; blocked or full storage just means no value.
   const keyStore = (storage, key) => ({
     get() { try { return storage.getItem(key); } catch { return null; } },
-    set(v) { try { storage.setItem(key, v); } catch { /* quota/blocked */ } },
+    set(v) { try { storage.setItem(key, v); return true; } catch { return false; /* quota/blocked */ } },
     clear() { try { storage.removeItem(key); } catch { /* blocked */ } },
     // Parsed value, or null when missing or corrupt; callers still check its shape.
     getJson() { try { return JSON.parse(this.get()); } catch { return null; } },
@@ -976,19 +981,29 @@
     const stringify = (d) => `{"v":${JSON.stringify(d.v ?? 1)},"s":{${Object.entries(d.s).map(([k, e]) => `${JSON.stringify(k)}:${jsonOf(e)}`).join(',')}}}`;
     // SNAP_MAX kept, pinned first then newest; on quota, drop older searches, then the gone
     // lists, then give up. Returns the keys it stopped remembering.
-    const persist = (d) => {
+    // `evict`: false for a pin, which may trim gone rows to fit but never drops another search.
+    const persist = (d, evict = true) => {
       const order = () => Object.keys(d.s).sort((a, b) => (d.s[b].pin ? 1 : 0) - (d.s[a].pin ? 1 : 0) || d.s[b].at - d.s[a].at);
       const evicted = order().slice(SNAP_MAX);
       for (const k of evicted) delete d.s[k];
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try { const out = stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return { evicted, ok: true }; } catch {
+      // Storage full: give up the cheapest first, one step at a time: gone rows, then unpinned
+      // searches (oldest first, the one just saved last), then pinned ones. `quota` says it was
+      // storage, not the 3-search limit.
+      let quota = false;
+      for (let attempt = 0; attempt < SNAP_MAX + 3; attempt++) {
+        try { const out = stringify(d); storage.setItem(SNAP_KEY, out); memo = d; memoRaw = out; return { evicted, ok: true, quota }; } catch {
           memo = null;
-          const ks = order(); // pinned first here too, and whatever goes is reported
-          if (attempt === 0 && ks.length > 1) for (const k of ks.slice(1)) { delete d.s[k]; evicted.push(k); }
-          else for (const k of ks) { d.s[k].gone = []; entryJson.delete(d.s[k]); }
+          quota = true;
+          const ks = Object.keys(d.s), newest = ks.reduce((a, k) => (!a || d.s[k].at > d.s[a].at ? k : a), '');
+          const withGone = ks.filter((k) => d.s[k].gone?.length);
+          if (withGone.length) { for (const k of withGone) { d.s[k].gone = []; entryJson.delete(d.s[k]); } continue; }
+          if (!evict) break;
+          const k = ks.sort((a, b) => (d.s[a].pin ? 1 : 0) - (d.s[b].pin ? 1 : 0) || (a === newest) - (b === newest) || d.s[a].at - d.s[b].at)[0];
+          if (!k) break;
+          delete d.s[k]; evicted.push(k);
         }
       }
-      return { evicted, ok: false };
+      return { evicted, ok: false, quota };
     };
     // Trims until the entry fits SNAP_ENTRY_BUDGET, cheapest loss first and furthest down first:
     // row text, gone rows' text, then row features and headlines, then gone rows themselves.
@@ -1070,9 +1085,9 @@
         // Trimming and writing wait for `later` when given: the diff is all this run needs now.
         const done = (d2) => {
           fitBudget(entry);
-          const { evicted } = persist(d2);
+          const { evicted, quota } = persist(d2);
           // `refused`: every slot is pinned, so this search wasn't kept (its diff still applies to this run).
-          return { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key) };
+          return { evicted: evicted.filter((k) => k !== key), refused: evicted.includes(key), quota };
         };
         if (!later) { const res = done(d); return Object.assign(view(entry), res); }
         const out = view(entry);
@@ -1089,7 +1104,7 @@
         if (!d.s[key]) return false;
         if (on) d.s[key].pin = 1; else delete d.s[key].pin;
         entryJson.delete(d.s[key]);
-        return persist(d).ok;
+        return persist(d, false).ok;
       },
       clear() { flush(); memo = null; try { storage.removeItem(SNAP_KEY); } catch { /* blocked */ } },
       exportData: () => { flush(); return load().s; },
@@ -1317,8 +1332,17 @@
   const PAUSE_KEY = `${TOOL_PREFIX}paused`;
   const pauseGate = (storage, now = () => Date.now()) => {
     const k = keyStore(storage, PAUSE_KEY);
-    const until = () => { const raw = k.get(); if (raw == null) return 0; const t = +raw || 0; if (t > now()) return t; k.clear(); return 0; };
-    return { until, trip(ms = PAUSE_MS) { const t = now() + ms; k.set(String(t)); return t; }, clear: () => k.clear() };
+    // With storage full the write fails: this tab's own pause is then kept in memory, so it still
+    // stops (other tabs can't hear of it). A stored pause stays the one truth otherwise.
+    let local = 0;
+    const until = () => {
+      const raw = k.get(), t = Math.max(+raw || 0, local);
+      if (t > now()) return t;
+      if (raw != null) k.clear();
+      local = 0;
+      return 0;
+    };
+    return { until, trip(ms = PAUSE_MS) { const t = now() + ms; local = k.set(String(t)) ? 0 : t; return t; }, clear: () => { local = 0; k.clear(); } };
   };
 
   // No page data: a bot check (a short interstitial, or one that says so) pauses fetching; a
@@ -2079,14 +2103,15 @@
   async function fetchResults(url, { fetchImpl = fetch, wait = sleep, onRetry = () => {}, signal } = {}) {
     for (let attempt = 0; ; attempt++) {
       signal?.throwIfAborted();
-      let res, err;
-      try { res = await fetchImpl(url, { credentials: 'include', signal: withTimeout(signal, FETCH_TIMEOUT_MS) }); } catch (e) { err = e; }
+      let res, err, body;
+      // The body too: a download that breaks off or times out is retried like a failed request.
+      try { res = await fetchImpl(url, { credentials: 'include', signal: withTimeout(signal, FETCH_TIMEOUT_MS) }); if (res.ok) body = await res.text(); } catch (e) { err = e; }
       signal?.throwIfAborted();
       const retryable = err || res.status === 429 || res.status >= 500;
       if (!retryable) {
         if (res.status === 403) throw botCheck(`REA refused the request (HTTP 403) - probably a bot check.`);
         if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
-        return extractResults(await res.text());
+        return extractResults(body);
       }
       if (attempt >= RETRIES) {
         if (err) throw new Error(`Network error: ${err.name === 'TimeoutError' ? 'timed out' : err.message}`);
@@ -3383,7 +3408,7 @@ ${rows.map((r) => `<div class="l">${r.img ? `<img src="${esc(r.img)}" alt="">` :
 <div class="m">${esc(factsLine(r, ' · '))}</div>
 ${(r.inspections || []).length ? `<div class="m">Inspections: ${esc(r.inspections.map((i) => i.label).join('; '))}</div>` : ''}
 ${r.agency ? `<div class="m">${esc(r.agency)}</div>` : ''}${r.appStatus ? `<div class="m">Status: ${esc(r.appStatus)}</div>` : ''}${r.rating ? `<div class="m">My rating: ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</div>` : ''}
-${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).length ? `<div class="m">Ask:</div><ul class="q">${askItems(r, amenities).map((x) => `<li>${x.a === 'y' ? '☑ ' : x.a === 'n' ? '☒ ' : '☐ '}${esc(x.q)}</li>`).join('')}</ul>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${r.checks?.[k] === 'y' ? '☑' : r.checks?.[k] === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
+${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).length ? `<div class="m">Ask:</div><ul class="q">${askItems(r, amenities).map((x) => `<li>${x.a === 'y' ? '☑ ' : x.a === 'n' ? '☒ ' : '☐ '}${esc(x.q)}</li>`).join('')}</ul>` : ''}${checklist.length ? `<div class="m">${checklist.map((k) => `${own(r.checks, k) === 'y' ? '☑' : own(r.checks, k) === 'n' ? '☒' : '☐'} ${esc(k)}`).join('  ')}</div>` : ''}<div class="box">Notes at inspection</div><div class="u">${esc(r.url)}</div>
 </div></div>`).join('')}</body></html>`;
 
   // Drift canary: share of rows with each field, tracked as an average over searches. A field
@@ -3691,7 +3716,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     box-shadow:0 4px 16px rgba(0,0,0,.28)}
   #rf-launch:hover{background:var(--rf-accent-hover)}
   /* hidden always wins over our display rules */
-  #rf-launch[hidden],#rf-panel[hidden],#rf-panel [hidden],#rf-lbar [hidden]{display:none!important}
+  #rf-launch[hidden],#rf-panel[hidden],#rf-panel [hidden],#rf-lbar [hidden],#rf-remind[hidden]{display:none!important}
   #rf-panel{position:fixed;top:0;right:0;bottom:0;width:430px;max-width:100vw;z-index:2147483001;background:var(--rf-bg);
     display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.22);color-scheme:light dark;
     font:13px/1.45 system-ui,-apple-system,sans-serif;color:var(--rf-fg)}
@@ -4098,7 +4123,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (!isSearchPage(location.href)) return null;
     try {
       const key = searchKey(location.href), page = pageNum(location.href);
-      if (window.ArgonautExchange) return { key, page, results: parseExchange(window.ArgonautExchange) };
+      if (window.ArgonautExchange) { try { return { key, page, results: parseExchange(window.ArgonautExchange) }; } catch { /* emptied by REA's app: the page's own script tag next */ } }
       const tag = exchangeScript();
       return tag ? { key, page, results: extractResults(tag.textContent + '</script>') } : null;
     } catch { return null; }
@@ -4429,7 +4454,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const rec = await idbDo('readonly', (st) => st.get('copy')).catch(() => { failed = true; return null; });
     if (failed) { mirrorHeld = true; if (mirrorRetries++ < 3) setTimeout(offerMirror, 30000); return; }
     const here = marks.exportData(), lost = mirrorLost(rec?.data, here);
-    if (!lost) { if (mirrorHeld) releaseMirror(); return; }
+    // Marks written since the copy was (a change just made, then a reload before the copy caught
+    // up) mean the difference is yours, not a loss. Only an emptied or older store is offered it.
+    // (A store made after the copy, ie storage cleared and then a new star, is still a loss.)
+    const ownChange = mirrorWeight(here) && marks.createdAt() && marks.createdAt() < (rec?.at || 0) && marks.writtenAt() > (rec?.at || 0);
+    if (!lost || ownChange) { if (mirrorHeld) releaseMirror(); return; }
     mirrorHeld = true;
     if (!isSearchPage(location.href) || !ui.offerRestore) return; // the offer lives in the drawer: the next search page asks
     ui.offerRestore(rec.data, `${mirrorWeight(here) ? 'Some of your shortlist in this browser has' : 'Your shortlist in this browser has'} gone (its storage was cleared). A safety copy from ${ago(Date.now() - rec.at)} has`);
@@ -4805,8 +4834,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (e.key === 'Escape' && ui.peekId) { ui.closePeek(); return; } // closes just the photo
     const menu = document.activeElement?.closest?.('.rf-acts-more[open], .rf-menu[open]');
     if (e.key === 'Escape' && menu && panel.contains(menu)) { menu.open = false; menu.querySelector('summary').focus(); return; } // closes just the ⋯ menu
-    // In a search box with something typed, the browser's Esc clears it; a second Esc closes.
-    if (e.key === 'Escape' && document.activeElement?.matches?.('#rf-panel input[type=search]') && document.activeElement.value) return;
+    // In a search box with something typed, Esc clears it (not every browser does); a second Esc closes.
+    if (e.key === 'Escape' && document.activeElement?.matches?.('#rf-panel input[type=search]') && document.activeElement.value) {
+      e.preventDefault();
+      document.activeElement.value = '';
+      document.activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
     if (e.key === 'Escape' && !e.defaultPrevented && (panel.contains(document.activeElement) || narrow.matches)) {
       if (!help.hidden) { toggleHelp(); return; }
       setOpen(false); launch.focus(); return;
@@ -5718,7 +5752,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         if (!cfg.remember) throw new DOMException('remember turned off', 'AbortError'); // opted out mid-check: store nothing
         store.set(key, res.rows, res.truncated);
         const snap = snaps.save(key, res.rows, res.truncated);
-        if (key === currentKey()) adopt(key, res.rows, res.truncated, '', snap, true);
+        if (key === (currentKey() ?? cacheKey)) adopt(key, res.rows, res.truncated, '', snap, true);
         else learn(res.rows, true, true);
         ui.savedResult.set(key, found);
         out.push(`${label}: ${found.added} new${found.match != null ? ` (${found.match} match ${found.by})` : ''}${found.gone ? `, ${found.gone} gone` : ''}`);
@@ -6070,7 +6104,17 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // Same listings in the same order as on screen (a shortlist/hide/note/status click, most
   // re-renders): only the items whose markup changed are swapped, so the rest keep their nodes
   // (and focus). Anything else, or most items changed, is one innerHTML.
+  // A redraw that swaps or moves the focused listing (another tab's change, a reorder) would drop
+  // focus to the page: put it back on the same control in the new node.
   const paintList = (rows) => {
+    const a = document.activeElement, it = a && ui.list.contains(a) ? a.closest('.rf-item') : null;
+    const sel = it && a !== it ? [a.dataset.act && `[data-act="${CSS.escape(a.dataset.act)}"]`, a.dataset.v && `[data-v="${CSS.escape(a.dataset.v)}"]`, a.dataset.r && `[data-r="${CSS.escape(a.dataset.r)}"]`].filter(Boolean).join('') : '';
+    paintRows(rows);
+    if (!it || document.activeElement === a && a.isConnected) return;
+    const id = it.dataset.id, to = (sel && itemEl(id, sel)) || itemEl(id);
+    to?.focus({ preventScroll: true });
+  };
+  const paintRows = (rows) => {
     const n = Math.max(RENDER_CHUNK, ui.keepShown || 0);
     const els = listItems();
     const only = ui.onlyIds;
@@ -6245,7 +6289,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       ${na === 'inspected' ? `<div class="rf-nudge">Did you inspect? <button type="button" class="rf-chip" data-na="yes">Yes, inspected</button> <button type="button" class="rf-chip" data-na="no">Didn't go</button></div>` : ''}
       ${na === 'applyby' ? `<div class="rf-nudge">Applications close ${esc(applyByLabel(r.applyBy).replace(/^Apply by /, ''))}: apply? ${esc(applyReady(r, cfg, ui.portals || []))}. <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
       ${na === 'apply' ? `<div class="rf-nudge">Inspected ${esc(ago(now - r.appAt))}: apply? <button type="button" class="rf-chip" data-na="applied">Mark applied</button></div>` : ''}
-      ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => r.checks?.[k]).length}/${checks.length}${asks.length ? ` · Asked ${asks.filter((x) => x.a).length}/${asks.length}` : ''}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => checkBtn(k, r.checks?.[k], 'class="rf-chip"')).join('')}</div>${asks.length ? `<div class="rf-checks rf-asks" role="group" aria-label="What to ask the agent (tap once the agent answers: fine, then a problem)">${asks.map((x) => qaBtn(x, 'class="rf-chip"')).join('')}</div>` : ''}</details>` : ''}
+      ${r.starred && sl ? `<details class="rf-ck-more"${ckOpen(r) ? ' open' : ''}><summary>Checklist ${checks.filter((k) => own(r.checks, k)).length}/${checks.length}${asks.length ? ` · Asked ${asks.filter((x) => x.a).length}/${asks.length}` : ''}</summary><div class="rf-checks" role="group" aria-label="Inspection checklist">${checks.map((k) => checkBtn(k, own(r.checks, k), 'class="rf-chip"')).join('')}</div>${asks.length ? `<div class="rf-checks rf-asks" role="group" aria-label="What to ask the agent (tap once the agent answers: fine, then a problem)">${asks.map((x) => qaBtn(x, 'class="rf-chip"')).join('')}</div>` : ''}</details>` : ''}
       ${r.starred && sl ? `<div class="rf-app"><span class="rf-meta" aria-hidden="true">My rating</span> ${ratingHtml(r, 'data-act="rate"')}</div>` : ''}
       ${r.starred ? `<label class="rf-app">Application <select data-app aria-label="Application status">${statusOptions(r.appStatus)}</select>${r.appAt ? ` <span class="rf-meta">${esc(ago(now - r.appAt))}</span>` : ''}${needsFollowUp(r) ? ' <span class="rf-warn-t">follow up?</span>' : ''}</label>` : ''}
       ${sl && r.appStatus === 'declined' ? `<div class="rf-acts rf-why"><span class="rf-meta">Why declined? (optional)</span>${DECLINE_REASONS.map((x) => `<button data-act="dr" data-r="${x}" aria-pressed="${r.declineReason === x}">${reasonLabel(x)}</button>`).join('')}</div>` : ''}
@@ -6289,7 +6333,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const PRESET_VISIT_KEY = `${TOOL_PREFIX}preset-visit`;
   const PLACE_KEY = `${TOOL_PREFIX}place`; // sessionStorage: where you were in each search's results
   const PRESET_PREV_KEY = `${TOOL_PREFIX}preset-prev/v1`;
-  const prevKey = keyStore(storageOr('localStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
+  const prevKey = keyStore(storageOr('sessionStorage'), PRESET_PREV_KEY), visitKey = keyStore(storageOr('sessionStorage'), PRESET_VISIT_KEY);
   const prevStore = {
     get() { const v = prevKey.getJson(); return isObj(v) ? sanitizeCfg(v) : null; },
     set: (v) => prevKey.setJson(v),
@@ -6508,7 +6552,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       // Written in the next task, so the results paint first; the warning follows the write.
       const snap = cfg.remember ? snaps.save(key, res.rows, res.truncated, (fn) => setTimeout(fn, 0)) : null;
       if (!snap) setWarn('saved', '');
-      snap?.saved.then(({ evicted, refused }) => setWarn('saved', refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
+      snap?.saved.then(({ evicted, refused, quota }) => setWarn('saved', quota ? `This browser's storage is full: ${refused ? 'this search wasn\'t remembered' : 'kept this search'}${evicted.filter((k) => k !== key).length ? `, stopped remembering ${evicted.filter((k) => k !== key).map(searchLabel).join(', ')}` : ''}. Delete saved searches or turn off Remember results to make room.`
+        : refused ? `Not remembered: all ${SNAP_MAX} saved searches are pinned (unpin one under Saved searches).`
         : evicted.length ? `Stopped remembering ${evicted.map(searchLabel).join(', ')} (${SNAP_MAX} searches at most; pin one to keep it).` : ''));
       adopt(key, res.rows, res.truncated, '', snap, true);
       ui.newsSeen?.();
@@ -6771,7 +6816,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const facts = [Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}${r.bondWeeks > BOND_CAP_WEEKS ? ` (bond ${r.bondWeeks} wks)` : ''}` : '',
       cash != null ? `cash to move ${money(cash)}` : '', applyByLabel(r.applyBy), rec ? `${r.agency}: ${rec}` : '', sqmLabel(r), r.lease ? leaseText(r.lease) : '', r.applyVia ? `apply via ${r.applyVia}` : '', r.taken ? TAKEN_LABELS[r.taken] : '',
       ...watchTags(r), placesLabel(r) || kmLabel(r), negotiateFacts(r, cache ? cacheDrops() : null)].filter(Boolean);
-    const checks = checklistItems(cfg.checklist).map((k) => checkBtn(k, r.checks?.[k], 'data-l="ck"')).join('');
+    const checks = checklistItems(cfg.checklist).map((k) => checkBtn(k, own(r.checks, k), 'data-l="ck"')).join('');
     const sl = marks.shortlist(), mine = sl.find((x) => x.id === r.id);
     const nx = nextStop(sl, Number.isFinite(r.lat) || !mine ? r : { ...r, lat: mine.lat, lng: mine.lng }); // the page may not say where it is; the shortlist copy does
     const clockAt = (ms) => dtf({ hour: 'numeric', minute: '2-digit', ...(tzOf(r) ? { timeZone: tzOf(r) } : {}) }).format(ms);
@@ -7060,6 +7105,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (active && mirrorHeld && !ui.pendingRestore && typeof indexedDB !== 'undefined') offerMirror(); // started on a listing page: ask here
       ui.launch.hidden = !active && !ui.pendingShare; // an unanswered share offer stays reachable
       if (!active && !ui.pendingShare) ui.setOpen(false);
+      const tip = document.getElementById('rf-remind');
+      if (tip) tip.hidden = !active; // the reminder is about searches: back when one is
       setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view

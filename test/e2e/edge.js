@@ -304,7 +304,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await status(page), /1 of 2 shortlisted/);
     await page.fill('.rf-sl-q', 'zzznomatch');
     await page.waitForSelector('.rf-empty:has-text("Nothing on the shortlist matches")');
-    await page.fill('.rf-sl-q', '');
+    await page.focus('.rf-sl-q'); await page.keyboard.press('Escape');
+    assert.equal(await page.inputValue('.rf-sl-q'), '', 'Esc clears the search');
+    assert.ok(await page.isVisible('#rf-panel'), 'and leaves the drawer open');
     await page.waitForFunction(() => document.querySelectorAll('.rf-item').length === 2);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=csv]'))]);
     const csv = fs.readFileSync(await dl.path(), 'utf8');

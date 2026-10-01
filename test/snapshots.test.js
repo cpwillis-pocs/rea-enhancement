@@ -74,7 +74,7 @@ test('applyFilters: newOnly and showGone', () => {
   assert.equal(ids({ showGone: true }).length, 3);
 });
 
-test('snapshotStore: quota falls back to newest search, then drops gone lists', () => {
+test('snapshotStore: storage full gives up gone lists first, then older searches, keeping the current one', () => {
   let t = 1e12, quota = Infinity;
   const m = new Map();
   const storage = { getItem: (k) => m.get(k) ?? null, removeItem: (k) => m.delete(k),
@@ -88,7 +88,11 @@ test('snapshotStore: quota falls back to newest search, then drops gone lists', 
   t += 2 * H;
   st.save(KEY, [row('146500003')], false);
   assert.ok(st.get(KEY), 'current search kept');
-  assert.equal(st.get(other), null, 'older search dropped to fit');
+  assert.ok(st.get(other) ? st.get(KEY).gone.length === 0 : true, 'its gone list went first; the older search only if that wasn\'t enough');
+  quota = 10; // nothing fits now
+  t += 2 * H;
+  const out = st.save(KEY, [row('146500004')], false);
+  assert.equal(out.quota, true, 'reported as storage, not the search limit');
 });
 
 test('snapshotStore: amenity states survive the round trip even when text is clipped', () => {
@@ -224,7 +228,7 @@ test('snapshotStore: a deferred save is readable at once and written by whatever
   assert.ok(st.get(KEY), 'readable while pending');
   assert.equal(st.sizes().length, 1, 'sizes flushes the pending write');
   assert.notEqual(storage.getItem('rea-avail-filter/snapshots/v1'), null);
-  assert.deepEqual(await v.saved, { evicted: [], refused: false });
+  assert.deepEqual(await v.saved, { evicted: [], refused: false, quota: false });
   run(); // the later task finds nothing left to do
   const w = st.save(KEY, [row('146500002')], false, (fn) => { run = fn; });
   assert.equal(st.pin(KEY, true), true, 'pin flushes first, so the pin lands on the new entry');
