@@ -5,7 +5,7 @@
 // review the diff, then run the checks it prints.
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 
 const root = process.env.RELEASE_ROOT ? path.resolve(process.env.RELEASE_ROOT) : path.join(__dirname, '..');
 const FILE = 'rea-availability-filter.user.js';
@@ -22,8 +22,16 @@ const cur = src.match(/\/\/ @version\s+(\S+)/)[1];
 if (num(next) <= num(cur)) die(`${next} is not higher than the current ${cur}`);
 
 // Counts: unit tests from a real run, e2e blocks from the source.
-const unit = +process.env.RELEASE_UNIT_COUNT || +(execSync('node --test test/*.test.js', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().match(/^# tests (\d+)/m) || [])[1];
-if (!unit) die('could not count the unit tests (do they pass?)');
+// TAP, whatever Node's default reporter (Node 26 prints spec style even when piped). Counted even
+// when some fail: lint's own e2e-count check fails until this release updates the docs.
+let unit = +process.env.RELEASE_UNIT_COUNT, failing = 0;
+if (!unit) {
+  const tests = fs.readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.test.js')).map((f) => `test/${f}`);
+  const out = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...tests], { cwd: root, encoding: 'utf8' }).stdout || '';
+  unit = +(out.match(/^# tests (\d+)/m) || [])[1];
+  failing = +(out.match(/^# fail (\d+)/m) || [])[1] || 0;
+}
+if (!unit) die('could not count the unit tests');
 const edge = read('test/e2e/edge.js');
 const blocks = (edge.match(/await block\('/g) || []).length;
 const top = Math.max(...[...edge.matchAll(/await block\('(\d+)/g)].map((m) => +m[1]));
@@ -46,6 +54,7 @@ const live = fs.readdirSync(path.join(root, 'test/shapes')).map((f) => f.match(/
 const shapeNote = !live.length ? ''
   : (Date.now() - Date.parse(live.at(-1))) / 864e5 > SHAPE_MAX_DAYS ? `the newest real shape is from ${live.at(-1)}: run npm run live` : '';
 if (shapeNote) console.warn(`release: warning: ${shapeNote}`);
+if (failing) console.warn(`release: warning: ${failing} unit test(s) failed before the bump (lint's e2e-count check fails until the docs are updated); npm run check now`);
 console.log(`release: ${cur} -> ${next}; ${unit} unit tests, ${blocks} e2e blocks (1–${top}).
 Still to do:
   1. Write the CHANGELOG.md section (a "- " stub is there).
