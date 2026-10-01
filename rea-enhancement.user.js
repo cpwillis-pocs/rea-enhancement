@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Enhancement
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.36.5
+// @version      2.36.6
 // @description  Toolkits for realestate.com.au. Rental Toolkit: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -7093,10 +7093,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.36.2', items: [
-    "On REA's search: the filters set on REA show above yours, in orange where they leave listings out.",
-    "Use my filters on REA puts your rent, rooms, type and dates on REA's search, so big searches read in full.",
-    'Availability Filter is now Rental Toolkit; Search on the same search filters what you have, instantly.',
+  const WHATS_NEW = { version: '2.36.6', items: [
+    "On REA's search: REA's own filters show above yours; Use my filters on REA puts yours on its search, so big searches read in full.",
+    "Restore can replace what's here, to go back to exactly what a backup had.",
+    "Search on the same search filters what you have, instantly; light / dark from the drawer's header.",
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',

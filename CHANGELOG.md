@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.6
+
+- **Named for more than rentals:** the script is now **rea-enhancement** (REA Enhancement in Tampermonkey), and **Rental Toolkit** is its part for rent searches, so a toolkit for other parts of REA (eg buying) can join it later. The install link is now `rea-enhancement.user.js`, data is kept under `rea-enhancement/`, the console helpers are `reaEnhancement.selfcheck()`, `.probe()` and `.shape()`, and downloads are named `rea-enhancement-…`. Set before anyone had installed it, so nothing needs moving.
+
 ## 2.36.5
 
 - **Restore can replace what's here:** tick **Replace what's here** in the restore offer to put everything back exactly as the backup had it (shortlist, hides, notes, statuses, ratings, checklists, hidden agencies, presets and saved searches), eg to go back to an earlier state or start clean on another computer. Listings marked since the backup are unmarked; what you've seen (first seen, price and date changes) stays. It says what will change first, and Undo puts it all back. Left unticked, a restore merges as before.
