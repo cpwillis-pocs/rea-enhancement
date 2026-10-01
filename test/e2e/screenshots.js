@@ -16,7 +16,7 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = harness.watch(await pw.chromium.launch());
-  const shot = async (name, { dark = false, width = 1280, height = 860, act, seed, url = SEARCH, ready = 'article > .rf-badge' }) => {
+  const shot = async (name, { dark = false, width = 1280, height = 860, act, seed, url = SEARCH, ready = 'article > .rf-badge', keepFocus = false }) => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: dark ? 'dark' : 'light', timezoneId: 'Australia/Sydney', locale: 'en-AU' });
     const page = await ctx.newPage();
     await page.clock.install({ time: new Date('2026-09-23T10:00:00+10:00') }); // fixture dates stay meaningful
@@ -27,9 +27,32 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     await page.addScriptTag({ content: SCRIPT });
     await page.waitForSelector(ready);
     await act(page);
+    if (!keepFocus) await page.evaluate(() => document.activeElement?.blur()); // no caret or selected text in the picture
     await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(OUT, `${name}.jpg`), type: 'jpeg', quality: 82 });
+    const png = await page.screenshot({ type: 'png' });
+    await ctx.close();
+    await frame(name, png, { width, height, dark, url });
     console.log('wrote', name);
+  };
+  // Each shot in a browser window (a phone for narrow ones) on a soft background, for the README.
+  const frame = async (name, png, { width, height, dark, url }) => {
+    const phone = width < 500, img = `data:image/png;base64,${png.toString('base64')}`;
+    const where = decodeURIComponent(new URL(url).host + new URL(url).pathname).replace(/^www\./, '');
+    const bg = dark ? 'linear-gradient(135deg,#1d2a2b,#232537)' : 'linear-gradient(135deg,#e6f4ec,#e9eefb)';
+    const dot = (c) => `<i style="width:12px;height:12px;border-radius:50%;background:${c};display:inline-block"></i>`;
+    const win = phone
+      ? `<div style="padding:14px;border-radius:52px;background:#16171a;box-shadow:0 30px 70px -18px rgba(10,20,40,.45)"><div style="border-radius:40px;overflow:hidden;position:relative;background:${dark ? '#1c1c20' : '#fff'}">
+          <div style="height:50px;display:flex;align-items:center;justify-content:space-between;padding:0 30px;font:600 15px system-ui,sans-serif;color:${dark ? '#eee' : '#111'}"><span>9:41</span><span style="letter-spacing:2px">▮▮▮</span></div>
+          <img src="${img}" style="display:block;width:${width}px;height:${height - 50}px;object-fit:cover;object-position:top"><div style="position:absolute;top:10px;left:50%;width:110px;height:30px;margin-left:-55px;border-radius:16px;background:#16171a"></div></div></div>`
+      : `<div style="border-radius:14px;overflow:hidden;background:${dark ? '#1c1c20' : '#fff'};box-shadow:0 30px 70px -22px rgba(10,30,50,.4),0 0 0 1px rgba(0,0,0,${dark ? '.5' : '.07'})">
+          <div style="height:42px;display:flex;align-items:center;gap:8px;padding:0 16px;background:${dark ? '#2a2b30' : '#f1f3f5'};border-bottom:1px solid ${dark ? '#3a3b41' : '#e2e5e9'}">
+            ${dot('#ff5f57')}${dot('#febc2e')}${dot('#28c840')}
+            <div style="margin-left:16px;flex:0 1 560px;height:26px;border-radius:13px;background:${dark ? '#1c1c20' : '#fff'};display:flex;align-items:center;padding:0 14px;font:13px system-ui,sans-serif;color:${dark ? '#b8b8c0' : '#5b5f66'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;line-height:26px">${where}</div>
+          </div><img src="${img}" style="display:block;width:${width}px;height:${height}px"></div>`;
+    const ctx = await browser.newContext({ deviceScaleFactor: 2, viewport: { width: width + 200, height: height + 300 } });
+    const page = await ctx.newPage();
+    await page.setContent(`<!doctype html><body style="margin:0;display:inline-block;padding:${phone ? 56 : 60}px;background:${bg}">${win}</body>`);
+    await page.locator('body').screenshot({ path: path.join(OUT, `${name}.jpg`), type: 'jpeg', quality: 86 });
     await ctx.close();
   };
   const search = async (page) => {
