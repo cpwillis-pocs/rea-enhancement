@@ -47,10 +47,13 @@ test('marksStore: toggle, filter, persistence, prune', () => {
   // Reload from storage.
   const again = core.marksStore(storage, () => t);
   assert.deepEqual(again.counts(), { starred: 1, hidden: 1, notes: 0 });
-  // 91 days later unstarred/unhidden entries are pruned on next save.
+  // 91 days later unstarred/unhidden entries are pruned on next save; seeing nothing new is no save.
   t += 91 * 864e5;
+  const before = storage.getItem('rea-avail-filter/marks/v1');
   again.observe([]);
-  assert.deepEqual(Object.keys(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m).sort(), ['146500004', '146500005']);
+  assert.equal(storage.getItem('rea-avail-filter/marks/v1'), before, 'no sightings, no write');
+  again.observe([row('146500007')]);
+  assert.deepEqual(Object.keys(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m).sort(), ['146500004', '146500005', '146500007']);
 });
 
 test('marksStore: corrupt storage recovers', () => {
@@ -98,6 +101,36 @@ test('marksStore: import rejects junk and sanitises', () => {
   assert.equal(r, null, 'entry without a safe URL is not listed');
   assert.equal(b.note('146500099'), 'ok');
   assert.equal(({}).s, undefined, 'no prototype pollution');
+});
+
+test('marksStore: sightings write only what changed; opened and reviewed are not choices', () => {
+  let t = 1e12;
+  const storage = mem();
+  const st = core.marksStore(storage, () => t);
+  const key = 'rea-avail-filter/marks/v1';
+  let writes = 0;
+  const set = storage.setItem; storage.setItem = (k, v) => { writes++; set(k, v); };
+  st.observe([row('146500010')]);
+  assert.equal(writes, 1, 'a new listing is written');
+  t += 60e3; st.observe([row('146500010')]);
+  assert.equal(writes, 1, 'seen again a minute later: no write');
+  t += 11 * 60e3; st.observe([row('146500010')]);
+  assert.equal(writes, 2, 'last seen moves on after the 10-minute step');
+  t += 60e3; st.observe([row('146500010', '$650 per week')]);
+  assert.equal(writes, 3, 'a price change is written at once');
+  assert.equal(JSON.parse(storage.getItem(key)).m['146500010'].pp, 700);
+  st.toggle('146500010', 's');
+  const raw = storage.getItem(key);
+  assert.match(raw, /^\{"w":\d+,/, 'the choice stamp leads');
+  assert.equal(st.sameChoices(raw), true);
+  st.setOpened('146500010'); st.setReviewed(['146500010']);
+  assert.equal(st.sameChoices(storage.getItem(key)), true, 'opened and reviewed keep the stamp');
+  const n = writes; st.setOpened('146500010');
+  assert.equal(writes, n, 'opened again within the step: no write');
+  t += 1; st.toggle('146500010', 'h');
+  assert.equal(st.sameChoices(raw), false, 'a newer choice is not the same');
+  assert.equal(st.sameChoices('{"c":1,"m":{}}'), false, 'no stamp: unknown');
+  assert.equal(st.sameChoices(null), false);
 });
 
 test('marksStore: two tabs do not clobber each other; null m recovers', () => {

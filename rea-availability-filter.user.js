@@ -390,6 +390,7 @@
     return k;
   };
   const PRICE_HISTORY_MAX = 10;
+  const SEEN_STEP_MS = 10 * 60e3; // last seen / opened kept to 10 minutes: seeing a listing again sooner writes nothing
   const RELIST_GAP_MS = HOUR_MS; // old listing unseen at least this long before a same-address one counts as a relist
   const agencyKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // Stored summary <-> row-shaped fields (one mapping for import, shortlist and summary()).
@@ -471,7 +472,8 @@
       try {
         if (writes++ % PRUNE_EVERY === 0 || Object.keys(data.m).length > MARKS_MAX) prune();
         if (choice) data.w = now(); // when you last changed these marks (the safety copy compares with it)
-        const out = JSON.stringify(data);
+        // `w` leads, so another tab can tell a write of sightings only from the first bytes (sameChoices).
+        const out = JSON.stringify(data.w ? { w: data.w, ...data } : data);
         storage.setItem(MARKS_KEY, out);
         raw = out;
         writeState.report(true);
@@ -527,10 +529,12 @@
         const t = now();
         const batch = new Set(rows.map((r) => r.id));
         const anyInspections = rows.some((r) => r.inspections?.length);
+        let changed = false;
         for (const r of rows) {
           if (!r.id) continue;
+          const was = m[r.id] ? JSON.stringify(m[r.id]) : '';
           const e = m[r.id] || (m[r.id] = { f: t });
-          e.l = t;
+          if (!(t - e.l < SEEN_STEP_MS)) e.l = t; // last seen to the step: a reload a minute later writes nothing
           delete e.x; // seen again, so not gone
           if (e.s) {
             const li = Math.max(e.li || 0, lastPast(e.d?.in, t)); // REA drops an inspection once it's over
@@ -590,9 +594,13 @@
             if (full && prev && prev !== r.id && m[prev] && !e.rl && !batch.has(prev) && t - (m[prev].l || 0) > RELIST_GAP_MS) e.rl = prev;
             if (e.rl && batch.has(e.rl)) delete e.rl; // the "old" listing is live again: two places, not a relist
             if (full || !prev || batch.has(prev) || !m[prev]) d.ad[ak] = r.id; // a partial view doesn't move the address on
+            if (d.ad[ak] !== prev) changed = true;
           }
+          if (!changed && JSON.stringify(e) !== was) changed = true;
         }
-        save(false); // sightings, not your choices
+        // Sightings, not your choices; nothing new (a reload, the same page again) is no write, so
+        // no rewrite of every mark here and no storage event in REA's other tabs.
+        if (changed) save(false);
       },
       decorate(rows) {
         const { m, ag, sb } = load();
@@ -673,8 +681,14 @@
         edit(id, (e) => { if (HIDE_REASONS.includes(reason)) e.hr = reason; else delete e.hr; });
       },
       // You opened the listing (from the drawer, a card or its page): "opened 2d ago", Not-opened filter.
+      // Opened and reviewed are what you looked at, not choices: they don't redraw other tabs
+      // (sameChoices), and opening the same listing again within a few minutes writes nothing.
       setOpened(id) {
-        if (isListingId(id)) edit(id, (e) => { e.o = now(); });
+        if (!isListingId(id)) return;
+        const e = entry(fresh().m, id);
+        if (now() - e.o < SEEN_STEP_MS) return;
+        e.o = now();
+        save(false);
       },
       // Your 1-5 after an inspection; the same number again clears it.
       setRating(id, n) {
@@ -689,13 +703,16 @@
         const { m } = fresh();
         let n = 0;
         for (const id of ids) { if (!isListingId(id)) continue; const e = entry(m, id); if (!!e.rv === on) continue; if (on) e.rv = now(); else delete e.rv; n++; }
-        if (n) save();
+        if (n) save(false);
         return n;
       },
       // Shortlisted listings from every search, newest-starred first, as drawer rows.
       // Rows are reused while their stored mark is unchanged (and within the same minute, since
       // "past" inspections depend on the time): the Shortlist tab and the listing bar ask often.
       writtenAt: () => +load().w || 0,
+      // Another tab's write (its stored string) with the same "you changed" stamp as this copy:
+      // sightings only, nothing to redraw for. Unknown (no stamp, an older version's write) is no.
+      sameChoices(raw) { const w = /^\{"w":(\d+)[,}]/.exec(raw || '')?.[1]; return w != null && +w === (+load().w || 0); },
       createdAt: () => +load().c || 0,
       shortlist() {
         const { m } = load();
@@ -7444,6 +7461,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       // A restore's Undo puts back what was stored before it: after another tab has written, that
       // would silently undo the other tab too, so the offer goes.
       if (e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) ui.status.querySelector('.rf-undo-restore')?.remove();
+      // Sightings only (another tab read a page, opened a listing): nothing of yours changed, so no
+      // re-read or redraw here; this tab's next write still re-reads storage first (fresh()).
+      if (e.key === MARKS_KEY && marks.sameChoices(e.newValue)) return;
       if (e.key === MARKS_KEY || e.key === null) {
         marks.invalidate();
         // A tab in the background redraws once when it's looked at again, not on every change made elsewhere.

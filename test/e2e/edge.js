@@ -2605,6 +2605,31 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 73. Another tab writing only sightings (it read a page) doesn't redraw this one; a change of
+  // yours there (a star) does.
+  await block('73', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 2).map((x) => x.dataset.id));
+    await page.hover(`.rf-item[data-id="${ids[0]}"]`); await page.click(`.rf-item[data-id="${ids[0]}"] >> [data-act=s]`);
+    const other = await ctx.newPage();
+    await other.route('**/*', serve()); await other.goto(SEARCH);
+    const write = (choice) => other.evaluate(([c, i]) => {
+      const k = 'rea-avail-filter/marks/v1', d = JSON.parse(localStorage.getItem(k));
+      if (c) { d.m[i].s = 1; d.m[i].st = 1; d.w += 1; } else d.m[i].l += 1;
+      localStorage.setItem(k, JSON.stringify({ w: d.w, ...d })); // as the script writes it: the stamp first
+    }, [choice, ids[1]]);
+    await page.evaluate(() => { document.querySelector('.rf-status').textContent = 'untouched'; }); // a redraw rewrites it
+    await write(false);
+    await page.waitForTimeout(300);
+    assert.equal(await status(page), 'untouched', 'sightings only: no redraw');
+    await write(true);
+    await page.waitForSelector(`.rf-item.rf-starred[data-id="${ids[1]}"]`, { timeout: 3000 });
+    console.log('other tab: sightings skipped, choices drawn: ok');
+    await other.close(); await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);
