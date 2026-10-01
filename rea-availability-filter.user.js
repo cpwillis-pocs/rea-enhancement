@@ -4494,7 +4494,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     widthKey.set(String(w));
     ui.applyWidth(w);
   });
-  window.addEventListener('resize', () => ui.applyWidth());
+  window.addEventListener('resize', () => { if (!panel.hidden) ui.applyWidth(); }); // opening sizes it (setOpen)
   }
 
   function wirePeek(panel) {
@@ -5647,7 +5647,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const it = `${base + ui.stickyStatus + 4}px`;
     if (panel.style.getPropertyValue('--rf-item-top') !== it) panel.style.setProperty('--rf-item-top', it);
     const top = ui.view === 'shortlist' ? ui.slBar : ui.controls;
-    toFilters.hidden = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
+    const off = panel.classList.contains('rf-full') || top.getBoundingClientRect().bottom > tabs.getBoundingClientRect().bottom;
+    if (toFilters.hidden !== off) toFilters.hidden = off; // runs on every scroll event
   };
   if (typeof ResizeObserver === 'function') new ResizeObserver(() => ui.syncSticky()).observe(ui.status);
   panel.addEventListener('scroll', () => { ui.syncSticky(); notePlace(); }, { passive: true });
@@ -6020,13 +6021,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const sbs = marks.hiddenSuburbs();
     const box = ui.panel.querySelector('.rf-agencies');
     box.hidden = !ags.length && !sbs.length;
-    box.querySelector('.rf-ag-list').innerHTML = ags.map((a) =>
+    setHtml(box.querySelector('.rf-ag-list'), ags.map((a) =>
       `<button type="button" class="rf-chip" data-unhide-ag="${esc(a)}" aria-label="Show ${esc(a)} again">${esc(a)} ×</button>`).join('') +
-      sbs.map((a) => `<button type="button" class="rf-chip" data-unhide-sb="${esc(a)}" aria-label="Show suburb ${esc(a)} again">${esc(a)} (suburb) ×</button>`).join('');
+      sbs.map((a) => `<button type="button" class="rf-chip" data-unhide-sb="${esc(a)}" aria-label="Show suburb ${esc(a)} again">${esc(a)} (suburb) ×</button>`).join(''));
     const c = marks.counts();
-    ui.slCount.textContent = `(${c.starred})`;
-    for (const el of (ui.countEls ||= [...ui.panel.querySelectorAll('[data-count]')])) el.textContent = `(${c[el.dataset.count]})`;
+    for (const [el, t] of [[ui.slCount, `(${c.starred})`], ...(ui.countEls ||= [...ui.panel.querySelectorAll('[data-count]')]).map((el) => [el, `(${c[el.dataset.count]})`])]) if (el.textContent !== t) el.textContent = t;
   };
+  // innerHTML only when the markup is new: a redraw that changes nothing keeps the nodes (and focus).
+  const setHtml = (el, html) => { if (el._html !== html || el.childNodes.length !== el._n) { el.innerHTML = html; el._html = html; el._n = el.childNodes.length; } };
 
   // Inline note editor; Enter saves, Shift+Enter newline, Esc cancels (without closing the drawer).
   function editNote(item) {
@@ -6258,8 +6260,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function renderActive() {
     const chips = cache ? removedBy(pool(), cfg) : [];
     ui.active.hidden = !chips.length || ui.view === 'shortlist';
-    ui.active.innerHTML = chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"${c.key === 'sizeMin' ? ` title="${esc(SQM_NOTE)}"` : ''}
-      aria-label="Remove filter ${esc(c.label)}${c.removes > 0 ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes > 0 ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join('');
+    setHtml(ui.active, chips.map((c, i) => `<button type="button" class="rf-chip rf-achip" data-chip="${i}"${c.key === 'sizeMin' ? ` title="${esc(SQM_NOTE)}"` : ''}
+      aria-label="Remove filter ${esc(c.label)}${c.removes > 0 ? `, hiding ${c.removes}` : ''}">${esc(c.label)}${c.removes > 0 ? ` <span>−${c.removes}</span>` : ''} ×</button>`).join(''));
     ui.activeChips = chips;
     const inMore = chips.filter((c) => MORE_KEYS.includes(c.key)).length; // not the dates or suburbs above it
     ui.moreSummary.textContent = `More filters${inMore ? ` (${inMore} active)` : ''}`;
