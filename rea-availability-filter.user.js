@@ -5002,11 +5002,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       }
     }
     if (e.key === 'Tab' && narrow.matches) {
-      const f = [...panel.querySelectorAll('button,input,select,textarea,a[href],summary')].filter((el) => el.offsetParent && !el.disabled &&
-        !el.closest('details:not([open]) > :not(summary)') && (el.checkVisibility?.({ contentVisibilityAuto: true }) ?? true));
-      if (!f.length) return;
-      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
-      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      // Only the first and last focusable that can be seen matter: looked for from each end (each
+      // check reads layout, and a long list has thousands of buttons in between).
+      const all = panel.querySelectorAll('button,input,select,textarea,a[href],summary');
+      const ok = (el) => el.offsetParent && !el.disabled && !el.closest('details:not([open]) > :not(summary)') && (el.checkVisibility?.({ contentVisibilityAuto: true }) ?? true);
+      const end = (from, step) => { for (let i = from; i >= 0 && i < all.length; i += step) if (ok(all[i])) return all[i]; return null; };
+      const [edge, wrap] = e.shiftKey ? [end(0, 1), () => end(all.length - 1, -1)] : [end(all.length - 1, -1), () => end(0, 1)];
+      if (edge && document.activeElement === edge) { e.preventDefault(); wrap().focus(); }
     }
   }));
   }
