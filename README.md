@@ -156,5 +156,3 @@ No dependencies; Node 20+. `npm run check` (lint + unit), `npm run e2e:setup` th
 Provided as is, without warranty of any kind, and without support, maintenance or any commitment to respond to issues or fix them. Whether and how you install and use it is your decision and your responsibility; no liability is accepted for what it does or for how it is used. See the [terms](https://cpwillis.dev/terms) and [privacy policy](https://cpwillis.dev/privacy).
 
 Not affiliated with, endorsed by or supported by REA Group. It reads pages you can already see, in your own browser, at human-ish speed. Use it in line with [realestate.com.au](https://www.realestate.com.au/)'s terms. Listing data belongs to REA and its agents.
-
-Source: [github.com/cpwillis-pocs/rea-enhancement](https://github.com/cpwillis-pocs/rea-enhancement).
