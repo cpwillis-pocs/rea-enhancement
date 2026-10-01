@@ -4199,7 +4199,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // What scrolls the results: the list itself when expanded, else the whole drawer.
   // A listing (or a control inside it) found again after a re-render, by id.
   const attrSel = (attr, v) => `[${attr}="${CSS.escape(v)}"]`; // finds a control again after a redraw, to keep focus on it
-  const itemEl = (id, inner = '') => ui.list.querySelector(`.rf-item[data-id="${CSS.escape(id)}"]${inner ? ` ${inner}` : ''}`);
+  // Listings are the list's own children: a walk of those, not a selector over every node inside them.
+  const itemEl = (id, inner = '') => {
+    for (const el of ui.list.children) if (el.dataset.id === id && el.classList.contains('rf-item')) return inner ? el.querySelector(inner) : el;
+    return null;
+  };
   const listScroller = () => (ui.panel.classList.contains('rf-full') ? ui.list : ui.panel);
   // New results start at their top; in the side drawer only scroll up if the list's top has
   // gone above the header (a filter change near the top of the drawer stays put).
