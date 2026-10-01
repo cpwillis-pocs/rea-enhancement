@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { listing, memStorage } = require('./helpers');
 
 
@@ -72,7 +72,7 @@ test('healthStore: learns usual fill rates, flags a sudden drop, ignores small s
 
 test('healthStore: corrupt stored data starts fresh instead of throwing', () => {
   for (const bad of ['{"ema":null}', '{"ema":[1]}', '{"ema":{"price":"x"},"n":"y"}', '[]', 'nope']) {
-    const m = memStorage(); m.setItem('rea-avail-filter/health/v1', bad);
+    const m = memStorage(); m.setItem('rea-enhancement/health/v1', bad);
     const st = core.healthStore(m);
     const rows = Array.from({ length: 30 }, () => ({ priceNum: 500 }));
     assert.deepEqual(st.record(rows), [], bad);
@@ -82,20 +82,20 @@ test('healthStore: corrupt stored data starts fresh instead of throwing', () => 
 
 test('corrupt entries: marks, snapshots and presets drop bad items instead of breaking', () => {
   const m = memStorage();
-  m.setItem('rea-avail-filter/marks/v1', JSON.stringify({ c: 1, m: { 111111: null, 111112: [1], 111113: { s: 1, f: 1, l: 1 } }, ad: 5 }));
+  m.setItem('rea-enhancement/marks/v1', JSON.stringify({ c: 1, m: { 111111: null, 111112: [1], 111113: { s: 1, f: 1, l: 1 } }, ad: 5 }));
   const marks = core.marksStore(m);
   assert.equal(marks.toggle('222222', 's', { id: '222222', url: 'https://www.realestate.com.au/p-222222' }), true);
-  assert.ok(JSON.parse(m.getItem('rea-avail-filter/marks/v1')).m['222222'].s, 'write persisted');
+  assert.ok(JSON.parse(m.getItem('rea-enhancement/marks/v1')).m['222222'].s, 'write persisted');
   assert.ok(marks.shortlist().some((r) => r.id === '222222'));
   assert.doesNotThrow(() => marks.counts());
 
   const k = 'https://www.realestate.com.au/rent/in-x/list-1';
-  m.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: null, bad: { at: 'x' } } }));
+  m.setItem('rea-enhancement/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: null, bad: { at: 'x' } } }));
   const snaps = core.snapshotStore(m);
   assert.doesNotThrow(() => snaps.save(k, [{ id: '146500001', url: 'https://www.realestate.com.au/p-1' }], false));
   assert.deepEqual(Object.keys(snaps.exportData()), [k]);
 
-  m.setItem('rea-avail-filter/presets/v1', JSON.stringify({ v: 1, list: [null, 'x', { name: 'ok', cfg: {} }, { name: 'nocfg' }] }));
+  m.setItem('rea-enhancement/presets/v1', JSON.stringify({ v: 1, list: [null, 'x', { name: 'ok', cfg: {} }, { name: 'nocfg' }] }));
   const pr = core.presetStore(m);
   assert.deepEqual(pr.list().map((p) => p.name), ['ok']);
   assert.equal(pr.save('two', {}), 'two');
@@ -132,7 +132,7 @@ test('stored inspections: past sessions drop out before the per-row cap', () => 
 test('snapshot load validates fields; restored rows re-derive the next inspection', () => {
   const m = memStorage();
   const k = 'https://www.realestate.com.au/rent/in-y/list-1';
-  m.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: 1, rows: 5, ids: 7, gone: [null] }, 'https://evil.example/rent/': { at: 1, rows: [] } } }));
+  m.setItem('rea-enhancement/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: 1, rows: 5, ids: 7, gone: [null] }, 'https://evil.example/rent/': { at: 1, rows: [] } } }));
   const snaps = core.snapshotStore(m);
   assert.deepEqual(snaps.get(k).rows, []);
   assert.doesNotThrow(() => snaps.save(k, [], false));
@@ -148,7 +148,7 @@ test('snapshot load validates fields; restored rows re-derive the next inspectio
 
 test('shortlist tolerates non-string summary fields', () => {
   const m = memStorage();
-  m.setItem('rea-avail-filter/marks/v1', JSON.stringify({ c: 1, m: { 146500001: { s: 1, f: 1, l: 1, d: { u: 'https://www.realestate.com.au/p-146500001', p: 700, a: 5, b: 2 } } } }));
+  m.setItem('rea-enhancement/marks/v1', JSON.stringify({ c: 1, m: { 146500001: { s: 1, f: 1, l: 1, d: { u: 'https://www.realestate.com.au/p-146500001', p: 700, a: 5, b: 2 } } } }));
   const rows = core.marksStore(m).shortlist();
   assert.equal(rows[0].address, '5');
   assert.equal(rows[0].beds, 2);
@@ -161,16 +161,16 @@ test('discovery: a null/empty branch does not cache a miss for deeper siblings',
 
 test('toolKeys/toolBytes/fmtBytes: only this tool\'s keys', () => {
   const m = memStorage();
-  m.setItem('rea-avail-filter/v1', 'abc'); m.setItem('rea-avail-filter/marks/v1', '{}'); m.setItem('reaOwn', 'xxxxxxxx');
-  assert.deepEqual(core.toolKeys(m).sort(), ['rea-avail-filter/marks/v1', 'rea-avail-filter/v1']);
-  assert.equal(core.toolBytes(m), 2 * ('rea-avail-filter/v1abc'.length + 'rea-avail-filter/marks/v1{}'.length));
+  m.setItem('rea-enhancement/v1', 'abc'); m.setItem('rea-enhancement/marks/v1', '{}'); m.setItem('reaOwn', 'xxxxxxxx');
+  assert.deepEqual(core.toolKeys(m).sort(), ['rea-enhancement/marks/v1', 'rea-enhancement/v1']);
+  assert.equal(core.toolBytes(m), 2 * ('rea-enhancement/v1abc'.length + 'rea-enhancement/marks/v1{}'.length));
   assert.deepEqual([core.fmtBytes(10), core.fmtBytes(2048), core.fmtBytes(3 * 1024 * 1024)], ['10 B', '2 KB', '3.0 MB']);
 });
 
 test('snapshots saved before heads-up tags get them on load; bad numeric cfg makes no chip', () => {
   const m = memStorage();
   const k = 'https://www.realestate.com.au/rent/in-z/list-1';
-  m.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: 1, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/p-146500001', text: 'sunny unit. water usage charged to tenant.' }] } } }));
+  m.setItem('rea-enhancement/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at: 1, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/p-146500001', text: 'sunny unit. water usage charged to tenant.' }] } } }));
   assert.equal(core.snapshotStore(m).get(k).rows[0].watch, 'water');
   assert.deepEqual(core.activeFilters({ ...core.DEFAULT_CFG, priceMin: 'abc' }), []);
 });

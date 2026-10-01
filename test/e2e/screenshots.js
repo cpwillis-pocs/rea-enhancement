@@ -9,7 +9,7 @@ let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 const { ORIGIN, serve } = require('./fixtures');
 
-const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filter.user.js'), 'utf8');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-enhancement.user.js'), 'utf8');
 const OUT = path.join(__dirname, '../../docs/screenshots');
 const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 
@@ -21,8 +21,8 @@ const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
     const page = await ctx.newPage();
     await page.clock.install({ time: new Date('2026-09-23T10:00:00+10:00') }); // fixture dates stay meaningful
     await page.route('**/*', serve());
-    if (seed) await page.addInitScript((v) => localStorage.setItem('rea-avail-filter/marks/v1', v), JSON.stringify(seed()));
-    await page.addInitScript(() => localStorage.setItem('rea-avail-filter/seen-version', '99.0.0')); // no welcome or what's-new note in the pictures
+    if (seed) await page.addInitScript((v) => localStorage.setItem('rea-enhancement/marks/v1', v), JSON.stringify(seed()));
+    await page.addInitScript(() => localStorage.setItem('rea-enhancement/seen-version', '99.0.0')); // no welcome or what's-new note in the pictures
     await page.goto(url);
     await page.addScriptTag({ content: SCRIPT });
     await page.waitForSelector(ready);

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { listing, memStorage: mem } = require('./helpers');
 
 const row = (id) => core.toRow(listing({ id, _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}` } } }), false);
@@ -84,18 +84,18 @@ test('snapshotStore: storage full gives up gone lists first, then older searches
   t += 2 * H;
   const other = 'https://www.realestate.com.au/rent/in-manly/list-1';
   st.save(other, [row('146500009')], false);
-  quota = m.get('rea-avail-filter/snapshots/v1').length - 1; // next write of both no longer fits
+  quota = m.get('rea-enhancement/snapshots/v1').length - 1; // next write of both no longer fits
   t += 2 * H;
   st.save(KEY, [row('146500003')], false);
   assert.ok(st.get(KEY), 'current search kept');
   assert.ok(st.get(other) ? st.get(KEY).gone.length === 0 : true, 'its gone list went first; the older search only if that wasn\'t enough');
   quota = 10; // nothing fits now
   t += 2 * H;
-  const before = m.get('rea-avail-filter/snapshots/v1');
+  const before = m.get('rea-enhancement/snapshots/v1');
   const out = st.save(KEY, [row('146500004')], false);
   assert.equal(out.quota, true, 'reported as storage, not the search limit');
   assert.equal(out.refused, true, 'not kept');
-  assert.equal(m.get('rea-avail-filter/snapshots/v1'), before, 'and nothing else given up for it: what was stored stays');
+  assert.equal(m.get('rea-enhancement/snapshots/v1'), before, 'and nothing else given up for it: what was stored stays');
 });
 
 test('snapshotStore: a restored row is re-typed field by field; an impossible inspection time is dropped', () => {
@@ -149,7 +149,7 @@ test('storage full: a pinned search is kept (or the loss reported), and pin repo
   const rows = (n, base) => Array.from({ length: n }, (_, i) => row(String(146510000 + base + i)));
   st.save(key('a'), rows(20, 0)); t += H;
   st.pin(key('a'), true);
-  const one = store._m.get('rea-avail-filter/snapshots/v1').length;
+  const one = store._m.get('rea-enhancement/snapshots/v1').length;
   const tight = core.snapshotStore(mem(Math.round(one * 1.6)), () => t);
   tight.importData(st.exportData());
   const out = tight.save(key('b'), rows(20, 100));
@@ -167,7 +167,7 @@ test('snapshotStore: a search over the size budget drops text from the rows furt
     _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${146510000 + i}` } } }), false));
   const v = st.save(KEY, rows, false);
   assert.equal(v.lite, true);
-  const stored = m.getItem('rea-avail-filter/snapshots/v1');
+  const stored = m.getItem('rea-enhancement/snapshots/v1');
   assert.ok(stored.length <= core.SNAP_ENTRY_BUDGET + 200, `stored ${stored.length}`);
   assert.ok(v.rows[0].text.includes('dishwasher'), 'the first rows keep their text');
   assert.equal(v.rows.at(-1).text, '', 'the last ones lose it');
@@ -201,14 +201,14 @@ test('snapshots are stored packed (column names once, no URL prefixes), read bac
   const st = core.snapshotStore(m, () => 1e12);
   const rows = [row('146500001'), { ...row('146500002'), img: 'https://i2.au.reastatic.net/345x260/x/main.jpg' }];
   const before = st.save(KEY, rows, false).rows;
-  const raw = JSON.parse(m.getItem('rea-avail-filter/snapshots/v1')).s[KEY];
+  const raw = JSON.parse(m.getItem('rea-enhancement/snapshots/v1')).s[KEY];
   assert.equal(raw.f, 3);
   assert.ok(Array.isArray(raw.rk) && Array.isArray(raw.rows[0]), 'rows as arrays');
   assert.ok(!JSON.stringify(raw.rows).includes('https://www.realestate.com.au'), 'origin dropped');
   const after = core.snapshotStore(m, () => 1e12).get(KEY).rows;
   assert.deepEqual(after.map((r) => [r.id, r.url, r.img, r.priceNum, r.sqm]), before.map((r) => [r.id, r.url, r.img, r.priceNum, r.sqm]));
   const old = mem(); // written by 2.27: one object per row
-  old.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [KEY]: { at: 1e12, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500001', price: '$700 per week' }] } } }));
+  old.setItem('rea-enhancement/snapshots/v1', JSON.stringify({ v: 1, s: { [KEY]: { at: 1e12, ids: ['146500001'], rows: [{ id: '146500001', url: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500001', price: '$700 per week' }] } } }));
   assert.equal(core.snapshotStore(old, () => 1e12).get(KEY).rows[0].priceNum, 700);
 });
 
@@ -222,8 +222,8 @@ test('size budget counts no-longer-listed rows at their stored (packed) size, an
   st.save(KEY, mk(146530000), false);
   t += 48 * H;
   st.save(KEY, mk(146540000), false);
-  assert.ok(m.getItem('rea-avail-filter/snapshots/v1').length <= core.SNAP_ENTRY_BUDGET + 1000, 'within budget once gone rows are dropped');
-  const packed = JSON.parse(m.getItem('rea-avail-filter/snapshots/v1')).s[KEY];
+  assert.ok(m.getItem('rea-enhancement/snapshots/v1').length <= core.SNAP_ENTRY_BUDGET + 1000, 'within budget once gone rows are dropped');
+  const packed = JSON.parse(m.getItem('rea-enhancement/snapshots/v1')).s[KEY];
   assert.equal(packed.f, 3);
   const other = core.snapshotStore(mem(), () => t);
   assert.equal(other.importData({ [KEY]: packed }), 1);
@@ -237,10 +237,10 @@ test('snapshotStore: a deferred save is readable at once and written by whatever
   let run = null;
   const v = st.save(KEY, [row('146500001')], false, (fn) => { run = fn; });
   assert.equal(v.newIds.size, 0);
-  assert.equal(storage.getItem('rea-avail-filter/snapshots/v1'), null, 'not written yet');
+  assert.equal(storage.getItem('rea-enhancement/snapshots/v1'), null, 'not written yet');
   assert.ok(st.get(KEY), 'readable while pending');
   assert.equal(st.sizes().length, 1, 'sizes flushes the pending write');
-  assert.notEqual(storage.getItem('rea-avail-filter/snapshots/v1'), null);
+  assert.notEqual(storage.getItem('rea-enhancement/snapshots/v1'), null);
   assert.deepEqual(await v.saved, { evicted: [], refused: false, quota: false });
   run(); // the later task finds nothing left to do
   const w = st.save(KEY, [row('146500002')], false, (fn) => { run = fn; });
@@ -263,10 +263,10 @@ test('search keys: REA tracking fields and filter order are not part of a search
   const storage = mem();
   const old = core.snapshotStore(storage, () => 1e12);
   old.save('https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement', [row('146500001')], false);
-  const raw = JSON.parse(storage.getItem('rea-avail-filter/snapshots/v1'));
+  const raw = JSON.parse(storage.getItem('rea-enhancement/snapshots/v1'));
   const entry = raw.s[Object.keys(raw.s)[0]];
   raw.s = { 'https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement': { ...entry, at: 1e12 + 5 }, [KEY]: { ...entry, at: 1e12 } };
-  storage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify(raw));
+  storage.setItem('rea-enhancement/snapshots/v1', JSON.stringify(raw));
   const st = core.snapshotStore(storage, () => 1e12 + 10);
   assert.deepEqual(Object.keys(st.exportData()), [KEY]);
   assert.equal(st.exportData()[KEY].at, 1e12 + 5, 'the newer copy');
@@ -274,6 +274,6 @@ test('search keys: REA tracking fields and filter order are not part of a search
   assert.ok('https://www.realestate.com.au/rent/in-manly/list-1' in st.exportData(), 'a backup imports under the key without tracking');
   // A preset bound to the old key still applies to the search.
   const presets = mem();
-  presets.setItem('rea-avail-filter/presets/v1', JSON.stringify({ v: 1, list: [{ name: 'Mine', cfg: { priceMax: '900' }, key: 'https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement' }] }));
+  presets.setItem('rea-enhancement/presets/v1', JSON.stringify({ v: 1, list: [{ name: 'Mine', cfg: { priceMax: '900' }, key: 'https://www.realestate.com.au/rent/in-bondi/list-1?source=refinement' }] }));
   assert.equal(core.presetStore(presets).forSearch(KEY)?.name, 'Mine');
 });

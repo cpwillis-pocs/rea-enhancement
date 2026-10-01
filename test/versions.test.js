@@ -10,11 +10,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { listing } = require('./helpers');
 
 const FILE = path.join(__dirname, 'versions.json');
-const src = fs.readFileSync(path.join(__dirname, '..', 'rea-availability-filter.user.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'rea-enhancement.user.js'), 'utf8');
 const constant = (name) => +(src.match(new RegExp(`const ${name} = (\\d+);`)) || [])[1];
 const hash = (v) => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
 const rx = (r) => (r instanceof RegExp ? [r.source, r.flags] : r ?? null);

@@ -14,11 +14,11 @@ const copy = () => {
   fs.mkdirSync(path.join(dir, 'test'));
   fs.mkdirSync(path.join(dir, '.github/workflows'), { recursive: true });
   fs.copyFileSync(path.join(root, '.github/workflows/ci.yml'), path.join(dir, '.github/workflows/ci.yml'));
-  for (const f of ['rea-availability-filter.user.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'SECURITY.md', 'PRIVACY.md']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
+  for (const f of ['rea-enhancement.user.js', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'SECURITY.md', 'PRIVACY.md']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
   for (const f of fs.readdirSync(__dirname).filter((x) => x.endsWith('.test.js'))) fs.copyFileSync(path.join(__dirname, f), path.join(dir, 'test', f));
   return dir;
 };
-const edit = (dir, fn) => { const p = path.join(dir, 'rea-availability-filter.user.js'); fs.writeFileSync(p, fn(fs.readFileSync(p, 'utf8'))); };
+const edit = (dir, fn) => { const p = path.join(dir, 'rea-enhancement.user.js'); fs.writeFileSync(p, fn(fs.readFileSync(p, 'utf8'))); };
 
 test('lint passes on the repository', () => {
   const r = lint(root);
@@ -31,7 +31,7 @@ test('lint catches header, changelog, privacy, storage and dynamic-code violatio
     [(s) => s.replace('// @grant        none', '// @grant        GM_xmlhttpRequest'), /@grant must stay "none"/],
     [(s) => s.replace(/(\/\/ @version\s+)\S+/, '$19.9.9'), /CHANGELOG\.md top entry/],
     [(s) => s.replace('const memStores', "const leak = 'https://evil.example.com/x';\n  const memStores"), /URL outside realestate\.com\.au: https:\/\/evil\.example\.com\/x/],
-    [(s) => s.replace('const memStores', "const k = 'rea-avail-filter/stray';\n  const memStores"), /storage key literal/],
+    [(s) => s.replace('const memStores', "const k = 'rea-enhancement/stray';\n  const memStores"), /storage key literal/],
     [(s) => s.replace('const memStores', "localStorage.setItem('x', 1);\n  const memStores"), /literal key/],
     [(s) => s.replace('const memStores', "eval('1');\n  const memStores"), /dynamic code/],
     [(s) => s.replace('const memStores', "new WebSocket('wss://www.realestate.com.au');\n  const memStores"), /WebSocket is not used/],
@@ -80,7 +80,7 @@ test('npm run release bumps the version, stubs the changelog and updates the doc
   const r = spawnSync(process.execPath, [path.join(__dirname, 'release.js'), '99.0.0'], { env, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /newest real shape is from 2020-01-01/, 'warns when the real shape is stale');
-  assert.match(fs.readFileSync(path.join(dir, 'rea-availability-filter.user.js'), 'utf8'), /@version\s+99\.0\.0/);
+  assert.match(fs.readFileSync(path.join(dir, 'rea-enhancement.user.js'), 'utf8'), /@version\s+99\.0\.0/);
   assert.match(fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8'), /^## 99\.0\.0\n\n- \n/m);
   assert.match(fs.readFileSync(path.join(dir, 'docs/ROADMAP.md'), 'utf8'), /Where it stands \(v99\.0\.0\)[\s\S]*321 unit tests/);
   assert.match(fs.readFileSync(path.join(dir, 'docs/ARCHITECTURE.md'), 'utf8'), /\(321 tests\)/);
@@ -96,7 +96,7 @@ test('CI change classifier: docs skip everything, unit-only skips e2e, e2e-only 
   assert.deepEqual(classify(['test/shapes/live-2026-10-01.json']), { unit: true, e2e: true, nodes: [20, 22, 24] }, 'shapes feed e2e block 63 too');
   assert.deepEqual(classify(['test/e2e/edge.js']), { unit: true, e2e: true, nodes: [20] });
   assert.deepEqual(classify(['test/e2e/fixtures.js']).nodes, [20, 22, 24], 'fixtures are shared with unit tests');
-  for (const f of ['rea-availability-filter.user.js', 'package.json', '.github/workflows/ci.yml', 'test/helpers.js', 'test/lint.js']) {
+  for (const f of ['rea-enhancement.user.js', 'package.json', '.github/workflows/ci.yml', 'test/helpers.js', 'test/lint.js']) {
     assert.deepEqual(classify(['README.md', f]), { unit: true, e2e: true, nodes: [20, 22, 24] }, f);
   }
 });

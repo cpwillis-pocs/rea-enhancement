@@ -1,6 +1,6 @@
 # rea-enhancement
 
-**Rental Toolkit** is a Tampermonkey userscript for [realestate.com.au](https://www.realestate.com.au/) rentals: an **available-from** filter, every results page in one sortable list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser. Not affiliated with REA Group.
+**rea-enhancement** is a Tampermonkey userscript that adds toolkits to [realestate.com.au](https://www.realestate.com.au/). The first, **Rental Toolkit**, is for rent searches: an **available-from** filter, every results page in one sortable list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser. Not affiliated with REA Group.
 
 ![Drawer with merged, date-filtered results](docs/screenshots/drawer.jpg)
 
@@ -17,7 +17,7 @@
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Firefox, Edge).
-2. **[Install the script](https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js)** and confirm.
+2. **[Install the script](https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-enhancement.user.js)** and confirm.
 3. Open any `realestate.com.au/rent/...` search and click **Rental Toolkit** (bottom right).
 
 Updates install automatically when `@version` goes up.
@@ -138,10 +138,10 @@ Updates install automatically when `@version` goes up.
 REA's data format is undocumented and changes. If the badges on REA's cards stop appearing, the drawer shows a banner saying the cards weren't recognised. The script tries several likely field names, then searches the listing by shape, and degrades to blank rather than breaking. It also remembers how often each field is usually present and warns if one suddenly disappears. If you see that warning, press **Copy report** in it (also under Settings) and paste the result into an issue: it holds the diagnostics and one listing's structure, with no listing text, names or addresses. If a field is always empty but there's no warning, click **Search all pages**, then open DevTools and run:
 
 ```js
-reaFilter.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue
-reaFilter.probe()     // every field path the script reads, and whether it exists (plus discovered paths)
-reaFilter.shape()     // one listing's structure with names, addresses and descriptions taken out - safe to paste
-reaFilter.raw()       // one raw listing object (includes the listing's text)
+reaEnhancement.selfcheck() // copies a diagnostics report (fields found, usual rates, recent errors) - paste it into the issue
+reaEnhancement.probe()     // every field path the script reads, and whether it exists (plus discovered paths)
+reaEnhancement.shape()     // one listing's structure with names, addresses and descriptions taken out - safe to paste
+reaEnhancement.raw()       // one raw listing object (includes the listing's text)
 ```
 
 Then [open an issue](../../issues/new?template=rea-format-changed.md) with the output.

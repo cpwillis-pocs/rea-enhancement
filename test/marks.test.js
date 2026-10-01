@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { listing, memStorage: mem } = require('./helpers');
 
 const row = (id, price = '$700 per week') => core.toRow(listing({ id, _links: { canonical: { href: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}` } }, price: { display: price } }), false);
@@ -49,15 +49,15 @@ test('marksStore: toggle, filter, persistence, prune', () => {
   assert.deepEqual(again.counts(), { starred: 1, hidden: 1, notes: 0 });
   // 91 days later unstarred/unhidden entries are pruned on next save; seeing nothing new is no save.
   t += 91 * 864e5;
-  const before = storage.getItem('rea-avail-filter/marks/v1');
+  const before = storage.getItem('rea-enhancement/marks/v1');
   again.observe([]);
-  assert.equal(storage.getItem('rea-avail-filter/marks/v1'), before, 'no sightings, no write');
+  assert.equal(storage.getItem('rea-enhancement/marks/v1'), before, 'no sightings, no write');
   again.observe([row('146500007')]);
-  assert.deepEqual(Object.keys(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m).sort(), ['146500004', '146500005', '146500007']);
+  assert.deepEqual(Object.keys(JSON.parse(storage.getItem('rea-enhancement/marks/v1')).m).sort(), ['146500004', '146500005', '146500007']);
 });
 
 test('marksStore: corrupt storage recovers', () => {
-  const s = mem(); s.setItem('rea-avail-filter/marks/v1', '{nope');
+  const s = mem(); s.setItem('rea-enhancement/marks/v1', '{nope');
   const st = core.marksStore(s);
   assert.deepEqual(st.counts(), { starred: 0, hidden: 0, notes: 0 });
 });
@@ -107,7 +107,7 @@ test('marksStore: sightings write only what changed; opened and reviewed are not
   let t = 1e12;
   const storage = mem();
   const st = core.marksStore(storage, () => t);
-  const key = 'rea-avail-filter/marks/v1';
+  const key = 'rea-enhancement/marks/v1';
   let writes = 0;
   const set = storage.setItem; storage.setItem = (k, v) => { writes++; set(k, v); };
   st.observe([row('146500010')]);
@@ -143,7 +143,7 @@ test('marksStore: two tabs do not clobber each other; null m recovers', () => {
   tab2.toggle('146500003', 'h');
   assert.deepEqual(core.marksStore(storage).counts(), { starred: 1, hidden: 1, notes: 0 });
 
-  const bad = mem(); bad.setItem('rea-avail-filter/marks/v1', '{"c":1,"m":null}');
+  const bad = mem(); bad.setItem('rea-enhancement/marks/v1', '{"c":1,"m":null}');
   const st = core.marksStore(bad);
   assert.doesNotThrow(() => st.observe([row('146500004')]));
 });
@@ -168,7 +168,7 @@ test('marksStore: caps entries at MARKS_MAX, keeping shortlisted/hidden', () => 
   const rows = [];
   for (let i = 0; i < 5005; i++) rows.push({ id: String(200000000 + i), priceNum: Infinity });
   st.observe(rows);
-  const m = JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m;
+  const m = JSON.parse(storage.getItem('rea-enhancement/marks/v1')).m;
   assert.equal(Object.keys(m).length, 5000);
   assert.equal(m['100000001'].s, 1, 'shortlisted survives the cap');
 });
@@ -332,9 +332,9 @@ test('marksStore: no price history stored for listings whose price never changed
   const st = core.marksStore(storage, () => 1e12);
   st.observe([row('146500300', '$700 per week')]);
   st.observe([row('146500300', '$700 per week')]);
-  assert.equal(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m['146500300'].ph, undefined);
+  assert.equal(JSON.parse(storage.getItem('rea-enhancement/marks/v1')).m['146500300'].ph, undefined);
   st.observe([row('146500300', '$680 per week')]);
-  assert.deepEqual(JSON.parse(storage.getItem('rea-avail-filter/marks/v1')).m['146500300'].ph.map((x) => x[1]), ['$700 per week', '$680 per week']);
+  assert.deepEqual(JSON.parse(storage.getItem('rea-enhancement/marks/v1')).m['146500300'].ph.map((x) => x[1]), ['$700 per week', '$680 per week']);
 });
 
 test('marksStore: bulk undo restores only the bulk-touched listings (keeps another tab\'s edits)', () => {
@@ -399,7 +399,7 @@ test('marksStore: yearless rollover is not a change; direction fixed when record
 
 test('shortlist coerces odd summary field types', () => {
   const m = mem();
-  m.setItem('rea-avail-filter/marks/v1', JSON.stringify({ c: 1, m: { 146500001: { s: 1, f: 1, l: 1, d: { u: 'https://www.realestate.com.au/p-146500001', v: true, a: {}, p: ['x'], b: {} } } } }));
+  m.setItem('rea-enhancement/marks/v1', JSON.stringify({ c: 1, m: { 146500001: { s: 1, f: 1, l: 1, d: { u: 'https://www.realestate.com.au/p-146500001', v: true, a: {}, p: ['x'], b: {} } } } }));
   const r = core.marksStore(m).shortlist()[0];
   assert.equal(r.address, '');
   assert.equal(r.available, '-');
@@ -484,7 +484,7 @@ test('observe keeps richer shortlist summary fields a sparser source lacks', () 
   const rich = Object.assign(row('146500031', '$700 per week'), { agency: 'Harbour Co', inspections: [{ at: 2e12, label: 'Sat' }] });
   st.toggle('146500031', 's', rich);
   st.observe([Object.assign(row('146500031', '$650 per week'), { agency: '', inspections: [] })], { features: false }); // a property page
-  const d = JSON.parse(m.getItem('rea-avail-filter/marks/v1')).m['146500031'].d;
+  const d = JSON.parse(m.getItem('rea-enhancement/marks/v1')).m['146500031'].d;
   assert.equal(d.p, '$650 per week', 'price updated');
   assert.equal(d.ag, 'Harbour Co', 'agency kept');
   assert.equal(d.in.length, 1, 'inspections kept');
@@ -765,7 +765,7 @@ test('marksStore: writes reuse untouched entries\' JSON, and what is stored is e
   a.toggle(rows[0].id, 's', rows[0]); t += 1000;
   a.setStatus(rows[0].id, 'applied'); a.setNote(rows[1].id, 'hi'); a.toggle(rows[2].id, 'h'); a.setRating(rows[0].id, 4);
   a.cycleCheck(rows[0].id, 'Noise'); a.cycleAnswer(rows[0].id, 'avail'); a.setHideReason(rows[2].id, 'price');
-  const stored = storage.getItem('rea-avail-filter/marks/v1');
+  const stored = storage.getItem('rea-enhancement/marks/v1');
   const parsed = JSON.parse(stored);
   const b = core.marksStore(storage, () => t);
   assert.deepEqual(b.exportData(), a.exportData(), 'a fresh reader sees the same');

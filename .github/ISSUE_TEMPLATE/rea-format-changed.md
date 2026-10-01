@@ -10,8 +10,8 @@ labels: rea-drift
 **Search URL**
 <!-- A realestate.com.au/rent/... URL that reproduces it. Strip anything personal. -->
 
-**`reaFilter.selfcheck()`, `reaFilter.probe()` and `reaFilter.shape()` output**
-<!-- DevTools console on the results page after running a search: reaFilter.selfcheck() copies a report to the clipboard; paste it here. Then run reaFilter.probe() and paste the table (or returned object), and reaFilter.shape() (copies one listing's structure with its words taken out). None of them includes listing descriptions, names, addresses or your notes. -->
+**`reaEnhancement.selfcheck()`, `reaEnhancement.probe()` and `reaEnhancement.shape()` output**
+<!-- DevTools console on the results page after running a search: reaEnhancement.selfcheck() copies a report to the clipboard; paste it here. Then run reaEnhancement.probe() and paste the table (or returned object), and reaEnhancement.shape() (copies one listing's structure with its words taken out). None of them includes listing descriptions, names, addresses or your notes. -->
 
 ```
 ```

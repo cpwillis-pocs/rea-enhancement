@@ -1,5 +1,5 @@
 {
- "note": "Synthetic baseline for property pages: the e2e fixture listing page, as reaFilter.shape() prints it there. Real ones come from npm run live.",
+ "note": "Synthetic baseline for property pages: the e2e fixture listing page, as reaEnhancement.shape() prints it there. Real ones come from npm run live.",
  "expect": {
   "fill": [
    "availability",

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { listing } = require('./helpers');
 
 const am = (description, features) => core.amenitiesOf(core.toRow(listing({ description, features }), false));

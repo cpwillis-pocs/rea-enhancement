@@ -6,7 +6,7 @@ The script has no server, no analytics and no third-party requests. It talks onl
 
 ## What it stores, and where
 
-Everything is in your browser, under keys starting `rea-avail-filter/`. The full list is in [ARCHITECTURE.md](docs/ARCHITECTURE.md#storage).
+Everything is in your browser, under keys starting `rea-enhancement/`. The full list is in [ARCHITECTURE.md](docs/ARCHITECTURE.md#storage).
 
 | What | Where | How long |
 |---|---|---|
@@ -17,7 +17,7 @@ Everything is in your browser, under keys starting `rea-avail-filter/`. The full
 | Results cache, place in the list | sessionStorage | This tab only; cleared when it closes |
 | Bot-check pause, last backup time | localStorage | The pause removes itself after 10 minutes |
 | What the last Shortlist calendar export sent (event IDs and start times only, no addresses), so the next export can take out what dropped off | localStorage | Replaced on each Shortlist calendar export; at most 300 events |
-| A safety copy of your choices, presets and settings | IndexedDB (`rea-avail-filter/mirror`), also on realestate.com.au | Until you Cancel its restore offer or Delete all my data; REA's scripts can read it, like the rest |
+| A safety copy of your choices, presets and settings | IndexedDB (`rea-enhancement/mirror`), also on realestate.com.au | Until you Cancel its restore offer or Delete all my data; REA's scripts can read it, like the rest |
 
 **Settings → Delete all my data** removes every key and the safety copy. **Backup** downloads your choices and settings (places, checklist, enquiry template, lease end, income, current rent, moving day, application pack, moving list and condition report with their ticks, weights, theme) as a JSON file on your machine; nothing is uploaded.
 
@@ -31,6 +31,6 @@ The script runs inside REA's page (`@grant none`), so REA's scripts share the sa
 - **Exports** (CSV, TSV, calendar, print, enquiry text) are files or clipboard text you then send on.
 - **Copy report** (in the data-format warnings and Settings) copies the `selfcheck()` and `shape()` output below, together.
 - **Console helpers** for bug reports:
-  - `reaFilter.selfcheck()`: script version, page path (no query string), row count, field fill rates, card detection mode, the data paths found, and recent error messages. No listing text or search terms.
-  - `reaFilter.shape()`: the structure of one listing with every value replaced by its type, except a short list of non-personal keys (eg property type); addresses, names, emails, phone numbers and descriptions are always redacted. Safe to paste in an issue.
-  - `reaFilter.raw()`: one listing exactly as REA sent it, including agent names and contact details. Don't paste it publicly.
+  - `reaEnhancement.selfcheck()`: script version, page path (no query string), row count, field fill rates, card detection mode, the data paths found, and recent error messages. No listing text or search terms.
+  - `reaEnhancement.shape()`: the structure of one listing with every value replaced by its type, except a short list of non-personal keys (eg property type); addresses, names, emails, phone numbers and descriptions are always redacted. Safe to paste in an issue.
+  - `reaEnhancement.raw()`: one listing exactly as REA sent it, including agent names and contact details. Don't paste it publicly.

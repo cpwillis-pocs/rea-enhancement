@@ -1,5 +1,5 @@
 {
- "note": "Synthetic baseline: the shape of the e2e fixture listing, as reaFilter.shape() prints it. Real shapes from issues or `npm run live` go alongside it.",
+ "note": "Synthetic baseline: the shape of the e2e fixture listing, as reaEnhancement.shape() prints it. Real shapes from issues or `npm run live` go alongside it.",
  "expect": {
   "fill": [
    "availability",

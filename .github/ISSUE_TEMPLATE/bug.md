@@ -13,4 +13,4 @@ labels: bug
 
 **Search URL, script version, browser**
 
-**Console errors** (DevTools, filter by `rf` or `reaFilter`)
+**Console errors** (DevTools, filter by `rf` or `reaEnhancement`)

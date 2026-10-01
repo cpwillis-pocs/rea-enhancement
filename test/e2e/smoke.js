@@ -12,7 +12,7 @@ try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm
 const { listing, results, exchange } = require('../helpers');
 const cov = require('./coverage');
 
-const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filter.user.js'), 'utf8');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-enhancement.user.js'), 'utf8');
 const BIGSCRIPT = SCRIPT.replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;');
 const ORIGIN = 'https://www.realestate.com.au';
 const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
@@ -176,7 +176,7 @@ const html = (n) => {
   await page.check('#rf-onlyStarred');
   assert.deepEqual(await page.$$eval('.rf-item', (els) => els.map((e) => e.dataset.id)), [firstId]);
   await page.uncheck('#rf-onlyStarred');
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rea-enhancement/marks/v1')).m);
   assert.equal(stored[firstId].s, 1);
   assert.equal(stored[secondId].h, 1);
   // Unhide via "Show hidden listings".
@@ -200,7 +200,7 @@ const html = (n) => {
   const backup = fs.readFileSync(await bk.path(), 'utf8');
   assert.equal(JSON.parse(backup).m[firstId].n, 'Ask about pets');
   // Wipe, then restore from the backup file.
-  await page.evaluate(() => localStorage.removeItem('rea-avail-filter/marks/v1'));
+  await page.evaluate(() => localStorage.removeItem('rea-enhancement/marks/v1'));
   await page.setInputFiles('.rf-sl-bar input[type=file]', { name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
   await page.waitForSelector('.rf-restore-in:not([hidden])');
   assert.match(await page.textContent('.rf-restore-msg'), /^Restore 1 listing \(1 shortlisted, 0 hidden\)/);
@@ -251,7 +251,7 @@ const html = (n) => {
     'Privacy https://cpwillis.dev/privacy _blank noopener noreferrer',
   ], 'source, terms and privacy at the foot of the drawer');
 
-  const probed = await page.evaluate(() => window.reaFilter.probe());
+  const probed = await page.evaluate(() => window.reaEnhancement.probe());
   assert.equal(probed['availableDate.display'] !== '(missing)', true);
 
   // Navigating to another search mid-crawl aborts it: no further page fetches, UI usable.
@@ -333,7 +333,7 @@ const html = (n) => {
     assert.match(await p2.textContent('.rf-item[data-id="148000001"] .rf-avail'), /no longer listed/);
     await p2.click('.rf-settings summary');
     await p2.uncheck('#rf-remember');
-    assert.equal(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'opt-out clears');
+    assert.equal(await p2.evaluate(() => localStorage.getItem('rea-enhancement/snapshots/v1')), null, 'opt-out clears');
     await cov.collect(p2, SCRIPT);
     await ctx.close();
   }

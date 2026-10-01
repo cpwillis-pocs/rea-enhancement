@@ -13,7 +13,7 @@ const { ORIGIN, serve, reaPage } = require('./fixtures');
 const shapeKit = require('../helpers'); // listingFromShape, results, page: e2e from real REA shapes
 const cov = require('./coverage');
 
-const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filter.user.js'), 'utf8').replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-enhancement.user.js'), 'utf8').replace('const PAGE_DELAY_MS = 600;', 'const PAGE_DELAY_MS = 0;');
 const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 const FIXED = new Date('2026-09-23T10:00:00+10:00');
 const status = (p) => p.textContent('.rf-status');
@@ -23,7 +23,7 @@ const run = async (p) => { await p.click('#rf-launch'); await p.click('#rf-run')
 const settle = (p) => p.evaluate(() => new Promise((r) => setTimeout(r, 0)));
 // Drawer results render synchronously on change; the fixtures (18 rows) stay under one render chunk.
 const count = (p, sel = '.rf-item') => p.$$eval(sel, (e) => e.length);
-const MARKS_KEY = 'rea-avail-filter/marks/v1';
+const MARKS_KEY = 'rea-enhancement/marks/v1';
 const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"m":{}}').m, MARKS_KEY);
 
 (async () => {
@@ -169,21 +169,21 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForSelector('.rf-partial:not([hidden])');
     assert.match(await page.textContent('.rf-partial'), /Read 1 of 3 pages; page 2 failed \(.*bot-check/);
     assert.equal(await count(page), 6, 'page 1 kept');
-    assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'a partial crawl is not remembered');
+    assert.equal(await page.evaluate(() => localStorage.getItem('rea-enhancement/snapshots/v1')), null, 'a partial crawl is not remembered');
     assert.notEqual(await page.getAttribute('#rf-run', 'aria-disabled'), 'true', 'usable after failure');
     assert.match(await page.textContent('.rf-warn-msg'), /bot check, so fetching is paused until/, 'the bot check pauses fetching');
-    assert.ok(await page.evaluate(() => +localStorage.getItem('rea-avail-filter/paused') > Date.now()));
+    assert.ok(await page.evaluate(() => +localStorage.getItem('rea-enhancement/paused') > Date.now()));
     blocked = false; hits.length = 0;
     await page.click('.rf-partial [data-resume]');
     await waitStatus(page, /^Paused:/);
     assert.ok(await page.$('.rf-partial:not([hidden]) [data-resume]'), 'Resume stays offered');
     assert.deepEqual(hits, [], 'nothing fetched while paused');
-    await page.evaluate(() => localStorage.removeItem('rea-avail-filter/paused')); // the 10 minutes are up
+    await page.evaluate(() => localStorage.removeItem('rea-enhancement/paused')); // the 10 minutes are up
     await page.click('.rf-partial [data-resume]');
     await waitStatus(page, /18 listings match|of 18 listings match/);
     assert.ok(await page.$('.rf-partial[hidden]'), 'resume clears the notice');
     assert.ok(!hits.includes('1'), `page 1 not fetched again (${hits})`);
-    assert.ok(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), 'complete crawl remembered');
+    assert.ok(await page.evaluate(() => localStorage.getItem('rea-enhancement/snapshots/v1')), 'complete crawl remembered');
     console.log('crawl failure keeps page 1, resume completes: ok');
     await done(page); await ctx.close();
   });
@@ -237,10 +237,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   // 8. Corrupt saved settings and drifted item shapes don't stop the script.
   await block('8', async () => {
     const ctx = await browser.newContext();
-    await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ keyword: null, sort: 5, from: 7 })));
+    await ctx.addInitScript(() => localStorage.setItem('rea-enhancement/v1', JSON.stringify({ keyword: null, sort: 5, from: 7 })));
     const page = await open(ctx);
     await run(page);
-    assert.equal(await page.evaluate(() => typeof window.reaFilter.probe), 'function');
+    assert.equal(await page.evaluate(() => typeof window.reaEnhancement.probe), 'function');
     console.log('corrupt settings tolerated: ok');
     await done(page); await ctx.close();
   });
@@ -264,7 +264,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(txt, /Move-in \$\d/);
     const total = await count(page);
     // A cap at the median move-in cost must keep some listings and drop others.
-    const ups = await page.evaluate(() => window.reaFilter.rows().map((r) => r.upfront).filter(Number.isFinite).sort((a, b) => a - b));
+    const ups = await page.evaluate(() => window.reaEnhancement.rows().map((r) => r.upfront).filter(Number.isFinite).sort((a, b) => a - b));
     const cap = ups[Math.floor(ups.length / 2)];
     await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-upfrontMax', String(cap)); await page.dispatchEvent('#rf-upfrontMax', 'change');
@@ -359,7 +359,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     // On failure, dump what the cards and rows actually hold (CI failed here twice, not locally).
     await page.waitForSelector('article > .rf-badge .rf-b-pets', { timeout: 5000 }).catch(async (e) => {
       console.log('DIAG badges:', await page.$$eval('article', (a) => a.map((x) => `${x.dataset.rfId}:${x.querySelector('.rf-badge')?.textContent ?? '(none)'}`)));
-      console.log('DIAG rows:', await page.evaluate(() => (window.reaFilter.rows() || []).slice(0, 6).map((r) => `${r.id} pets=${r.amen?.pets} text=${(r.text || '').slice(0, 60)}`)));
+      console.log('DIAG rows:', await page.evaluate(() => (window.reaEnhancement.rows() || []).slice(0, 6).map((r) => `${r.id} pets=${r.amen?.pets} text=${(r.text || '').slice(0, 60)}`)));
       throw e;
     });
     await page.click('.rf-clear');
@@ -660,7 +660,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.inputValue('#rf-type'), '');
     await page.selectOption('.rf-preset', 'a:-3-bed');
     assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'applying a "-" name applies, not deletes');
-    await page.evaluate(() => sessionStorage.removeItem('rea-avail-filter/preset-visit'));
+    await page.evaluate(() => sessionStorage.removeItem('rea-enhancement/preset-visit'));
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     assert.equal(await page.inputValue('#rf-type'), 'Townhouse', 'bound type survives page load');
     await page.evaluate(() => { const el = document.querySelector('#rf-type'); el.value = ''; el.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -806,7 +806,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ag = await page.getAttribute('.rf-market [data-market-ag]', 'data-market-ag');
     await page.click('.rf-market [data-market-ag]');
     await waitStatus(page, new RegExp(`^Hid every listing from ${ag}`));
-    const hidden = () => page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).ag || {}));
+    const hidden = () => page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('rea-enhancement/marks/v1')).ag || {}));
     assert.deepEqual(await hidden(), [ag], 'agency hidden from the market view');
     await page.click('.rf-status .rf-undo');
     assert.deepEqual(await hidden(), [], 'and Undo brings it back');
@@ -850,7 +850,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const other = 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1';
     // Init scripts run before the page's fake clock is installed: stamp from FIXED, not Date.now().
     await ctx.addInitScript(([k, at]) => {
-      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at, ids: [], rows: [], gone: [] } } }));
+      if (!localStorage.getItem('rea-enhancement/snapshots/v1')) localStorage.setItem('rea-enhancement/snapshots/v1', JSON.stringify({ v: 1, s: { [k]: { at, ids: [], rows: [], gone: [] } } }));
     }, [other, +FIXED - 864e5 * 2]);
     const page = await open(ctx);
     await page.click('#rf-launch');
@@ -872,7 +872,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-saved-check]');
     await page.click('.rf-settings summary'); await page.uncheck('#rf-remember');
     await page.waitForFunction(() => !document.querySelector('[data-saved-check]').hasAttribute('aria-disabled'), null, { timeout: 30000 });
-    assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), null, 'nothing re-saved after opting out');
+    assert.equal(await page.evaluate(() => localStorage.getItem('rea-enhancement/snapshots/v1')), null, 'nothing re-saved after opting out');
     console.log('saved searches: ok,', st.slice(0, 90));
     await done(page); await ctx.close();
   });
@@ -884,7 +884,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await run(page);
     const id = await page.evaluate(() => {
       const it = [...document.querySelectorAll('.rf-item')].find((x) => /\d{4}/.test(x.querySelector('.rf-avail').textContent));
-      const key = 'rea-avail-filter/marks/v1';
+      const key = 'rea-enhancement/marks/v1';
       const d = JSON.parse(localStorage.getItem(key));
       d.m[it.dataset.id].av -= 3; // pretend it used to be available 3 days earlier
       localStorage.setItem(key, JSON.stringify(d));
@@ -926,7 +926,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const stored = await marks(page).then((m) => m['146500101']);
     assert.equal(stored.s, 1); assert.equal(stored.as, 'applied'); assert.equal(stored.n, 'ask about\nparking');
     assert.match(stored.d.p, /\$999/, 'summary taken from the listing page');
-    const lshape = JSON.parse(await page.evaluate(() => window.reaFilter.shape()));
+    const lshape = JSON.parse(await page.evaluate(() => window.reaEnhancement.shape()));
     assert.equal(lshape.kind, 'listing', 'shape() on a property page is that listing');
     assert.ok(!/Test St|Bondi, NSW/.test(JSON.stringify(lshape)) && /per week/.test(JSON.stringify(lshape)));
     // Checklist and details, folded until opened; a chip cycles its item and stays open.
@@ -979,7 +979,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-forget]');
     await Promise.all([page.waitForEvent('load'), page.click('.rf-ask [data-ask=yes]')]);
     const keys = await page.evaluate(() => Object.keys(localStorage).concat(Object.keys(sessionStorage)));
-    assert.deepEqual(keys.filter((k) => k.startsWith('rea-avail-filter/')), [], 'tool data gone');
+    assert.deepEqual(keys.filter((k) => k.startsWith('rea-enhancement/')), [], 'tool data gone');
     assert.ok(keys.includes('reaOwnKey'), "REA's own data kept");
     console.log('delete all data: ok');
     await done(page); await ctx.close();
@@ -1060,7 +1060,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-drop-chip]');
     assert.ok((await count(page)) > 0, 'dropping the suggested filter brings listings back');
     // Applied a week ago: follow-up nudge on the shortlist.
-    await page.evaluate((i) => { const k = 'rea-avail-filter/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); Object.assign(d.m[i], { as: 'applied', ast: Date.now() - 7 * 864e5 }); localStorage.setItem(k, JSON.stringify(d)); }, other);
+    await page.evaluate((i) => { const k = 'rea-enhancement/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); Object.assign(d.m[i], { as: 'applied', ast: Date.now() - 7 * 864e5 }); localStorage.setItem(k, JSON.stringify(d)); }, other);
     await page.click(`.rf-item[data-id="${other}"] [data-act=s]`);
     await page.click('[data-view=shortlist]');
     assert.match(await page.textContent(`.rf-item[data-id="${other}"]`), /follow up\?/);
@@ -1140,7 +1140,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-item[data-id="146500000"] [data-act=bldg]');
     assert.equal(await count(page), 3, 'only that building');
     assert.match(await status(page), /Showing 3 listings at 2 Curlewis St/);
-    assert.ok(!('building' in JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1')))), 'the building filter is not stored');
+    assert.ok(!('building' in JSON.parse(await page.evaluate(() => localStorage.getItem('rea-enhancement/v1')))), 'the building filter is not stored');
     await page.click('.rf-achip:has-text("Building: 2 Curlewis St")');
     assert.equal(await count(page), before, 'chip removes the building filter');
     // Measure from a listing; add it as a place (feedback line).
@@ -1161,7 +1161,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.evaluate(() => document.querySelectorAll('.rf-acts-more[open]').forEach((d) => { d.open = false; }));
     await page.click('.rf-item[data-id="146500000"] [data-act=s]');
     assert.equal(await page.getAttribute('.rf-item[data-id="146500000"] [data-act=s]', 'aria-pressed'), 'true', 'shortlisted');
-    await page.evaluate(() => { const k = 'rea-avail-filter/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); d.m['146500000'].d.in = [{ at: Date.now() - 864e5, label: 'yesterday' }]; d.m['146500000'].as = 'to inspect'; d.m['146500000'].ast = Date.now() - 3 * 864e5; localStorage.setItem(k, JSON.stringify(d)); window.dispatchEvent(new StorageEvent('storage', { key: k })); }); // as another tab would
+    await page.evaluate(() => { const k = 'rea-enhancement/marks/v1'; const d = JSON.parse(localStorage.getItem(k)); d.m['146500000'].d.in = [{ at: Date.now() - 864e5, label: 'yesterday' }]; d.m['146500000'].as = 'to inspect'; d.m['146500000'].ast = Date.now() - 3 * 864e5; localStorage.setItem(k, JSON.stringify(d)); window.dispatchEvent(new StorageEvent('storage', { key: k })); }); // as another tab would
     await page.click('[data-view=shortlist]');
     await page.selectOption('.rf-sl-filter', '!');
     assert.match(await item('146500000'), /Did you inspect\?/);
@@ -1178,7 +1178,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('24m', async () => {
     const ctx = await browser.newContext();
     await ctx.addInitScript((at) => {
-      if (!localStorage.getItem('rea-avail-filter/snapshots/v1')) localStorage.setItem('rea-avail-filter/snapshots/v1', JSON.stringify({ v: 1, s: { 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1': { at, ids: [], rows: [], gone: [] } } }));
+      if (!localStorage.getItem('rea-enhancement/snapshots/v1')) localStorage.setItem('rea-enhancement/snapshots/v1', JSON.stringify({ v: 1, s: { 'https://www.realestate.com.au/rent/in-manly,+nsw+2095/list-1': { at, ids: [], rows: [], gone: [] } } }));
     }, +FIXED - 3 * 864e5);
     const page = await open(ctx);
     await page.waitForSelector('#rf-remind');
@@ -1187,14 +1187,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.uncheck('#rf-remindSaved');
     assert.equal(await page.$('#rf-remind'), null, 'turning reminders off removes the prompt');
     await page.check('#rf-remindSaved');
-    await page.evaluate(() => localStorage.removeItem('rea-avail-filter/remind-at'));
+    await page.evaluate(() => localStorage.removeItem('rea-enhancement/remind-at'));
     await page.click('#rf-panel .rf-x'); // the prompt sits by the launcher, under the drawer
     await page.evaluate(() => history.pushState(null, '', location.href.replace(/in-[^/]+/, 'in-coogee,+nsw+2034'))); // a different search re-checks
     await page.waitForSelector('#rf-remind');
     await page.click('#rf-remind [data-r=later]');
     assert.equal(await page.$('#rf-remind'), null, 'Later closes it');
     assert.ok(await page.evaluate(() => !document.getElementById('rf-panel') || document.getElementById('rf-panel').hidden), 'Later does not open the drawer');
-    await page.evaluate(() => localStorage.removeItem('rea-avail-filter/remind-at'));
+    await page.evaluate(() => localStorage.removeItem('rea-enhancement/remind-at'));
     await page.evaluate(() => history.pushState(null, '', location.href.replace(/in-[^/]+/, 'in-bronte,+nsw+2024')));
     await page.waitForSelector('#rf-remind');
     await page.click('#rf-remind [data-r=check]');
@@ -1232,7 +1232,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-saved summary');
     await page.click('.rf-saved-list [data-saved-pin]');
     assert.equal(await page.getAttribute('.rf-saved-list [data-saved-pin]', 'aria-pressed'), 'true');
-    assert.equal(await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('rea-avail-filter/snapshots/v1')).s)[0].pin), 1);
+    assert.equal(await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('rea-enhancement/snapshots/v1')).s)[0].pin), 1);
     // Shortlist it, then the next search shows no inspection for it: cancelled.
     await page.evaluate(() => document.querySelectorAll('.rf-acts-more[open]').forEach((d) => { d.open = false; }));
     await page.click('.rf-item[data-id="146500000"] [data-act=s]');
@@ -1307,16 +1307,16 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await first.click('#rf-launch');
     await first.waitForSelector('.rf-news:not([hidden])');
     assert.match(await first.textContent('.rf-news'), /Welcome\..*Search all pages.*stays in this browser/);
-    assert.equal(await first.evaluate(() => localStorage.getItem('rea-avail-filter/seen-version')), null, 'not seen until used');
+    assert.equal(await first.evaluate(() => localStorage.getItem('rea-enhancement/seen-version')), null, 'not seen until used');
     await first.click('#rf-run'); await waitStatus(first, /listings match/);
     assert.ok(await first.$('.rf-news[hidden]'), 'a completed search ends the welcome');
-    assert.ok(await first.evaluate(() => localStorage.getItem('rea-avail-filter/seen-version')), 'and records the version');
+    assert.ok(await first.evaluate(() => localStorage.getItem('rea-enhancement/seen-version')), 'and records the version');
     await first.reload(); await first.addScriptTag({ content: SCRIPT }); await first.waitForSelector('#rf-launch');
     await first.click('#rf-launch');
     assert.ok(await first.$('.rf-news[hidden]'), 'no welcome the second time');
     await done(first); await fresh.close();
     const ctx = await browser.newContext();
-    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/seen-version')) localStorage.setItem('rea-avail-filter/seen-version', '2.17.0'); });
+    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-enhancement/seen-version')) localStorage.setItem('rea-enhancement/seen-version', '2.17.0'); });
     const page = await open(ctx);
     await page.click('#rf-launch');
     await page.waitForSelector('.rf-news:not([hidden])');
@@ -1337,7 +1337,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     await run(page);
     await page.click('#rf-more summary'); await settle(page);
-    const byType = await page.evaluate(() => { const n = {}; for (const r of window.reaFilter.rows()) n[r.type] = (n[r.type] || 0) + 1; return n; });
+    const byType = await page.evaluate(() => { const n = {}; for (const r of window.reaEnhancement.rows()) n[r.type] = (n[r.type] || 0) + 1; return n; });
     const names = await page.$$eval('.rf-types [data-ptype]', (b) => b.map((x) => x.dataset.ptype));
     assert.deepEqual(names, Object.keys(byType).sort(), 'one chip per type in the results');
     await page.click('.rf-types [data-ptype="Apartment"]');
@@ -1435,7 +1435,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     // Seed: 146500002 hidden for its price at $2000/wk (the fixture rent is lower).
     await ctx.addInitScript(() => {
-      if (!localStorage.getItem('rea-avail-filter/marks/v1')) localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: { 146500002: { f: 1, l: 1, h: 1, hr: 'price', hp: 2000, p: 2000 } } }));
+      if (!localStorage.getItem('rea-enhancement/marks/v1')) localStorage.setItem('rea-enhancement/marks/v1', JSON.stringify({ v: 1, m: { 146500002: { f: 1, l: 1, h: 1, hr: 'price', hp: 2000, p: 2000 } } }));
     });
     const page = await open(ctx);
     await run(page);
@@ -1516,16 +1516,16 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await count(page, '.rc-body .rf-badge'), 0, 'on the card, not an inner box');
     await page.hover('div.rc'); await page.click('div.rc [data-card-act=s]');
     assert.equal(Object.values(await marks(page)).filter((e) => e.s).length, 1);
-    const early = await page.evaluate(() => window.reaFilter.selfcheck());
+    const early = await page.evaluate(() => window.reaEnhancement.selfcheck());
     assert.match(early, /rows: 6 \(page 1 only: no search run yet\)/, 'selfcheck before a search reads page 1');
     assert.match(early, /price 83%\/\?, .*coordinates 100%/, 'fill rates from page 1, not 0%');
     await run(page);
     await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-priceMax', '600'); await page.dispatchEvent('#rf-priceMax', 'change');
     await page.waitForSelector('div.rc[data-rf-match="0"]');
-    const report = await page.evaluate(() => window.reaFilter.selfcheck());
+    const report = await page.evaluate(() => window.reaEnhancement.selfcheck());
     assert.match(report, /cards: 6 found \(fallback: REA no longer uses <article>\)/);
-    const shape = await page.evaluate(() => window.reaFilter.shape());
+    const shape = await page.evaluate(() => window.reaEnhancement.shape());
     assert.ok(!/Curlewis|Bondi Realty/.test(shape) && /per week/.test(shape), 'shape(): structure without names or addresses');
     console.log('cards without <article>, shape(): ok');
     await done(page); await ctx.close();
@@ -1629,7 +1629,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const base = serve([], { pages: 2 });
     const hits = [];
-    await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/paused', String(Date.now() + 5 * 60 * 1000)));
+    await ctx.addInitScript(() => localStorage.setItem('rea-enhancement/paused', String(Date.now() + 5 * 60 * 1000)));
     const page = await open(ctx, SEARCH, { route: (route) => { const u = route.request().url(); if (/\/list-2/.test(u)) hits.push(u); return base(route); } });
     await page.click('#rf-launch');
     assert.match(await page.textContent('.rf-warn-msg'), /fetching is paused until/);
@@ -1661,7 +1661,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.evaluate(() => 'rfTheme' in document.documentElement.dataset), false);
     await done(page); await ctx.close();
     const light = await browser.newContext({ colorScheme: 'light' });
-    await light.addInitScript(() => localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ theme: 'dark' })));
+    await light.addInitScript(() => localStorage.setItem('rea-enhancement/v1', JSON.stringify({ theme: 'dark' })));
     const p2 = await open(light);
     await p2.click('#rf-launch');
     assert.equal(await bg(p2, '#rf-panel'), 'rgb(28, 28, 32)', 'Dark overrides a light system, from saved settings');
@@ -1727,7 +1727,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await b.$eval('#rf-theme', (el) => el.value), 'dark', "the other tab's form follows");
     await b.click('#rf-more summary');
     await b.fill('#rf-priceMax', '900'); await b.dispatchEvent('#rf-priceMax', 'change');
-    const saved = await a.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')));
+    const saved = await a.evaluate(() => JSON.parse(localStorage.getItem('rea-enhancement/v1')));
     assert.equal(saved.theme, 'dark', 'theme kept');
     assert.equal(saved.priceMax, '900', 'and the rent change saved');
     // A preset saved in one tab is in the other's menu; a search remembered there is listed here.
@@ -1767,7 +1767,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   // shortlist with no backup gets one nudge.
   await block('47', async () => {
     const ctx = await browser.newContext();
-    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/v1')) localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ theme: 'dark', checklist: 'Damp, Noise', priceMax: '900' })); });
+    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-enhancement/v1')) localStorage.setItem('rea-enhancement/v1', JSON.stringify({ theme: 'dark', checklist: 'Damp, Noise', priceMax: '900' })); });
     const page = await open(ctx);
     await run(page);
     await page.hover('.rf-item:nth-child(1)'); await page.click('.rf-item:nth-child(1) >> [data-act=s]');
@@ -1777,7 +1777,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(data.cfg.theme, 'dark');
     assert.equal(data.cfg.checklist, 'Damp, Noise');
     assert.ok(!('priceMax' in data.cfg), "a search's filters aren't settings");
-    assert.ok(await page.evaluate(() => localStorage.getItem('rea-avail-filter/backup-at')), 'backup time recorded');
+    assert.ok(await page.evaluate(() => localStorage.getItem('rea-enhancement/backup-at')), 'backup time recorded');
     await done(page); await ctx.close();
     const fresh = await browser.newContext();
     const p2 = await open(fresh);
@@ -1789,10 +1789,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await p2.click('[data-restore=yes]');
     await waitStatus(p2, /Restored 1 listing, 1 saved search and your settings from backup/);
     assert.equal(await p2.evaluate(() => document.documentElement.dataset.rfTheme), 'dark');
-    const saved = JSON.parse(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/v1')));
+    const saved = JSON.parse(await p2.evaluate(() => localStorage.getItem('rea-enhancement/v1')));
     assert.equal(saved.checklist, 'Damp, Noise');
     assert.notEqual(saved.remember, false, "a backup made with Remember off doesn't turn it off here");
-    assert.ok(await p2.evaluate(() => localStorage.getItem('rea-avail-filter/snapshots/v1')), 'remembered searches kept');
+    assert.ok(await p2.evaluate(() => localStorage.getItem('rea-enhancement/snapshots/v1')), 'remembered searches kept');
     await p2.click('.rf-status .rf-undo');
     await waitStatus(p2, /^Restore undone/);
     assert.equal(await p2.evaluate(() => 'rfTheme' in document.documentElement.dataset), false, 'settings back');
@@ -1802,14 +1802,14 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await many.addInitScript(() => {
       const m = {};
       for (let i = 0; i < 5; i++) m[146500010 + i] = { f: 1, l: 1, s: 1, st: 1, d: { u: `https://www.realestate.com.au/property-unit-nsw-bondi-${146500010 + i}`, a: `${i} Hall St, Bondi NSW 2026` } };
-      if (!localStorage.getItem('rea-avail-filter/marks/v1')) localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m }));
+      if (!localStorage.getItem('rea-enhancement/marks/v1')) localStorage.setItem('rea-enhancement/marks/v1', JSON.stringify({ v: 1, m }));
     });
     const lp = await open(many, `${ORIGIN}/property-unit-nsw-bondi-146500101`);
     await lp.waitForSelector('#rf-lbar');
-    assert.equal(await lp.evaluate(() => localStorage.getItem('rea-avail-filter/backup-nudge-at')), null, 'not used up on a listing page, where it would not be seen');
+    assert.equal(await lp.evaluate(() => localStorage.getItem('rea-enhancement/backup-nudge-at')), null, 'not used up on a listing page, where it would not be seen');
     await done(lp);
     const p3 = await open(many);
-    assert.equal(await p3.evaluate(() => localStorage.getItem('rea-avail-filter/backup-nudge-at')), null, 'nor before the drawer opens');
+    assert.equal(await p3.evaluate(() => localStorage.getItem('rea-enhancement/backup-nudge-at')), null, 'nor before the drawer opens');
     await p3.click('#rf-launch');
     await p3.waitForFunction(() => /5 listings shortlisted and never backed up/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''));
     await p3.reload(); await p3.addScriptTag({ content: SCRIPT }); await p3.waitForSelector('#rf-launch');
@@ -1845,7 +1845,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx, SEARCH, { route: serve([], { pages: 3, perPage: 12 }) });
     await run(page);
     await page.evaluate(() => { // an earlier visit, five weeks ago
-      const k = 'rea-avail-filter/snapshots/v1', d = JSON.parse(localStorage.getItem(k));
+      const k = 'rea-enhancement/snapshots/v1', d = JSON.parse(localStorage.getItem(k));
       for (const e of Object.values(d.s)) e.trend = [{ t: e.at - 35 * 864e5, n: 20, m: { 2: 950 } }, ...e.trend];
       localStorage.setItem(k, JSON.stringify(d));
     });
@@ -1862,7 +1862,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   // the list on that listing.
   await block('50', async () => {
     const ctx = await browser.newContext();
-    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-avail-filter/v1')) localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ places: 'Work: -33.87, 151.21' })); });
+    await ctx.addInitScript(() => { if (!localStorage.getItem('rea-enhancement/v1')) localStorage.setItem('rea-enhancement/v1', JSON.stringify({ places: 'Work: -33.87, 151.21' })); });
     const page = await open(ctx);
     await run(page);
     const n = await count(page);
@@ -1910,7 +1910,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-view=shortlist]');
     await page.focus(`.rf-item[data-id="${sid}"]`);
     await page.evaluate(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: '2', code: 'Digit2', shiftKey: true, bubbles: true })));
-    await page.waitForFunction((i) => JSON.parse(localStorage.getItem('rea-avail-filter/marks/v1')).m[i].as === 'inspected', sid);
+    await page.waitForFunction((i) => JSON.parse(localStorage.getItem('rea-enhancement/marks/v1')).m[i].as === 'inspected', sid);
     assert.equal((await marks(page))[sid].rt, undefined, 'no rating from a typed digit');
     console.log('list keys PgDn/PgUp/Home/End/c, AZERTY digits: ok');
     await done(page); await ctx.close();
@@ -1949,9 +1949,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('53', async () => {
     const ctx = await browser.newContext();
     await ctx.addInitScript((t) => {
-      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
+      if (localStorage.getItem('rea-enhancement/marks/v1')) return;
       const d = (id, a, la, at) => ({ u: `https://www.realestate.com.au/property-unit-nsw-bondi-${id}`, a, la, ln: 151.2767, in: at ? [{ at, label: 'later today' }] : [] });
-      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+      localStorage.setItem('rea-enhancement/marks/v1', JSON.stringify({ v: 1, m: {
         146500101: { f: 1, l: 1, s: 1, st: 1, d: d(146500101, '1 Hall St, Bondi NSW 2026', -33.8915, 0) },
         146500222: { f: 1, l: 1, s: 1, st: 1, d: d(146500222, '5 Beach Rd, Bondi NSW 2026', -33.9005, t + 75 * 60000) },
         146500333: { f: 1, l: 1, s: 1, st: 1, d: d(146500333, '9 Roscoe St, Bondi NSW 2026', -33.8915, t + 150 * 60000) },
@@ -1990,7 +1990,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await page.textContent('.rf-partial'), /Read 2 of 3 pages/, 'page 2 with a spaced blob was read');
     assert.match(await page.textContent('.rf-warn-msg'), /may have changed its format/);
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
-    assert.equal(await page.evaluate(() => localStorage.getItem('rea-avail-filter/paused')), null, 'not a bot check: nothing paused');
+    assert.equal(await page.evaluate(() => localStorage.getItem('rea-enhancement/paused')), null, 'not a bot check: nothing paused');
     await page.unroute('**/*'); await page.route('**/*', serve([], { pages: 3 }));
     await page.click('#rf-refresh');
     await page.waitForFunction(() => !/changed its format/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''), null, { timeout: 8000 });
@@ -2014,10 +2014,10 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     }
     await page.waitForFunction(() => /errors in the last minute \(latest: annotate\)/.test(document.querySelector('.rf-warn-msg')?.textContent || ''));
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
-    assert.match(await page.evaluate(() => window.reaFilter.selfcheck()), /annotate: boom from a test/);
+    assert.match(await page.evaluate(() => window.reaEnhancement.selfcheck()), /annotate: boom from a test/);
     await page.clock.runFor(61000); // a quiet minute: the warning goes, the log stays
     await page.waitForFunction(() => !/errors in the last minute/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''));
-    assert.match(await page.evaluate(() => window.reaFilter.selfcheck()), /annotate: boom from a test/);
+    assert.match(await page.evaluate(() => window.reaEnhancement.selfcheck()), /annotate: boom from a test/);
     console.log('own errors logged and shown: ok');
     await done(page); await ctx.close();
   });
@@ -2032,12 +2032,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
     await page.clock.runFor(2500); // past MIRROR_DELAY_MS
     const copied = () => page.evaluate(() => new Promise((res) => {
-      const r = indexedDB.open('rea-avail-filter/mirror', 1);
+      const r = indexedDB.open('rea-enhancement/mirror', 1);
       r.onupgradeneeded = () => r.result.createObjectStore('kv');
       r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(g.result ? Object.keys(g.result.data.m) : null); r.result.close(); }; };
     }));
     assert.deepEqual(await copied(), [id], 'the shortlist is mirrored');
-    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-enhancement/')) localStorage.removeItem(k); });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     // A star on REA's card before the offer is answered doesn't replace the copy.
     await page.waitForFunction(() => document.querySelectorAll('article > .rf-badge [data-card-act=s]').length > 1);
@@ -2053,7 +2053,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await waitStatus(page, /^Restored 1 listing/);
     assert.equal((await marks(page))[id].s, 1, 'shortlist back');
     // Emptied on purpose: Cancel drops the copy, and it isn't offered again.
-    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-enhancement/')) localStorage.removeItem(k); });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     await page.waitForSelector('.rf-restore-in:not([hidden])');
@@ -2065,7 +2065,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForSelector('.rf-restore-in:not([hidden])'); // Not now: offered again
     await page.click('[data-restore=no]');
     await waitStatus(page, /^Safety copy discarded/);
-    await page.waitForFunction(() => new Promise((res) => { const r = indexedDB.open('rea-avail-filter/mirror', 1); r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(!g.result); r.result.close(); }; }; }));
+    await page.waitForFunction(() => new Promise((res) => { const r = indexedDB.open('rea-enhancement/mirror', 1); r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('copy'); g.onsuccess = () => { res(!g.result); r.result.close(); }; }; }));
     // Answered: a star from the listing page's bar is copied again.
     await page.goto(`${ORIGIN}/property-unit-nsw-bondi-${id}`); await page.addScriptTag({ content: SCRIPT });
     await page.waitForSelector('#rf-lbar');
@@ -2079,12 +2079,12 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   // 25. Drift canary + selfcheck: prime the usual rates, then serve pages without inspections.
   await block('25', async () => {
     const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
-    await ctx.addInitScript(() => localStorage.setItem('rea-avail-filter/health/v1', JSON.stringify({ n: 5, ema: { inspections: 0.5, availability: 1, price: 0.9 } })));
+    await ctx.addInitScript(() => localStorage.setItem('rea-enhancement/health/v1', JSON.stringify({ n: 5, ema: { inspections: 0.5, availability: 1, price: 0.9 } })));
     const page = await open(ctx, SEARCH, { route: serve([], { pages: 4, perPage: 6, noInspections: true }) });
     await page.click('#rf-launch'); await page.click('#rf-run');
     await page.waitForFunction(() => /REA may have changed its data: inspections on 0%/.test(document.querySelector('.rf-warnbar:not([hidden])')?.textContent || ''), null, { timeout: 15000 });
     assert.match(await status(page), /listings match/, 'status keeps the match count');
-    const report = await page.evaluate(() => window.reaFilter.selfcheck());
+    const report = await page.evaluate(() => window.reaEnhancement.selfcheck());
     assert.match(report, /inspections 0%\/\d+%/);
     assert.match(report, /page: \/rent\//);
     await page.click('.rf-warnbar .rf-report');
@@ -2164,7 +2164,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await waitStatus(page, /^Listing hidden/);
     const other = await ctx.newPage();
     await other.route('**/*', serve()); await other.goto(SEARCH);
-    await other.evaluate(() => { const k = 'rea-avail-filter/marks/v1', d = JSON.parse(localStorage.getItem(k)); d.m['146599999'] = { f: 1, l: 1, n: 'from the other tab' }; localStorage.setItem(k, JSON.stringify(d)); });
+    await other.evaluate(() => { const k = 'rea-enhancement/marks/v1', d = JSON.parse(localStorage.getItem(k)); d.m['146599999'] = { f: 1, l: 1, n: 'from the other tab' }; localStorage.setItem(k, JSON.stringify(d)); });
     await page.waitForTimeout(300);
     assert.match(await status(page), /^Listing hidden/, 'the Undo offer survives the redraw');
     assert.ok(await page.$('.rf-status .rf-why'), 'hide reasons too');
@@ -2204,8 +2204,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('59', async () => {
     const ctx = await browser.newContext();
     await ctx.addInitScript(() => {
-      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
-      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+      if (localStorage.getItem('rea-enhancement/marks/v1')) return;
+      localStorage.setItem('rea-enhancement/marks/v1', JSON.stringify({ v: 1, m: {
         146500101: { f: 1, l: 1, s: 1, st: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026', ab: '2026-09-25' } },
         146500102: { f: 1, l: 1, s: 1, st: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', ab: '2026-10-20' } },
       } }));
@@ -2247,18 +2247,18 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForFunction(() => /Approved for 2 Hall St\. Give notice by 29 Sept?/.test(document.querySelector('.rf-status').textContent));
     await page.click('.rf-status button:has-text("I\'ve given notice")');
     await waitStatus(page, /^Noted: notice given/);
-    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).noticeGiven, '2026-09-23');
+    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-enhancement/v1')))).noticeGiven, '2026-09-23');
     // Notice given: the moving list takes the pack's place, and its next item leads.
     assert.match(await page.textContent('.rf-sl-ticks summary'), /^Moving list 0\/10 · next: Pay the bond$/);
     assert.equal(await page.$('.rf-sl-ticks > details:first-child > .rf-meta'), null, 'no rent or bond known: nothing claimed as left to pay');
     await page.click('.rf-sl-ticks [data-mv="Pay the bond"]');
     await page.waitForFunction(() => /^Moving list 1\/10 · next: Pay rent in advance$/.test(document.querySelector('.rf-sl-ticks summary')?.textContent));
-    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).moveDone, '146500102|Pay the bond');
+    assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-enhancement/v1')))).moveDone, '146500102|Pay the bond');
     // The condition report, room by room, beside it.
     await page.click('.rf-ecr summary');
     await page.click('.rf-ecr [data-ecr="Kitchen"]');
     assert.match(await page.textContent('.rf-ecr summary'), /^Condition report 1\/\d+/);
-    assert.match((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-avail-filter/v1')))).ecrDone, /^146500102\|Kitchen$/);
+    assert.match((await page.evaluate(() => JSON.parse(localStorage.getItem('rea-enhancement/v1')))).ecrDone, /^146500102\|Kitchen$/);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.ecr), 'Kitchen');
     await page.click('.rf-item .rf-nudge [data-na=applied]');
     assert.equal((await marks(page))['146500101'].as, 'applied');
@@ -2303,7 +2303,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
     await page.clock.runFor(2500);
     const file = { app: 'rea-enhancement', kind: 'marks', v: 1, m: { [ids[0]]: (await marks(page))[ids[0]] } };
-    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-avail-filter/')) localStorage.removeItem(k); });
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('rea-enhancement/')) localStorage.removeItem(k); });
     await page.reload(); await page.addScriptTag({ content: SCRIPT }); await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached' });
     await page.click('#rf-launch');
     await page.waitForSelector('.rf-restore-in:not([hidden])');
@@ -2338,7 +2338,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
-  // 63. From real shapes: every test/shapes/*.json (reaFilter.shape() of REA's own data) is served,
+  // 63. From real shapes: every test/shapes/*.json (reaEnhancement.shape() of REA's own data) is served,
   // search shapes as a results page and listing shapes as a property page, and the drawer and the
   // listing bar read them. A structure change REA ships breaks here in the UI, not only in units.
   await block('63', async () => {
@@ -2379,9 +2379,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
   await block('64', async () => {
     const ctx = await browser.newContext();
     await ctx.addInitScript(() => {
-      if (!localStorage.getItem('rea-avail-filter/v1')) localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ leaseEnd: '2026-10-20' }));
-      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
-      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+      if (!localStorage.getItem('rea-enhancement/v1')) localStorage.setItem('rea-enhancement/v1', JSON.stringify({ leaseEnd: '2026-10-20' }));
+      if (localStorage.getItem('rea-enhancement/marks/v1')) return;
+      localStorage.setItem('rea-enhancement/marks/v1', JSON.stringify({ v: 1, m: {
         146500101: { f: 1, l: 1, s: 1, st: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026' } },
         146500102: { f: 1, l: 1, s: 1, st: 1, as: 'declined', ast: 1, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', ag: 'Bondi Realty' } },
       } }));
@@ -2417,7 +2417,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx, SEARCH, { route: (r) => (/list-[23]/.test(r.request().url()) ? r.fulfill({ status: 200, contentType: 'text/html', body: reaPage(1, { pages: 3 }) }) : base(r)) });
     await run(page);
     assert.match(await page.textContent('.rf-warn-msg'), /repeated the first, so the search stopped there/);
-    assert.equal(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('rea-avail-filter/snapshots/v1') || '{"s":{}}').s || {}).length), 0, 'not remembered as a full crawl (the rest would count as gone)');
+    assert.equal(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('rea-enhancement/snapshots/v1') || '{"s":{}}').s || {}).length), 0, 'not remembered as a full crawl (the rest would count as gone)');
     assert.ok(await page.isVisible('.rf-warnbar .rf-report'), 'Copy report offered');
     console.log('pagination change guard: ok');
     await done(page); await ctx.close();
@@ -2434,7 +2434,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const other = await ctx.newPage();
     await other.route('**/*', serve()); await other.goto(SEARCH);
     for (const [act, id] of [['star', ids[0]], ['hide', ids[1]]]) {
-      await other.evaluate(([a, i]) => { const k = 'rea-avail-filter/marks/v1', d = JSON.parse(localStorage.getItem(k) || '{"v":1,"m":{}}'); d.m[i] = { ...(d.m[i] || { f: 1, l: 1 }), ...(a === 'star' ? { s: 1, st: 1 } : { h: 1 }) }; localStorage.setItem(k, JSON.stringify(d)); }, [act, id]);
+      await other.evaluate(([a, i]) => { const k = 'rea-enhancement/marks/v1', d = JSON.parse(localStorage.getItem(k) || '{"v":1,"m":{}}'); d.m[i] = { ...(d.m[i] || { f: 1, l: 1 }), ...(a === 'star' ? { s: 1, st: 1 } : { h: 1 }) }; localStorage.setItem(k, JSON.stringify(d)); }, [act, id]);
       await page.waitForTimeout(300);
       assert.equal(await page.evaluate(() => document.activeElement.closest('.rf-item')?.dataset.id), ids[5], `focus kept after another tab's ${act}`);
     }
@@ -2453,7 +2453,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('[data-view=shortlist]');
     const exportIcs = async () => { const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.rf-menu summary').then(() => page.click('.rf-sl-bar [data-export=ics]'))]); return fs.readFileSync(await dl.path(), 'utf8'); };
     await exportIcs();
-    assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/ics/v1'))).length >= 2, 'sent events remembered');
+    assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('rea-enhancement/ics/v1'))).length >= 2, 'sent events remembered');
     await page.hover(`.rf-item[data-id="${ids[1]}"]`); await page.click(`.rf-item[data-id="${ids[1]}"] >> [data-act=s]`);
     const second = await exportIcs();
     assert.match(second, new RegExp(`UID:${ids[1]}-\\d+@rea-enhancement\\r\\n[\\s\\S]*?STATUS:CANCELLED`), 'the unshortlisted listing is cancelled');
@@ -2530,9 +2530,9 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const t = FIXED.getTime(), D = 864e5;
     await ctx.addInitScript(([t, D]) => {
-      if (localStorage.getItem('rea-avail-filter/marks/v1')) return;
-      localStorage.setItem('rea-avail-filter/v1', JSON.stringify({ slSeenAt: String(t - 2 * D) }));
-      localStorage.setItem('rea-avail-filter/marks/v1', JSON.stringify({ v: 1, m: {
+      if (localStorage.getItem('rea-enhancement/marks/v1')) return;
+      localStorage.setItem('rea-enhancement/v1', JSON.stringify({ slSeenAt: String(t - 2 * D) }));
+      localStorage.setItem('rea-enhancement/marks/v1', JSON.stringify({ v: 1, m: {
         146500101: { f: t - 9 * D, l: t, s: 1, st: t - 5 * D, p: 650, pp: 700, pt: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500101', a: '1 Hall St, Bondi NSW 2026', p: '$650 per week', w: 'water' } },
         146500102: { f: t - 9 * D, l: t, s: 1, st: t - 6 * D, as: 'approved', ast: t - D, d: { u: 'https://www.realestate.com.au/property-unit-nsw-bondi-146500102', a: '2 Hall St, Bondi NSW 2026', p: '$700 per week' } },
       } }));
@@ -2563,7 +2563,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.selectOption('.rf-item[data-id="146500101"] select[data-app]', '');
     await page.selectOption('#rf-slSort', 'added');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id + ':' + x.querySelector('select[data-app]')?.value)), ['146500101:', '146500102:approved'], 'Date added: newest shortlisted first');
-    assert.ok(+JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).slSeenAt >= t, 'this visit stamped');
+    assert.ok(+JSON.parse(await page.evaluate(() => localStorage.getItem('rea-enhancement/v1'))).slSeenAt >= t, 'this visit stamped');
     console.log('shortlist order and since last visit: ok');
     await done(page); await ctx.close();
   });
@@ -2630,7 +2630,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const other = await ctx.newPage();
     await other.route('**/*', serve()); await other.goto(SEARCH);
     const write = (choice) => other.evaluate(([c, i]) => {
-      const k = 'rea-avail-filter/marks/v1', d = JSON.parse(localStorage.getItem(k));
+      const k = 'rea-enhancement/marks/v1', d = JSON.parse(localStorage.getItem(k));
       if (c) { d.m[i].s = 1; d.m[i].st = 1; d.w += 1; } else d.m[i].l += 1;
       localStorage.setItem(k, JSON.stringify({ w: d.w, ...d })); // as the script writes it: the stamp first
     }, [choice, ids[1]]);
@@ -2669,7 +2669,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-themebtn');
     assert.equal(await page.getAttribute('html', 'data-rf-theme'), 'light');
     assert.equal(await page.inputValue('#rf-theme'), 'light', 'shown in Settings');
-    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('rea-avail-filter/v1'))).theme, 'light', 'saved');
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('rea-enhancement/v1'))).theme, 'light', 'saved');
     assert.equal(await page.getAttribute('.rf-themebtn', 'aria-label'), 'Dark mode');
     await page.click('.rf-themebtn');
     assert.equal(await page.getAttribute('html', 'data-rf-theme'), 'dark');

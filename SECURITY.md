@@ -24,10 +24,10 @@ The script runs with `@grant none` on `realestate.com.au`, inside the page's own
 
 The lint (`test/lint.js`) also fails the build on `eval`/`new Function`, string timers, WebSockets, any URL outside `realestate.com.au` (bar the three plain links at the foot of the drawer and in the help panel: source, terms, privacy), and storage keys outside the script's prefix.
 
-Examples of a valid report: markup or script injection from listing text, a share link or a backup; a spreadsheet formula surviving export; a way to make the script send data anywhere but REA; storage written outside `rea-avail-filter/`.
+Examples of a valid report: markup or script injection from listing text, a share link or a backup; a spreadsheet formula surviving export; a way to make the script send data anywhere but REA; storage written outside `rea-enhancement/`.
 
 ## Out of scope
 
 - REA's own site, and anything REA's page scripts can already do (they share the page and its storage; see [PRIVACY.md](PRIVACY.md)).
 - A malicious copy of the script, or a changed `@grant` or `@match`, installed by the user.
-- Output of `reaFilter.raw()` pasted publicly (it is raw REA data, documented as such).
+- Output of `reaEnhancement.raw()` pasted publicly (it is raw REA data, documented as such).

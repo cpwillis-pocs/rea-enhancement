@@ -8,13 +8,13 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-const FILE = path.join(__dirname, '..', 'rea-availability-filter.user.js');
+const FILE = path.join(__dirname, '..', 'rea-enhancement.user.js');
 const src = fs.readFileSync(FILE, 'utf8');
 const header = src.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/)[0];
 const keep = header.split('\n').filter((l) => /@(match|run-at|grant|noframes)\b/.test(l));
 process.stdout.write([
   '// ==UserScript==',
-  '// @name         REA Availability Filter (dev)',
+  '// @name         REA Enhancement (dev)',
   '// @namespace    rea-enhancement-dev',
   '// @version      0.0.0-dev',
   '// @description  Loads the working copy from disk. Not for installs.',

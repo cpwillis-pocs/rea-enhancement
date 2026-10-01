@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { listing, results, page, memStorage } = require('./helpers');
 
 const BASE = 'https://www.realestate.com.au/rent/in-bondi/list-1';
@@ -187,11 +187,11 @@ test('pauseGate: trips for PAUSE_MS, then lifts; bad or past values mean not pau
   const t = g.trip();
   assert.equal(t, 1000 + core.PAUSE_MS);
   assert.equal(g.until(), t);
-  assert.equal(m.getItem('rea-avail-filter/paused'), String(t));
+  assert.equal(m.getItem('rea-enhancement/paused'), String(t));
   now = t - 1; assert.equal(g.until(), t, 'still paused a moment before');
   now = t; assert.equal(g.until(), 0, 'lifted at the time');
-  m.setItem('rea-avail-filter/paused', 'junk'); assert.equal(g.until(), 0);
-  now = 5000; m.setItem('rea-avail-filter/paused', '4000'); assert.equal(g.until(), 0); assert.equal(m.getItem('rea-avail-filter/paused'), null, 'expired value removed');
+  m.setItem('rea-enhancement/paused', 'junk'); assert.equal(g.until(), 0);
+  now = 5000; m.setItem('rea-enhancement/paused', '4000'); assert.equal(g.until(), 0); assert.equal(m.getItem('rea-enhancement/paused'), null, 'expired value removed');
   g.trip(5); g.clear(); assert.equal(g.until(), 0);
 });
 

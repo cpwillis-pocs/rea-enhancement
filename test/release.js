@@ -8,7 +8,7 @@ const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 
 const root = process.env.RELEASE_ROOT ? path.resolve(process.env.RELEASE_ROOT) : path.join(__dirname, '..');
-const FILE = 'rea-availability-filter.user.js';
+const FILE = 'rea-enhancement.user.js';
 const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 const write = (f, s) => fs.writeFileSync(path.join(root, f), s);
 const die = (m) => { console.error(`release: ${m}`); process.exit(1); };

@@ -2,7 +2,7 @@
 // Live check against the real realestate.com.au: local only, never in CI (it would hit REA from
 // shared runners and trip its bot checks). Loads one search, injects the working copy, runs a
 // full search, and checks the core paths still read: results found, prices and dates filled,
-// REA's cards recognised. Saves the first listing's reaFilter.shape() to test/shapes/ so a
+// REA's cards recognised. Saves the first listing's reaEnhancement.shape() to test/shapes/ so a
 // format change becomes a regression test (see CONTRIBUTING.md).
 //
 //   LIVE_URL=https://www.realestate.com.au/rent/in-bondi,+nsw+2026/list-1 npm run live
@@ -14,9 +14,9 @@ let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 
 const URL_ = process.env.LIVE_URL || 'https://www.realestate.com.au/rent/in-bondi,+nsw+2026/list-1';
-const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'rea-availability-filter.user.js'), 'utf8');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '..', 'rea-enhancement.user.js'), 'utf8');
 const { shapeDiff } = require('./helpers');
-const { PROBE_PATHS } = require('../rea-availability-filter.user.js');
+const { PROBE_PATHS } = require('../rea-enhancement.user.js');
 const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something REA changed is worth a look
 
 (async () => {
@@ -29,14 +29,14 @@ const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something RE
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.addScriptTag({ content: SCRIPT });
     await page.waitForSelector('#rf-launch', { timeout: 15000 });
-    const before = await page.evaluate(() => window.reaFilter.selfcheck());
+    const before = await page.evaluate(() => window.reaEnhancement.selfcheck());
     console.log(`--- before a search\n${before}\n`);
     await page.click('#rf-launch');
     await page.click('#rf-run');
     await page.waitForFunction(() => /listings match|failed|Paused/i.test(document.querySelector('.rf-status')?.textContent || '')
       || !document.querySelector('.rf-partial')?.hidden, null, { timeout: 180000 });
     const status = await page.textContent('.rf-status');
-    const report = await page.evaluate(() => window.reaFilter.selfcheck());
+    const report = await page.evaluate(() => window.reaEnhancement.selfcheck());
     console.log(`--- after the search: ${status}\n${report}\n`);
     const n = +(report.match(/^rows: (\d+)/m) || [])[1] || 0;
     if (!n) problems.push('no listings read');
@@ -45,7 +45,7 @@ const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something RE
     if (/cards: 0 found/.test(report)) problems.push("REA's result cards not recognised");
     if (/fallback: REA renamed it/.test(report)) problems.push('results found by shape (REA renamed the path)');
     if (process.env.LIVE_SAVE !== '0') {
-      const shape = JSON.parse(await page.evaluate(() => window.reaFilter.shape()));
+      const shape = JSON.parse(await page.evaluate(() => window.reaEnhancement.shape()));
       const fill = Object.keys(rates).filter((k) => rates[k] === 1 && ['availability', 'price', 'photos', 'agency'].includes(k));
       // Compare with the newest saved shape: save only when REA's structure moved, and fail when
       // a path the script reads (PROBE_PATHS) has gone.
@@ -66,7 +66,7 @@ const MIN_RATE = { availability: 0.5, price: 0.7 }; // below these, something RE
       console.log(`--- listing page ${first.replace(/\?.*/, '')}: ${JSON.stringify(bar)}`);
       if (bar.partial || !bar.price) problems.push('listing page not read (the listing bar has no price)');
       if (process.env.LIVE_SAVE !== '0') {
-        const raw = await page.evaluate(() => window.reaFilter.shape());
+        const raw = await page.evaluate(() => window.reaEnhancement.shape());
         if (/^\{/.test(raw)) { const saved = saveShape('listing', JSON.parse(raw), bar.price ? ['price'] : []); if (saved) problems.push(...saved); }
         else problems.push('shape() found no listing on the listing page');
       }

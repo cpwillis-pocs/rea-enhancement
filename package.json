@@ -1,15 +1,15 @@
 {
   "name": "rea-enhancement",
   "private": true,
-  "description": "Rental Toolkit for realestate.com.au: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.",
+  "description": "Toolkits for realestate.com.au. Rental Toolkit: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.",
   "scripts": {
-    "lint": "node --check rea-availability-filter.user.js && node test/lint.js",
+    "lint": "node --check rea-enhancement.user.js && node test/lint.js",
     "check": "npm run lint && node --test test/*.test.js",
     "test": "node --test test/*.test.js",
     "e2e": "node test/e2e/smoke.js && node test/e2e/edge.js && node test/e2e/a11y.js",
     "e2e:smoke": "node test/e2e/smoke.js",
     "e2e:edge": "node test/e2e/edge.js",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=rea-availability-filter.user.js test/*.test.js && COVERAGE=1 node test/e2e/smoke.js && COVERAGE=1 COVERAGE_APPEND=1 node test/e2e/edge.js",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=rea-enhancement.user.js test/*.test.js && COVERAGE=1 node test/e2e/smoke.js && COVERAGE=1 COVERAGE_APPEND=1 node test/e2e/edge.js",
     "screenshots": "node test/e2e/screenshots.js",
     "ci": "npm run check && npm run e2e",
     "e2e:fast": "E2E_JOBS=4 node test/e2e/edge.js",

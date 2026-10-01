@@ -49,7 +49,7 @@ To try a change in the browser, paste the file into a Tampermonkey script (or po
 The internals (data flow, every storage key, the marks fields, and the versions to bump) are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Status, settled decisions, known limitations and open ideas are in [docs/ROADMAP.md](docs/ROADMAP.md): check it before proposing a feature.
 
 
-`rea-availability-filter.user.js` is split into two halves by the `typeof window === 'undefined'` guard:
+`rea-enhancement.user.js` is split into two halves by the `typeof window === 'undefined'` guard:
 
 - **Above the guard**: pure functions (parsing, filters, sorts, export, fetch/retry with an injectable `fetch`). No DOM. `module.exports` makes them `require()`-able from `test/`.
 - **Below the guard**: drawer UI, SPA navigation handling, card badges, the listing-page bar. Covered by `test/e2e/smoke.js` (main flow) and `test/e2e/edge.js` (one numbered block per feature or edge path), which serve fixture pages on the real REA origin via request interception, so they need no network. `node test/e2e/screenshots.js` regenerates `docs/screenshots`.
@@ -59,9 +59,9 @@ Put new logic above the guard where you can, and give it a unit test.
 ## Rules of thumb
 
 - **REA's DOM is off limits except append-only.** Obfuscated classes change weekly and React re-renders wipe edits. The script only appends one `.rf-badge` per result card (REA's `<article>`, or the card `cardsOnPage` finds when there are none) and sets `data-rf-*` attributes. Don't reorder, remove or restyle REA nodes beyond the `data-rf-pos` (position on static cards) and `data-rf-match` (fade) rules.
-- **Every listing field is optional.** REA's GraphQL shape is undocumented. Read with optional chaining, degrade to empty, and add new paths to `PROBE_PATHS` so `reaFilter.probe()` reports them.
+- **Every listing field is optional.** REA's GraphQL shape is undocumented. Read with optional chaining, degrade to empty, and add new paths to `PROBE_PATHS` so `reaEnhancement.probe()` reports them.
 - **Be polite to REA.** Pages are fetched sequentially with a jittered delay and a hard page cap. Don't add parallel fetching or remove the cap; a bot check blocks the user, not us.
-- **Prefix every storage key with `rea-avail-filter/`.** localStorage is shared with REA; the prefix is how Settings measures and deletes only this script's data.
+- **Prefix every storage key with `rea-enhancement/`.** localStorage is shared with REA; the prefix is how Settings measures and deletes only this script's data.
 - **Escape everything rendered.** Listing text goes through `esc()`, URLs through `safeUrl()`, export cells through `safeCell()`.
 - **Bump `ROWS_VERSION`** when `toRow()` output changes shape, or cached rows from an old version will be read as the new one.
 - **Bump `@version`** in the userscript header whenever the script changes, and add a line to [CHANGELOG.md](CHANGELOG.md). Installs auto-update from `main` and Tampermonkey only pulls a higher version; CI fails a PR that changes the script without a bump. For a release users should hear about, update `WHATS_NEW` too (shown once after the update).
@@ -70,11 +70,11 @@ Put new logic above the guard where you can, and give it a unit test.
 
 ## Reporting REA format changes
 
-If a search fails or fields go blank, open an issue with the "REA data format changed" template and paste `reaFilter.selfcheck()` and `reaFilter.probe()` output from the DevTools console. That shows which paths still exist and which fields usually fill.
+If a search fails or fields go blank, open an issue with the "REA data format changed" template and paste `reaEnhancement.selfcheck()` and `reaEnhancement.probe()` output from the DevTools console. That shows which paths still exist and which fields usually fill.
 
 ### Shapes as regression tests
 
-`test/shapes/*.json` holds `reaFilter.shape()` output: the structure of one real listing with its words taken out. `test/shapes.test.js` rebuilds a listing from each (`listingFromShape()` in `test/helpers.js` fills in plausible values) and checks it still parses: an id and link, the fields in `expect.fill` read (names from `fillRates`: availability, price, inspections, coordinates, agency, features, listed, photos), and any values in `expect.row`.
+`test/shapes/*.json` holds `reaEnhancement.shape()` output: the structure of one real listing with its words taken out. `test/shapes.test.js` rebuilds a listing from each (`listingFromShape()` in `test/helpers.js` fills in plausible values) and checks it still parses: an id and link, the fields in `expect.fill` read (names from `fillRates`: availability, price, inspections, coordinates, agency, features, listed, photos), and any values in `expect.row`.
 
 When a drift report comes in, save its `shape()` output as `test/shapes/<date>-<what>.json`, add an `expect` block for what should be read, watch the test fail, then fix the parser. `npm run live` saves a fresh shape from a real search too.
 

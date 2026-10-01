@@ -1,14 +1,14 @@
 // ==UserScript==
-// @name         REA Availability Filter
+// @name         REA Enhancement
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
 // @version      2.36.5
-// @description  Rental Toolkit for realestate.com.au: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.
+// @description  Toolkits for realestate.com.au. Rental Toolkit: an available-from filter, every results page in one list, a shortlist across searches, inspection planning and exports. Runs entirely in your browser.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
 // @supportURL   https://github.com/cpwillis-pocs/rea-enhancement/issues
 // @license      MIT
-// @updateURL    https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js
-// @downloadURL  https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js
+// @updateURL    https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-enhancement.user.js
+// @downloadURL  https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-enhancement.user.js
 // @match        https://www.realestate.com.au/*
 // @run-at       document-idle
 // @grant        none
@@ -29,14 +29,14 @@
  * Loads on every REA page because REA can reach /rent/ via client-side navigation;
  * the UI only activates on /rent/ search pages.
  *
- * Console: reaFilter.probe() lists which listing fields exist in live data.
+ * Console: reaEnhancement.probe() lists which listing fields exist in live data.
  */
 
 (() => {
   'use strict';
 
   // Every storage key starts with this, so Settings can measure and delete only our data.
-  const TOOL_PREFIX = 'rea-avail-filter/';
+  const TOOL_PREFIX = 'rea-enhancement/';
   const CFG_KEY = `${TOOL_PREFIX}v1`;
   const IMG_SIZE = '345x260';
   const PEEK_SIZE = '800x600'; // photo peek: the same REA image at a larger size
@@ -1571,7 +1571,7 @@
 
   // Field discovery: when none of the known spellings exist, walk the listing (breadth-first,
   // bounded) for a key matching `keyRe` whose value passes `ok`. Returns { path, value } or
-  // null. This keeps features working if REA renames a field, and reaFilter.probe() reports
+  // null. This keeps features working if REA renames a field, and reaEnhancement.probe() reports
   // where each one was found.
   const DISCOVER_DEPTH = 4;
   const DISCOVER_NODES = 3000;
@@ -2125,7 +2125,7 @@
 
   // One malformed listing must not sink a page: rows that throw are dropped.
   const safeRow = (listing, surrounding) => {
-    try { return toRow(listing, surrounding); } catch (e) { console.debug?.('[reaFilter] listing skipped:', e); return null; }
+    try { return toRow(listing, surrounding); } catch (e) { console.debug?.('[reaEnhancement] listing skipped:', e); return null; }
   };
   // REA drift guard: `items` that isn't an array reads as empty rather than throwing.
   const itemsOf = (block) => (Array.isArray(block?.items) ? block.items : []);
@@ -2896,7 +2896,7 @@
   const REA_MISC = { 'pets-allowed': 'pets considered', furnished: 'furnished', 'ex-deposit-taken': 'no deposit taken' };
   const REA_MAX_COUNT = 6, REA_BEFORE_DAYS = 42; // REA's dropdowns: 6+ rooms, about six weeks of dates
   const REA_SEG = /^(?:property-(.+?)-)?(?:with-(studio|\d+)(?:-bedrooms?)?-)?(?:between-(any|\d+)-(any|\d+)-)?in-(.+)$/;
-  const reaFiltersOf = (href) => {
+  const reaEnhancementsOf = (href) => {
     let u, seg;
     try { u = new URL(href); seg = decodeURIComponent(u.pathname.split('/')[2] || ''); } catch { return null; }
     const m = /^\/rent\//.test(u.pathname) && seg.match(REA_SEG);
@@ -2951,7 +2951,7 @@
   // surrounding suburbs and taken listings. The rest of REA's own filters (amenities, keywords,
   // sort) are kept. Page 1, REA's tracking left off. null when the URL isn't a search this reads.
   const reaUrlFor = (href, cfg, now = new Date()) => {
-    const f = reaFiltersOf(href);
+    const f = reaEnhancementsOf(href);
     if (!f) return null;
     const c = { ...DEFAULT_CFG, ...cfg }, u = new URL(href);
     const lo = num(c.priceMin), hi = num(c.priceMax);
@@ -3720,7 +3720,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     return w;
   }
 
-  // Paths toRow() reads, for reaFilter.probe() in the console.
+  // Paths toRow() reads, for reaEnhancement.probe() in the console.
   const PROBE_PATHS = [
     'id', 'availableDate.display', 'price.display', 'bond.display', 'address.display.fullAddress', 'address.suburb',
     'generalFeatures.bedrooms.value', 'generalFeatures.bathrooms.value', 'generalFeatures.parkingSpaces.value',
@@ -3877,7 +3877,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   if (typeof window === 'undefined') {
     module.exports = {
-      reaFiltersOf, reaChips, reaUrlFor, sameReaSearch,
+      reaEnhancementsOf, reaChips, reaUrlFor, sameReaSearch,
       parseAvail, parsePrice, parseExchange, rowsFrom, extractResults, pageUrl, searchKey, isSearchPage, pageNum, toRow,
       fetchResults, fetchAllPages, sleep, planHtml, mapHtml, marketHtml, compareHtml, nextStop, PROBE_PATHS, classifyPage, backupSummary, mapLayout, trendPoint, trendText, evidenceOf, keywordEvidence, testCaseText, amenityTagItems, mergeCfg, backupCfg, WATCHOUTS, SNAP_ENTRY_BUDGET, pauseGate, sqmFromText, extractSqm, perSqm, PAUSE_MS, unpackJson, findListing, parseListingPage, discover, extractCoords, extractAgency, extractFeatures, extractMedia, listingId, dedupe, windowEnd, extractInspections, extractListed, toDate, applyFilters, filterRows, keywordTest, toTsv, toCsv, toIcs, printHtml, summaryText, inspectDays, parseFreeTimes, inspectFits, planDay, bestRoute, tzOf, textMatch, availFromText, needsAction, applyViaOf, applyByOf, leaseTermOf, leaseLabel, leaseCode, leaseFromCode, buildingKey, withBuildings, FILTER_KEYS, rowTests, without, leaseFit, fitLabel, checklistItems, checkSummary, parsePlaces, setDistances, worstKm, featSig, featDiff, enquiryText, HIDE_REASONS, agencyRecord, needsFollowUp, recordText, watchOf, watchTags, marketStats, searchLabel, incomePct, KEY_HELP, SETTINGS, settingsHtml, toolKeys, toolBytes, fmtBytes, encodeShare, decodeShare, shareUrl, shareFromHash, schemaWarnings, probe, esc, safeUrl, rowStore, marksStore, snapshotStore, presetStore, writeState, typeList, bigImg, shapeOf, amenityTags, resultsPath, healthStore, fillRates, APP_STATUSES, addressKey, DEFAULT_CFG, activeFilters, removedBy, withScores, cashToMove, vsNow, vsNowLabel, agencyDrops, negotiateFacts, inOrder, owedLabel, ecrToggle, ecrPrintHtml, askList, freeTimesText, byNext, sinceChanges, packPortals, applyReady, packState, packLabel, packToggle, movePlan, moveToggle, noticeBy, noticeDue, leaseEndOf, nextSteps, deadEnd, parseAnchor, haversineKm, AMENITIES, amenitiesOf, parseAmenCfg, amenCfgString, moveIn, withMedians, medianLabel, sanitizeCfg, itemsOf, sampleOf, cfgError, diffStats, ago, startOfDay, isFresh,
     };
@@ -3890,11 +3890,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
 
   // Double-run guard: a second copy (an installed and a dev copy, or a fork) would draw a second
   // drawer and fight over storage. The first one to load wins; the flag is set before any await.
-  if (window.__reaFilterLoaded || document.getElementById('rf-panel')) {
-    console.warn(`[reaFilter] another copy (${window.__reaFilterLoaded || 'unknown version'}) is already running on this page, so this one stops. Disable one of them in Tampermonkey.`);
+  if (window.__reaEnhancementLoaded || document.getElementById('rf-panel')) {
+    console.warn(`[reaEnhancement] another copy (${window.__reaEnhancementLoaded || 'unknown version'}) is already running on this page, so this one stops. Disable one of them in Tampermonkey.`);
     return;
   }
-  window.__reaFilterLoaded = (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev';
+  window.__reaEnhancementLoaded = (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev';
 
   // Clipboard with a fallback: the async API needs focus/permission, execCommand doesn't.
   async function copyText(text) {
@@ -3937,7 +3937,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const ics = toIcs(rows, Date.now(), { alarm: num(cfg.icsAlarm) || 0, ...(reminders ? { leaseEnd: cfg.periodic ? (cfg.noticeGiven ? leaseEndOf(cfg) : '') : cfg.leaseEnd, noticeDays: cfg.periodic ? 0 : num(cfg.noticeDays) || 0, noticeGiven: cfg.noticeGiven, followUps: true, move: movePlan(marks.shortlist(), cfg) } : {}),
       ...(track ? { prev: icsSent().getJson() || [], sent } : {}) });
     if (!ics) return setStatus('No upcoming inspection times or follow-ups in these listings.', true);
-    download(`rea-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
+    download(`rea-enhancement-inspections-${stamp()}.ics`, ics, 'text/calendar;charset=utf-8');
     if (track) icsSent().setJson(sent);
   }
 
@@ -3953,8 +3953,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   }
   const stamp = () => ymdLocal(new Date());
   // BOM so Excel opens UTF-8 (en dashes, accented suburbs) correctly.
-  const downloadCsv = (rows) => download(`rea-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
-  const downloadTsv = (rows) => download(`rea-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
+  const downloadCsv = (rows) => download(`rea-enhancement-${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv;charset=utf-8');
+  const downloadTsv = (rows) => download(`rea-enhancement-${stamp()}.tsv`, toTsv(rows), 'text/tab-separated-values;charset=utf-8');
 
   // #endregion
   // #region styles
@@ -4408,7 +4408,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const pool = () => (cfg.showGone && gone.length ? cache.concat(gone) : cache);
   const marks = marksStore(storageOr('localStorage'));
   const health = healthStore(storageOr('localStorage'));
-  const errorLog = []; // last few errors, for reaFilter.selfcheck()
+  const errorLog = []; // last few errors, for reaEnhancement.selfcheck()
   const logError = (msg) => { errorLog.push(`${new Date().toISOString()} ${String(msg).slice(0, 200)}`); if (errorLog.length > 10) errorLog.shift(); };
   // Errors in event handlers and observers (card badges, keys, the listing bar, other tabs)
   // otherwise only reach the console: log them for selfcheck(), and after ERROR_WARN_N in a
@@ -4416,7 +4416,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const ERROR_WARN_N = 3, ERROR_WARN_MS = 60000;
   const recentErrors = [];
   const noteError = (name, e) => {
-    console.warn(`[reaFilter] ${name}:`, e);
+    console.warn(`[reaEnhancement] ${name}:`, e);
     logError(`${name}: ${e?.message || e}`);
     const t = Date.now();
     recentErrors.push(t);
@@ -4865,7 +4865,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     data.presets = presets.exportData();
     if (cfg.remember) data.snapshots = snaps.exportData();
     data.cfg = backupCfg(cfg);
-    download(`rea-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
+    download(`rea-enhancement-backup-${stamp()}.json`, JSON.stringify(data), 'application/json');
     backupAt.set(String(Date.now()));
     setWarn('backup', '');
     ui.paintStorage?.();
@@ -5654,7 +5654,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     wirePeek(panel);
     for (const b of panel.querySelectorAll('[data-report]')) b.addEventListener('click', async () => {
       const ok = await copyText(reportText());
-      setStatus(ok ? 'Report copied: paste it into an issue ("REA data format changed"). It has no listing text, names or addresses.' : 'Clipboard blocked - run reaFilter.selfcheck() in the console instead.', !ok);
+      setStatus(ok ? 'Report copied: paste it into an issue ("REA data format changed"). It has no listing text, names or addresses.' : 'Clipboard blocked - run reaEnhancement.selfcheck() in the console instead.', !ok);
     });
     ui.warnbar.querySelector('.rf-warn-x').addEventListener('click', () => { ui.warnDismissed = ui.warnbar.querySelector('.rf-warn-msg').textContent; ui.warnbar.hidden = true; });
     // Next chunk loads as the "Show more" button nears view (the button stays for keyboard use).
@@ -6447,7 +6447,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // REA's own filters for this search (docs/REA-SEARCH-URLS.md): marked where REA leaves out
   // listings your filters here would keep, and a way to put yours on REA's search instead.
   function paintRea() {
-    const f = reaFiltersOf(location.href), chips = reaChips(f, cfg);
+    const f = reaEnhancementsOf(location.href), chips = reaChips(f, cfg);
     const to = f ? reaUrlFor(location.href, cfg) : null;
     ui.reaTo = to && !sameReaSearch(to, location.href) ? to : null;
     ui.reaApply.hidden = !ui.reaTo;
@@ -7530,7 +7530,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     try {
       const res = await getPage(pageUrl(href, n));
       if (!learnedPages.has(res)) { learnedPages.add(res); learn(rowsFrom(res)); } // a page served again from pageMemo: already in
-    } catch (e) { console.debug?.('[reaFilter] annotate fetch failed:', e); return; }
+    } catch (e) { console.debug?.('[reaEnhancement] annotate fetch failed:', e); return; }
     if (location.href === href) scheduleAnnotate();
   }
   const learnedPages = new WeakSet(); // results objects ensureVisiblePage has taken in
@@ -7604,7 +7604,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     });
   }
 
-  // Console helpers: reaFilter.probe() shows which listing fields exist in live data.
+  // Console helpers: reaEnhancement.probe() shows which listing fields exist in live data.
   // Copyable diagnostics for a bug report: no listing text, no search terms beyond the path.
   const selfcheckText = () => {
     // Before any search, page 1's own data stands in, so the fill rates aren't all 0%.
@@ -7612,7 +7612,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const rows = cache || (early ? rowsFrom(boot.results) : []);
     const rates = fillRates(rows), usual = health.usual();
     const report = [
-      `rea-enhancement ${window.reaFilter.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${early ? ' (page 1 only: no search run yet)' : truncated ? ' (truncated)' : ''}`,
+      `rea-enhancement ${window.reaEnhancement.version}`, `page: ${location.pathname}`, `rows: ${rows.length}${early ? ' (page 1 only: no search run yet)' : truncated ? ' (truncated)' : ''}`,
       `fields (this search / usual): ${Object.keys(HEALTH_FIELDS).map((k) => `${k} ${pct(rates[k])}/${usual.ema[k] == null ? '?' : pct(usual.ema[k])}`).join(', ')}`,
       `cards: ${cardInfo.found} found (${cardInfo.mode === 'fallback' ? 'fallback: REA no longer uses <article>' : cardInfo.mode})`,
       `results path: ${resultsPath.key ? `${resultsPath.key}.${resultsPath.field}${resultsPath.fallback ? ' (fallback: REA renamed it)' : ''}` : 'not read yet'}`,
@@ -7627,11 +7627,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const shapeText = () => {
     const onListing = isListingPage(location.href) && rawListingSample;
     const l = onListing ? rawListingSample : rawSample;
-    return l ? JSON.stringify({ script: window.reaFilter.version, kind: onListing ? 'listing' : 'search', ...(onListing ? {} : { resultsPath: `${resultsPath.key}.${resultsPath.field}` }), listing: shapeOf(l) }, null, 1) : '';
+    return l ? JSON.stringify({ script: window.reaEnhancement.version, kind: onListing ? 'listing' : 'search', ...(onListing ? {} : { resultsPath: `${resultsPath.key}.${resultsPath.field}` }), listing: shapeOf(l) }, null, 1) : '';
   };
   // Both, for the Copy report buttons: what an "REA data format changed" issue asks for.
   const reportText = () => [selfcheckText(), shapeText()].filter(Boolean).join('\n\nlisting shape:\n');
-  window.reaFilter = {
+  window.reaEnhancement = {
     version: (typeof GM_info !== 'undefined' && GM_info.script?.version) || 'dev',
     rows: () => cache,
     marks: () => marks.counts(),
@@ -7665,7 +7665,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // #region startup
   // Each step isolated: a failure in one (eg REA drift) must not take the others down.
   const step = (name, fn) => {
-    const fail = (e) => { console.warn(`[reaFilter] ${name}:`, e); logError(`${name}: ${e?.message || e}`); };
+    const fail = (e) => { console.warn(`[reaEnhancement] ${name}:`, e); logError(`${name}: ${e?.message || e}`); };
     try { const r = fn(); if (r?.catch) r.catch(fail); } catch (e) { fail(e); }
   };
   // REA pages that aren't a rent search, a listing or a share link (home, buy, agents) only get a

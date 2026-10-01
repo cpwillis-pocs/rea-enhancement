@@ -1,5 +1,5 @@
 'use strict';
-// Every test/shapes/*.json (reaFilter.shape() output, from an issue or `npm run live`) must still
+// Every test/shapes/*.json (reaEnhancement.shape() output, from an issue or `npm run live`) must still
 // parse: a listing rebuilt from the shape gives a row with an id and link, fills the fields its
 // `expect.fill` lists, and matches `expect.row`. A drift report becomes a failing test here first.
 const test = require('node:test');
@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 require('./clock');
-const core = require('../rea-availability-filter.user.js');
+const core = require('../rea-enhancement.user.js');
 const { results, listingFromShape, shapeDiff } = require('./helpers');
 
 const DIR = path.join(__dirname, 'shapes');
@@ -18,7 +18,7 @@ test('shapes: there is at least one', () => assert.ok(files.length > 0));
 for (const f of files) {
   test(`shape ${f}`, () => {
     const shape = JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8'));
-    assert.ok(shape.listing && typeof shape.listing === 'object', 'has a "listing" (paste the whole reaFilter.shape() output)');
+    assert.ok(shape.listing && typeof shape.listing === 'object', 'has a "listing" (paste the whole reaEnhancement.shape() output)');
     const listing = listingFromShape(shape.listing);
     const [row] = core.rowsFrom(results({ exact: [listing] }));
     assert.ok(row, 'parses to a row');

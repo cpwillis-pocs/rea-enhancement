@@ -6,7 +6,7 @@ const path = require('path');
 
 const root = process.env.LINT_ROOT ? path.resolve(process.env.LINT_ROOT) : path.join(__dirname, '..');
 const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
-const FILE = 'rea-availability-filter.user.js';
+const FILE = 'rea-enhancement.user.js';
 const src = read(FILE);
 const errors = [], warnings = [];
 const err = (msg, line) => errors.push(line ? `${FILE}:${line}: ${msg}` : msg);
@@ -114,8 +114,8 @@ for (const m of body.matchAll(/\b(?:XMLHttpRequest|WebSocket|EventSource|navigat
   err(`${m[0]} is not used by this script (fetch to REA only)`, lineOf(bodyStart + m.index));
 
 // 4. Storage keys are built from TOOL_PREFIX (Settings measures/deletes by prefix), never literals.
-const literals = [...body.matchAll(/'rea-avail-filter\/[^']*'/g)];
-if (literals.length !== 1 || !/const TOOL_PREFIX = 'rea-avail-filter\/';/.test(body))
+const literals = [...body.matchAll(/'rea-enhancement\/[^']*'/g)];
+if (literals.length !== 1 || !/const TOOL_PREFIX = 'rea-enhancement\/';/.test(body))
   for (const m of literals.slice(1)) err(`storage key literal ${m[0]}: build it from TOOL_PREFIX`, lineOf(bodyStart + m.index));
 for (const m of body.matchAll(/\bindexedDB\.(?:open|deleteDatabase)\(\s*['"`]/g))
   err('IndexedDB opened by a literal name: use a constant built from TOOL_PREFIX', lineOf(bodyStart + m.index));

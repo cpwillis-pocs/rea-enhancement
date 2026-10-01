@@ -218,7 +218,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          f=rea-availability-filter.user.js
+          f=rea-enhancement.user.js
           if git diff --quiet "$BASE" HEAD -- "$f"; then echo "script unchanged"; exit 0; fi
           ver() { sed -n 's#^// @version *##p' | head -1; }
           old=$(git show "$BASE:$f" | ver); new=$(ver < "$f")

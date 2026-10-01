@@ -45,7 +45,7 @@ const memStorage = (quota = Infinity) => {
   };
 };
 
-// Turns reaFilter.shape() output back into a listing parseRows can read: placeholders become
+// Turns reaEnhancement.shape() output back into a listing parseRows can read: placeholders become
 // plausible values (kept strings such as "$750 per week" stay as they are), so a drift report
 // pasted into test/shapes/ becomes a parsing test. Values are made up; only the structure is REA's.
 const SHAPE_NUM = { latitude: -33.8915, longitude: 151.2767, lat: -33.8915, lng: 151.2767, lon: 151.2767 };
@@ -76,7 +76,7 @@ const shapePaths = (v, pre = '', out = new Map()) => {
   out.set(pre, typeof v === 'string' ? v.replace(/^string\(\d+\)$/, 'string').replace(/^(?!url$|iso-date$|number$|boolean$|string$).*/, 'text') : String(v));
   return out;
 };
-// Two reaFilter.shape() listings compared: paths added, removed, or holding another kind of value.
+// Two reaEnhancement.shape() listings compared: paths added, removed, or holding another kind of value.
 const shapeDiff = (a, b) => {
   const pa = shapePaths(a), pb = shapePaths(b);
   return {

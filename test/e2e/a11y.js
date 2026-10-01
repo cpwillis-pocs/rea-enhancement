@@ -14,7 +14,7 @@ try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm
 let AXE;
 try { AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8'); } catch { console.error('a11y: axe-core missing: run npm run e2e:setup'); process.exit(2); }
 
-const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-availability-filter.user.js'), 'utf8');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '../../rea-enhancement.user.js'), 'utf8');
 const SEARCH = `${ORIGIN}/rent/in-bondi,+nsw+2026/list-1`;
 const FIXED = new Date('2026-09-23T10:00:00+10:00');
 const BLOCKING = new Set(['serious', 'critical']);
