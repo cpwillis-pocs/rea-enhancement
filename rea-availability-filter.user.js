@@ -3599,6 +3599,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ['e', 'expand / shrink the drawer', ['e']], ['f', 'back to the filters', ['f']], ['d', 'compact list on/off', ['d']], ['?', 'this help', ['?']],
     ['Esc', 'close', ['Escape']], ['Alt+Shift+F', 'open / close from anywhere on REA', []],
   ];
+  // Plain links shown in the help panel; the script never fetches them (lint allows exactly these).
+  const ABOUT_LINKS = [
+    ['Source', 'https://github.com/cpwillis-pocs/rea-enhancement'], ['Terms', 'https://cpwillis.dev/terms'], ['Privacy', 'https://cpwillis.dev/privacy'],
+  ];
   // `total`: listings on the list (to say when only some are compared); `picked`: ticked ones.
   function compareHtml(rows, cfg, { total = rows.length, picked = false } = {}) {
     const best = (score) => {
@@ -3768,6 +3772,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   .rf-help dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 0}
   .rf-help dt{font:600 11px ui-monospace,monospace;color:var(--rf-fg)}
   .rf-help dd{margin:0;color:var(--rf-muted)}
+  .rf-about{margin:8px 0 0;color:var(--rf-muted)} .rf-about a{color:inherit;text-decoration:underline}
   .rf-item:focus{outline:2px solid var(--rf-accent-fg);outline-offset:-2px;border-radius:8px}
   .rf-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--rf-muted);padding:0 4px}
   .rf-controls{padding:12px 16px;border-bottom:1px solid var(--rf-line);display:grid;grid-template-columns:minmax(0,1fr);gap:10px;overflow-x:hidden;max-height:60vh;overflow-y:auto}
@@ -4333,6 +4338,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     <div class="rf-help" id="rf-help" hidden>
       <strong>Keyboard</strong>
       <dl>${KEY_HELP.map(([k, what]) => `<dt>${esc(k)}</dt><dd>${esc(what)}</dd>`).join('')}</dl>
+      <p class="rf-about">rea-enhancement: ${ABOUT_LINKS.map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`).join(' · ')}. Provided as is, without warranty or support; how you use it is up to you.</p>
     </div>
     <div class="rf-peek" hidden role="dialog" aria-label="Photo"><img alt=""><div class="rf-peek-cap"></div></div>
     <div class="rf-status" role="status" aria-live="polite"></div>

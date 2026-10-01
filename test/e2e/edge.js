@@ -537,6 +537,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.keyboard.press('?');
     assert.equal(await page.$eval('.rf-help', (h) => h.hidden), false);
     assert.ok((await page.$$eval('.rf-help dt', (d) => d.map((x) => x.textContent))).includes('Alt+Shift+F'), 'help drawn from KEY_HELP');
+    assert.deepEqual(await page.$$eval('.rf-about a', (a) => a.map((x) => `${x.textContent} ${x.href} ${x.rel}`)), ['Source https://github.com/cpwillis-pocs/rea-enhancement noopener noreferrer', 'Terms https://cpwillis.dev/terms noopener noreferrer', 'Privacy https://cpwillis.dev/privacy noopener noreferrer'], 'source, terms and privacy linked');
     await page.keyboard.press('Escape');
     assert.equal(await page.$eval('.rf-help', (h) => h.hidden), true, 'Esc closes help first');
     await page.focus('.rf-list');

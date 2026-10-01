@@ -2,11 +2,13 @@
 
 ## Reporting a vulnerability
 
-Report privately through GitHub's **Report a vulnerability** button on the repository's Security tab (private vulnerability reporting). Please don't open a public issue for a security problem. Expect a reply within a week; fixes ship as a new `@version`, which Tampermonkey installs pick up automatically.
+Report privately through GitHub's **Report a vulnerability** button on the repository's Security tab (private vulnerability reporting). Please don't open a public issue for a security problem.
 
-## Supported versions
+Reports are read on a best-effort basis. There is no guaranteed response, timeframe or fix, and no support commitment of any kind; the script is provided as is, and its use is your responsibility (see the [terms](https://cpwillis.dev/terms) and [privacy policy](https://cpwillis.dev/privacy)). If a fix is made, it ships as a new `@version`, which Tampermonkey installs pick up automatically.
 
-Only the latest version on `main`. Installs auto-update from the raw file, so there are no maintained older branches.
+## Versions
+
+Only the latest version on `main` is considered. Installs auto-update from the raw file; there are no maintained older branches.
 
 ## What is in scope
 
@@ -20,7 +22,7 @@ The script runs with `@grant none` on `realestate.com.au`, inside the page's own
 | CSV / TSV export opened in a spreadsheet | Cells starting with `=`, `+`, `@`, tab, CR or a non-numeric `-` are prefixed with `'` so they aren't run as formulas | `safeCell` |
 | Calendar export | Text escaped and folded per RFC 5545; URLs pass `safeUrl` so no CR/LF can inject properties | `icsText`, `safeUrl` |
 
-The lint (`test/lint.js`) also fails the build on `eval`/`new Function`, string timers, WebSockets, any URL outside `realestate.com.au`, and storage keys outside the script's prefix.
+The lint (`test/lint.js`) also fails the build on `eval`/`new Function`, string timers, WebSockets, any URL outside `realestate.com.au` (bar the three plain links in the help panel: source, terms, privacy), and storage keys outside the script's prefix.
 
 Examples of a valid report: markup or script injection from listing text, a share link or a backup; a spreadsheet formula surviving export; a way to make the script send data anywhere but REA; storage written outside `rea-avail-filter/`.
 

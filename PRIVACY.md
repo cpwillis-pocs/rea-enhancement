@@ -1,5 +1,7 @@
 # Privacy
 
+This page describes what the script itself does with data. The [privacy policy](https://cpwillis.dev/privacy) and [terms](https://cpwillis.dev/terms) also apply.
+
 The script has no server, no analytics and no third-party requests. It talks only to `www.realestate.com.au`, and only to read the same result pages your browser would load if you clicked through them.
 
 ## What it stores, and where

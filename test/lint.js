@@ -104,9 +104,11 @@ if (engines !== '>=20') warnings.push(`package.json engines.node is "${engines}"
 const body = src.slice(header ? header.index + header[0].length : 0);
 const bodyStart = src.length - body.length;
 const ALLOWED = /^https:\/\/(?:[\w-]+\.)*(?:realestate\.com\.au|reastatic\.net)(?:[/:?#]|$)/;
+// The help panel's plain links (source, terms, privacy): exact URLs only, never fetched.
+const ABOUT = new Set(['https://github.com/cpwillis-pocs/rea-enhancement', 'https://cpwillis.dev/terms', 'https://cpwillis.dev/privacy']);
 for (const m of body.matchAll(/https?:\/\/[^\s'"`)<>\\]+/g)) {
   const url = m[0].replace(/[.,;]+$/, '');
-  if (!ALLOWED.test(url) && !/^https?:\/\/\$\{/.test(url)) err(`URL outside realestate.com.au: ${url}`, lineOf(bodyStart + m.index));
+  if (!ALLOWED.test(url) && !ABOUT.has(url) && !/^https?:\/\/\$\{/.test(url)) err(`URL outside realestate.com.au: ${url}`, lineOf(bodyStart + m.index));
 }
 for (const m of body.matchAll(/\b(?:XMLHttpRequest|WebSocket|EventSource|navigator\.sendBeacon|importScripts)\b/g))
   err(`${m[0]} is not used by this script (fetch to REA only)`, lineOf(bodyStart + m.index));
