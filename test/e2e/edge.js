@@ -2630,6 +2630,21 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await other.close(); await done(page); await ctx.close();
   });
 
+  // 74. Back to the Results tab with the same filters: the listings' nodes come back as they were
+  // (no re-parse), at the same place.
+  await block('74', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    await page.evaluate(() => { for (const el of document.querySelectorAll('.rf-item')) el._old = 1; });
+    await page.click('[data-view=shortlist]');
+    await page.click('[data-view=results]');
+    assert.equal(await count(page), 18);
+    assert.ok(await page.$$eval('.rf-item', (e) => e.every((x) => x._old)), 'same nodes');
+    console.log('tab switch keeps nodes: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);

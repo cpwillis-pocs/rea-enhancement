@@ -5735,9 +5735,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function setView(view) {
     ui.closePeek?.();
     const place = (ui.place ||= {});
-    if (ui.view && ui.view !== view) place[ui.view] = { top: listScroller().scrollTop, shown: listItems().length, sig: placeSig(ui.view) };
+    // The tab left keeps its nodes: coming back to the same list, they go back in and the redraw's
+    // keyed diff reuses them instead of parsing every listing's markup again.
+    const kept = (ui.viewNodes ||= {});
+    if (ui.view && ui.view !== view) { place[ui.view] = { top: listScroller().scrollTop, shown: listItems().length, sig: placeSig(ui.view) }; kept[ui.view] = [...ui.list.childNodes]; }
     const back = place[view]?.sig === placeSig(view) ? place[view] : null;
-    if (back) ui.keepShown = back.shown;
+    if (back) { ui.keepShown = back.shown; if (kept[view]) ui.list.replaceChildren(...kept[view]); }
+    delete kept[view];
     ui.view = view;
     for (const t of ui.tabs) { const on = t.dataset.view === view; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; }
     ui.list.setAttribute('aria-labelledby', `rf-tab-${view}`);
