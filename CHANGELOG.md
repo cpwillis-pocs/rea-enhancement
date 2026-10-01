@@ -2,6 +2,12 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.2
+
+- **On REA's search:** the filters set on REA itself (type, rent, rooms, dates, surrounding suburbs, pets, features) show above the toolkit's, in orange where they leave out listings your filters here would keep.
+- **Use my filters on REA** opens REA's search with your rent, rooms, type, available-to, surrounding-suburb and taken filters (rent widened to REA's steps, so nothing you'd keep is lost), so REA has fewer pages to read and big searches aren't cut off at 20 pages. REA's own amenities, keywords and sort stay as they are.
+- Fixed: a search reached through REA's Filters dialog counted as a different search from the same one reached by a link (REA's tracking fields were part of it), so it had its own cache, remembered results and preset. Saved searches and presets from before are merged.
+
 ## 2.36.1
 
 - **Now called Rental Toolkit:** the launcher and drawer have a clearer name (it was Availability Filter). The script installs and updates as before.
