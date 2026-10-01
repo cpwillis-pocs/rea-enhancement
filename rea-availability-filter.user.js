@@ -4603,7 +4603,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     // up) mean the difference is yours, not a loss. Only an emptied or older store is offered it.
     // (A store made after the copy, ie storage cleared and then a new star, is still a loss.)
     const ownChange = marks.createdAt() && marks.createdAt() < (rec?.at || 0) && marks.writtenAt() > (rec?.at || 0);
-    if (!lost || ownChange) { if (mirrorHeld) releaseMirror(); return; }
+    if (!lost || ownChange) { if (mirrorHeld) releaseMirror(rec); return; }
     mirrorHeld = true;
     if (!isSearchPage(location.href) || !ui.offerRestore) return; // the offer lives in the drawer: the next search page asks
     ui.offerRestore(rec.data, `${mirrorWeight(here) ? 'Some of your shortlist in this browser has' : 'Your shortlist in this browser has'} gone (its storage was cleared). A safety copy from ${ago(Date.now() - rec.at)} has`);
@@ -4613,7 +4613,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     restoreIn.querySelector('[data-restore=no]').textContent = 'Discard copy';
     restoreIn.querySelector('[data-restore=later]').hidden = false;
   };
-  const releaseMirror = () => { mirrorHeld = false; mirrorSoon(); };
+  // The copy already holds what's here (nothing chosen since it, the same presets and settings):
+  // not written again on every page view.
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const releaseMirror = (rec = null) => {
+    mirrorHeld = false;
+    if (rec && marks.writtenAt() <= rec.at && same(rec.data?.presets, presets.exportData()) && same(rec.data?.cfg, backupCfg(cfg))) { clearTimeout(mirrorTimer); mirrorTimer = 0; return; }
+    mirrorSoon();
+  };
   const dropMirror = () => idbDo('readwrite', (st) => st.delete('copy')).catch(() => {});
 
 
