@@ -6387,7 +6387,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const moreBtn = () => { const el = ui.list.lastElementChild; return el?.classList.contains('rf-more-btn') ? el : null; };
   // Position in the list is set here, after the markup lands, so an item's markup doesn't change
   // when one above it goes (and the keyed paint can keep its node).
-  const numberItems = (total) => listItems().forEach((el, i) => {
+  // `from`: items above it are already numbered for this total (a chunk added below them).
+  const numberItems = (total, from = 0) => listItems().forEach((el, i) => {
+    if (i < from) return;
     const pos = String(i + 1), set = String(total);
     if (el.getAttribute('aria-posinset') !== pos) el.setAttribute('aria-posinset', pos);
     if (el.getAttribute('aria-setsize') !== set) el.setAttribute('aria-setsize', set);
@@ -6396,12 +6398,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   });
   function renderMore() {
     const shown = listItems().length;
-    ui.list.querySelector('.rf-more-btn')?.remove();
+    moreBtn()?.remove();
     const parts = itemParts(ui.rows.slice(shown, shown + RENDER_CHUNK));
     ui.list.insertAdjacentHTML('beforeend', parts.map((p) => p.html).join('') + moreHtml(ui.rows.length - shown - RENDER_CHUNK));
     const els = listItems();
     parts.forEach((p, i) => { if (els[shown + i]) els[shown + i]._rf = p; });
-    numberItems(ui.rows.length);
+    numberItems(ui.rows.length, ui.lastPaintTotal === ui.rows.length ? shown : 0);
   }
 
   // Money facts in one line: move-in (bond flag), lease overlap/gap, vs your rent now, share of income, vs median.
