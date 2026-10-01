@@ -5295,6 +5295,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (!open) ui.closePeek?.();
       panel.hidden = !open;
       if (open && ui.savedStale) renderSaved();
+      if (open && ui.listStale) { const note = ui.listStale; ui.listStale = false; if (cache) inPlace(() => showResults(note === true ? '' : note)); }
       launch.setAttribute('aria-expanded', String(open));
       panel.setAttribute('aria-modal', String(open && narrow.matches));
       setInert(open && narrow.matches);
@@ -6187,6 +6188,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   function showResults(note = '') {
     if (ui.view === 'shortlist') return renderShortlist(); // its fit, cash and nudges follow the settings too
     const err = cfgError(cfg);
+    // Drawer closed (a star on REA's card, another tab's change, the restore at load): only the
+    // launcher's count is seen, so the list is drawn when the drawer opens (setOpen).
+    if (ui.panel.hidden) { ui.rows = err ? [] : applyFilters(pool(), cfg); setLaunchCount(ui.rows.length); ui.listStale = note || ui.listStale || true; return; }
     if (err) { render([]); return setStatus(err, true); }
     const rows = applyFilters(pool(), cfg);
     render(rows);

@@ -2585,6 +2585,26 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await done(page); await ctx.close();
   });
 
+  // 72. With the drawer closed, a star on REA's card updates the launcher, not the hidden list;
+  // opening the drawer draws it.
+  await block('72', async () => {
+    const ctx = await browser.newContext();
+    const page = await open(ctx);
+    await run(page);
+    await page.click('.rf-x');
+    await page.evaluate(() => { for (const el of document.querySelectorAll('.rf-item')) el._old = 1; });
+    const id = await page.$eval('article > .rf-badge [data-card-act=s]', (b) => b.dataset.id);
+    await page.click(`article > .rf-badge [data-card-act=s][data-id="${id}"]`);
+    await page.waitForFunction((i) => document.querySelector(`[data-card-act=s][data-id="${i}"]`)?.getAttribute('aria-pressed') === 'true', id);
+    assert.match(await page.textContent('#rf-launch'), /★1/, 'the launcher counts it');
+    assert.ok(await page.$$eval('.rf-item', (e) => e.every((x) => x._old)), 'the closed drawer was not redrawn');
+    await page.click('#rf-launch');
+    assert.ok(await page.$(`.rf-item.rf-starred[data-id="${id}"]`), 'drawn starred on opening');
+    await waitStatus(page, /listings match/);
+    console.log('closed drawer drawn on opening: ok');
+    await done(page); await ctx.close();
+  });
+
   await drain();
   console.log(`slowest blocks: ${times.sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id, ms]) => `${id} ${(ms / 1000).toFixed(1)}s`).join(', ')}`);
   if (flaky.length) console.log(`flaky (failed, then passed on the retry): ${flaky.join(', ')}`);

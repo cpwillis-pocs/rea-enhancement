@@ -226,10 +226,12 @@ const html = (n) => {
   const before = hits.length;
   await page.reload();
   await page.addScriptTag({ content: SCRIPT });
+  await page.waitForSelector('#rf-panel[data-rf-ready]', { state: 'attached', timeout: 5000 });
+  assert.match(await page.textContent('#rf-launch'), /\(\d+\)/, 'restored while closed: the launcher has its count');
+  await page.click('#rf-launch'); // the list (and its "Cached" note) is drawn on opening
   await page.waitForFunction(() => /Cached/.test(document.querySelector('.rf-status')?.textContent || ''), null, { timeout: 5000 });
   assert.equal(hits.length, before + 1, 'only the reloaded document itself was fetched');
 
-  await page.click('#rf-launch');
   await page.keyboard.press('Escape');
   assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), true);
   assert.equal(await page.getAttribute('#rf-launch', 'aria-expanded'), 'false');
