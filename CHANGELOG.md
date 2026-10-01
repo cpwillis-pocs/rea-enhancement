@@ -2,6 +2,29 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.35.3
+
+- **Searches survive browsing:** opening a listing through REA's own navigation no longer throws away a running search, Re-check or Check all.
+- **Print works:** Print and Print the checklist now open the print dialog. Chromium never fired load for the printout, so it now waits for the photos (at most 2 s) and prints.
+- **Keyboard focus stays in the drawer:**
+  - When its control goes: a removed filter chip, a note saved or cancelled, Undo, an offer's buttons, a banner's ×.
+  - When the drawer is reopened on a phone or on the Shortlist.
+  - So Esc and the shortcuts keep working. Esc in the Shortlist search clears it before closing the drawer.
+- Fixed:
+  - Adding an earlier inspection made a later one look cancelled, and took it out of the calendar.
+  - An old deadline with no year was rolled ten months ahead.
+  - A restored remembered search could put a non-date into a calendar file or a bogus taken code on a row, and lost its trimmed-text mark.
+  - Remembered searches kept only 3 sessions per listing; they now keep 12.
+  - A yearless availability date that rolled over showed as "available later".
+  - My inspection times didn't read en dashes or "to", including what `{mytimes}` writes.
+  - "per mth", "month" and "fortnight" rents weren't read.
+  - "1-2 year" and "6/12 month" leases weren't read.
+  - A Google Maps link in Places was labelled "https".
+  - "Available on 12.11.2026" wasn't read.
+  - Another tab's change broke a note you were typing.
+  - High Contrast didn't show the open tab, or which listings were shortlisted or approved.
+  - The copied report could keep more street types and 8-digit landlines.
+
 ## 2.35.2
 
 - **Keyboard-safe menus**: Presets and Bulk act only on the item you choose. Moving through them with the arrow keys or type-ahead waits for Enter (Esc leaves them), and deleting a preset asks first.
