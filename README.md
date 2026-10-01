@@ -1,22 +1,36 @@
 # rea-enhancement
 
-Tampermonkey userscript that adds what [realestate.com.au](https://www.realestate.com.au/) rental search is missing: an **available-from** date filter, sort by availability, every results page merged into one list, extra filters, on-card availability badges, a shortlist, and CSV export.
-
-REA has an `availableBefore=` ceiling but no floor, no availability sort and no cross-page view. The data is already in every results page (the SSR hydration blob, `window.ArgonautExchange`), so the script reads it and does the rest in your browser.
+Tampermonkey userscript for [realestate.com.au](https://www.realestate.com.au/) rentals: an **available-from** filter, every results page in one sortable list, a shortlist across searches, and exports. Runs entirely in your browser.
 
 ![Drawer with merged, date-filtered results](docs/screenshots/drawer.jpg)
 
-Everything stays local: no account, no telemetry, no third-party requests. The only network traffic is to realestate.com.au, the same pages you'd load by clicking through the results yourself.
+## TL;DR
+
+- **Filter what REA can't**: available from/to, move-in cost, cash to move, floor size, 19 amenities, heads-up clauses, distance to your places, inspection times you can make.
+- **One list, every page**: results from every page of the search merged and sortable, shown as each page arrives.
+- **Shortlist**: star listings from any search, add notes, application status and ratings; Compare, plan an inspection day, share or print.
+- **On REA's own cards**: availability, inspection and price badges, plus star and hide buttons.
+- **Market and map views**: rent spread per bed count, agency patterns, listings on a map.
+- **Exports**: CSV, TSV, clipboard, calendar (.ics) with inspections and reminders.
+- **Private**: no account, no telemetry; the only requests go to realestate.com.au, one page at a time.
 
 ## Install
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) in Chrome (Firefox/Edge also work).
-2. Click **[install the script](https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js)**. Tampermonkey opens its install page; confirm.
-3. Open any `realestate.com.au/rent/...` search and click **Availability Filter** at the bottom right.
+1. Install [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Firefox, Edge).
+2. **[Install the script](https://raw.githubusercontent.com/cpwillis-pocs/rea-enhancement/main/rea-availability-filter.user.js)** and confirm.
+3. Open any `realestate.com.au/rent/...` search and click **Availability Filter** (bottom right).
 
-Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and installs any newer `@version`. To update now, Tampermonkey dashboard -> **Utilities** -> **Check for userscript updates**.
+Updates install automatically when `@version` goes up.
 
-## Features
+## Screens
+
+<p><img src="docs/screenshots/badges.jpg" width="49%" alt="Badges on REA's result cards"> <img src="docs/screenshots/shortlist-tab.jpg" width="49%" alt="The Shortlist tab across searches"></p>
+<p><img src="docs/screenshots/market.jpg" width="49%" alt="Market view"> <img src="docs/screenshots/map.jpg" width="49%" alt="Map view"></p>
+<p><img src="docs/screenshots/compare.jpg" width="49%" alt="Compare shortlisted listings"> <img src="docs/screenshots/listing-bar.jpg" width="49%" alt="The bar on a listing page"></p>
+<p><img src="docs/screenshots/drawer-dark.jpg" width="64%" alt="Dark mode"> <img src="docs/screenshots/mobile.jpg" width="24%" alt="Mobile width"></p>
+
+<details>
+<summary><strong>Full feature list</strong></summary>
 
 **Filter and sort across every page**
 - Available from / to, or a rolling window (within 2/4/8/12 weeks) that stays current as a saved setting. Handles "Available now", `12 Oct 2026`, `Mon 12th Oct` (year inferred), `October 12`, `1st of December`, `12/10/2026`. Past dates count as available now.
@@ -57,16 +71,10 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **Keyboard**: j/k move, g/G or Home/End first/last, PgUp/PgDn by 5, s shortlist, h hide, u undo, n note, c copy summary, r reviewed, p photo, x tick for Compare, 1–5 application status, Shift+1–5 your rating, o or Enter open, t Results/Shortlist, m market view, v map, f filters, d compact, e expand, / keywords, ? help, Esc close; Alt+Shift+F toggles the drawer.
 - Walks every results page of the current search (max 20), dedupes, and says when a search is too broad to read fully.
 
-![Filters, amenity chips and active-filter chips](docs/screenshots/filters.jpg)
-
 **On REA's own result cards**
 - Badges: availability, next inspection, $/bed, distance, pets, shortlisted, new, price changed.
 - **Star** and **Hide** buttons right on each card.
 - Cards that don't match your filters fade out; hover to bring one back.
-
-![Badges on REA's result cards](docs/screenshots/badges.jpg)
-
-![Cards that don't match faded out](docs/screenshots/dimmed.jpg)
 
 **Shortlist, hide, new, price changes**
 - Star a listing to shortlist it, or hide one you've ruled out. Both persist in your browser.
@@ -90,30 +98,17 @@ Updates are automatic: Tampermonkey checks `@updateURL` (the file on `main`) and
 - **On a listing page**, a small bar lets you shortlist, set status, note or hide that listing directly; for a shortlisted one it also has your inspection checklist, your rating, the key facts and the **next stop** (the next shortlisted inspection today, how far, when to leave).
 - Price changes show "was $X" (hover for the full history). Availability date changes show the same way, and **Price or date changed recently** filters to them. A listing relisted at the same address under a new id is tagged **relisted** with its old price, and stays hidden if you'd hidden it.
 
-![Shortlist and price-change tags](docs/screenshots/shortlist.jpg)
-
-![The Shortlist tab across searches](docs/screenshots/shortlist-tab.jpg)
-
-![The bar on a listing page](docs/screenshots/listing-bar.jpg)
-
-![Compare shortlisted listings](docs/screenshots/compare.jpg)
-
-![Market view](docs/screenshots/market.jpg)
-
-![Map view](docs/screenshots/map.jpg)
-
 **Export**: CSV (opens cleanly in Excel), TSV, copy to clipboard for Google Sheets, or **Calendar** (.ics) with every upcoming inspection time for your results or shortlist (with an optional reminder, set in Settings; one listing's times from its ⋯ menu). The whole-list export also adds all-day reminders to follow up applications with no answer, for application deadlines, for your own lease end, and for the last day to give notice (enter your notice period in Settings; it depends on your state and lease). Once you're approved and have set a moving day, it adds moving day (with what's left on your moving list) and the day the entry condition report is due (your state's days, set in Settings). Reminders you no longer need (you applied, heard back, or the listing went), and anything that dropped off your shortlist since the last Shortlist export, come out when you import the file again, and with a calendar reminder set the all-day ones alert at 9am the day before. Spreadsheet columns include weekly rent, $/bed, move-in cost, cash to move (move-in plus any lease overlap), apply-by date, vs-median, inspections, shortlist, application status and date, checklist results, lease term, apply-via, lease fit, taken and previous price.
 
 **Dark mode** follows your system, or pick Light or Dark under Settings → Theme. **Mobile width** follows the screen. Keyboard and screen-reader friendly (labelled controls, focus kept where you were, full-screen drawer is modal on phones).
 
-<p><img src="docs/screenshots/drawer-dark.jpg" width="64%" alt="Dark mode"> <img src="docs/screenshots/mobile.jpg" width="24%" alt="Mobile width"></p>
+</details>
 
 ## How it behaves
 
-- **Polite to REA**: pages are fetched one at a time with a jittered ~600ms gap. 429/5xx responses back off exponentially (honouring `Retry-After`, capped at 60s) and requests time out after 20s. If REA answers with a bot check (403, repeated 429s, or a challenge page), all fetching pauses for 10 minutes in that tab. The page you're already on is reused rather than refetched, and results are cached per tab for 10 minutes. **Refresh** forces a refetch.
-- **SPA-aware**: changing the search cancels an in-flight crawl. Paging within a search keeps the cache.
-- **Non-invasive**: REA's DOM is only touched append-only (one badge per result card plus `data-rf-*` attributes), so React re-renders can't break it or be broken by it.
-- **Storage**: settings, shortlist, notes and seen-listing history live in `localStorage` on realestate.com.au (listings not seen for 90 days are forgotten unless shortlisted, hidden or noted). Remembered results for your last three searches are in `localStorage` too (a very large search keeps less text for the listings furthest down, so it fits); this tab's working results are in `sessionStorage`. Settings shows how much is stored, and **Delete all my data** removes only this script's keys.
+- **Polite**: one page at a time with a ~600 ms jittered gap, backoff on 429/5xx, 20-page cap; a bot check pauses fetching for 10 minutes.
+- **Non-invasive**: REA's page is only appended to (one badge per card, `data-rf-*` attributes).
+- **Local storage only**: settings, shortlist and remembered searches stay in this browser; Settings shows the size and **Delete all my data** removes only this script's keys. See [PRIVACY.md](PRIVACY.md).
 
 ## When REA changes something
 
@@ -130,28 +125,9 @@ Then [open an issue](../../issues/new?template=rea-format-changed.md) with the o
 
 ## Development
 
-No dependencies; Node 20+.
+No dependencies; Node 20+. `npm run check` (lint + unit), `npm run e2e:setup` then `npm run e2e` (Playwright), `node test/e2e/screenshots.js` (these images, from generated fixture data).
 
-```sh
-npm run lint    # syntax + project invariants (header, privacy, storage keys, changelog)
-npm run check   # lint + unit tests (what CI runs first)
-npm run e2e:setup  # once: the Playwright version CI pins, plus Chromium
-npm run e2e     # Chromium tests against fixture pages on the REA origin
-npm run live    # local only: one real search, core paths, saves a fresh shape to test/shapes/
-npm run coverage   # unit + e2e line coverage
-node test/e2e/screenshots.js   # regenerate docs/screenshots
-```
-
-More docs:
-
-- [CONTRIBUTING.md](CONTRIBUTING.md): setup, tests, CI, rules of thumb.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the script works, what it stores, and which versions to bump.
-- [docs/ROADMAP.md](docs/ROADMAP.md): current status, decisions taken, known limitations, ideas not built yet, and the release checklist.
-- [CHANGELOG.md](CHANGELOG.md): every release.
-- [PRIVACY.md](PRIVACY.md): what is stored, where, and what leaves your browser.
-- [SECURITY.md](SECURITY.md): reporting a vulnerability privately, and what the script treats as untrusted.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for layout, rules of thumb and the CI pipeline (which can also be run on demand from the Actions tab, eg to repeat the browser tests or regenerate screenshots). Screenshots use generated fixture data, not real listings.
+[CONTRIBUTING.md](CONTRIBUTING.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) · [ROADMAP](docs/ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md)
 
 ## Disclaimer
 
