@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         REA Availability Filter
 // @namespace    https://github.com/cpwillis-pocs/rea-enhancement
-// @version      2.36.0
+// @version      2.36.1
 // @description  Availability-date filtering and sorting, extra filters, cross-page merging, on-card availability badges and CSV/TSV export for realestate.com.au rental searches.
 // @author       cpwillis
 // @homepageURL  https://github.com/cpwillis-pocs/rea-enhancement
@@ -6941,10 +6941,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.36.0', items: [
-    'Search all pages shows listings as each page is read, not after the last one; the list grows where you are.',
-    "Faster everywhere: REA's other pages, a closed drawer and other tabs do far less work, and remembered searches load quicker.",
-    "Compact list: a listing's buttons show over its card on hover instead of pushing the list down.",
+  const WHATS_NEW = { version: '2.36.1', items: [
+    'Availability Filter is now Rental Toolkit. Search all pages shows listings as each page is read.',
+    'Search all pages on the same search filters what you already have, instantly; Refresh reads every page again.',
+    "Light / dark from the drawer's header; everything is faster, on REA's other pages too.",
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',

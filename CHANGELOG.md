@@ -2,6 +2,13 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.1
+
+- **Now called Rental Toolkit:** the launcher and drawer have a clearer name (it was Availability Filter). The script installs and updates as before.
+- **Search all pages on the same search filters what's already read**, however long ago, instead of reading every page again; Refresh reads them again.
+- **Light / dark** in one click from the drawer's header (the Theme setting follows).
+- **Source, terms and privacy** links at the foot of the drawer.
+
 ## 2.36.0
 
 - **Results as they're read:** a search shows each page as soon as it's in (the first listings straight away, not after the last page), with "Reading page 3 of 20… 42 of 75 so far match". The list grows where you are, and a Refresh keeps the full list until it's done.
