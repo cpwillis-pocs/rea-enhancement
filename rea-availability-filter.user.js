@@ -7457,6 +7457,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
         step('cards', watchCards);
         step('card actions', watchCardActions);
         step('opens', watchOpens);
+        // REA's cards for the page as loaded are there already: badge them now, not after restore.
+        step('first badges', () => { if (boot && cfg.annotate) annotate(); });
         step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
           : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
         const syncMarks = () => {
