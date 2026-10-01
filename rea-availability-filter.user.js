@@ -7301,9 +7301,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const key = searchKey(href), n = pageNum(href);
     if (cacheKey === key && cache) return scheduleAnnotate();
     if (boot && boot.key === key && boot.page === n && Date.now() - bootAt < ROWS_TTL_MS) return scheduleAnnotate();
-    try { learn(rowsFrom(await getPage(pageUrl(href, n)))); } catch (e) { console.debug?.('[reaFilter] annotate fetch failed:', e); return; }
+    try {
+      const res = await getPage(pageUrl(href, n));
+      if (!learnedPages.has(res)) { learnedPages.add(res); learn(rowsFrom(res)); } // a page served again from pageMemo: already in
+    } catch (e) { console.debug?.('[reaFilter] annotate fetch failed:', e); return; }
     if (location.href === href) scheduleAnnotate();
   }
+  const learnedPages = new WeakSet(); // results objects ensureVisiblePage has taken in
+  let ensureT = 0;
 
   function watchCards() {
     new MutationObserver(guard('cards', (muts) => {
@@ -7320,7 +7325,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // REA is an SPA - invalidate cached rows (and any in-flight run) when the search URL changes.
   function watchNavigation() {
     let lastKey = currentKey();
-    const fire = () => window.dispatchEvent(new Event('rf:navigate'));
+    // A task after REA's pushState returns (restoring a search parses and draws: not inside REA's
+    // route change), and a burst of history calls is one event.
+    let navT = 0;
+    const fire = () => { navT ||= setTimeout(() => { navT = 0; window.dispatchEvent(new Event('rf:navigate')); }, 0); };
     for (const fn of ['pushState', 'replaceState']) {
       const orig = history[fn];
       history[fn] = function (...args) { const r = orig.apply(this, args); fire(); return r; };
@@ -7333,7 +7341,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (!active && !ui.pendingShare) ui.setOpen(false);
       const tip = document.getElementById('rf-remind');
       if (tip) tip.hidden = !active; // the reminder is about searches: back when one is
-      setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
+      clearTimeout(ensureT);
+      ensureT = setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
       if (!key) return; // a listing (or another REA page) between searches isn't leaving: the search keeps running, and what's read stays
