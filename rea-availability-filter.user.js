@@ -3595,7 +3595,16 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const w = window.open('', '_blank');
     if (!w) return setStatus('Pop-up blocked - allow pop-ups for realestate.com.au to print.', true);
     w.document.open(); w.document.write(html); w.document.close();
-    w.addEventListener('load', () => w.print(), { once: true });
+    // Chromium finishes a written document at close() and never fires its load: print once its
+    // photos are in (or after 2 s), rather than waiting for a load that doesn't come.
+    const imgs = [...w.document.images].filter((i) => !i.complete);
+    let printed = false;
+    const go = () => { if (printed) return; printed = true; try { w.focus(); w.print(); } catch { /* the window was closed */ } };
+    if (!imgs.length) return setTimeout(go, 0);
+    let left = imgs.length;
+    const one = () => { if (--left === 0) { clearTimeout(t); go(); } };
+    const t = setTimeout(go, 2000);
+    for (const i of imgs) { i.addEventListener('load', one, { once: true }); i.addEventListener('error', one, { once: true }); }
   }
 
   // `reminders`: the whole-list export also carries follow-ups and your lease end (not one
@@ -3980,6 +3989,9 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     #rf-panel :focus-visible,#rf-lbar :focus-visible,.rf-badge :focus-visible{outline:2px solid Highlight!important;outline-offset:1px}
     #rf-launch{border:1px solid ButtonText}
     .rf-bar{forced-color-adjust:none;background:Highlight!important} /* the market bars are drawn only with a background */
+    /* Which tab is open, and shortlisted / approved listings: borders, since shadows aren't drawn here. */
+    .rf-tabs button{border-bottom-color:Canvas!important} .rf-tabs button[aria-selected=true]{border-bottom-color:Highlight!important;color:Highlight!important}
+    .rf-item.rf-starred{border-left:3px solid Highlight} .rf-item.rf-approved{outline:2px solid Highlight;outline-offset:-2px}
   }
   .rf-badge .rf-card-acts button:focus-visible{outline:2px solid #087a50!important;outline-offset:1px!important}
   .rf-badge .rf-b-now{background:#087a50!important}
@@ -4444,6 +4456,14 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   // An action menu (a select that acts, then resets): only a chosen item acts. Arrow keys and
   // type-ahead on a closed select change it, and fire change, as you move through it (Windows,
   // Linux): those wait for Enter. A mouse or touch pick acts at once; Esc, Tab or leaving cancels.
+  // Opening the drawer with nowhere saved to go back to: Search, or (folded on a phone, or on the
+  // Shortlist where Search is hidden) the first of these that can be seen.
+  function focusOnOpen() {
+    const p = ui.panel, sl = ui.view === 'shortlist';
+    const to = [sl ? ui.slQuery : ui.run, p.querySelector('.rf-unfold:not([hidden])'), p.querySelector('.rf-sl-unfold:not([hidden])'), ui.list.querySelector('.rf-item'), p.querySelector('.rf-x')]
+      .find((el) => el && el.checkVisibility?.() !== false && el.offsetParent !== null);
+    (to || p).focus({ preventScroll: true });
+  }
   function onPick(sel, fn) {
     let browsing = false;
     sel.addEventListener('pointerdown', () => { browsing = false; });
@@ -4742,7 +4762,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       e.preventDefault();
       if (!panel.dataset.rfReady) { ui.openWhenReady = true; return; } // like the launcher: open once restored
       setOpen(panel.hidden);
-      if (!panel.hidden) { if (!ui.placedNow) ui.run.focus(); } else launch.focus();
+      if (!panel.hidden) { if (!ui.placedNow) focusOnOpen(); } else launch.focus();
       return;
     }
     if (panel.hidden) return;
@@ -4750,6 +4770,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     if (e.key === 'Escape' && ui.peekId) { ui.closePeek(); return; } // closes just the photo
     const menu = document.activeElement?.closest?.('.rf-acts-more[open], .rf-menu[open]');
     if (e.key === 'Escape' && menu && panel.contains(menu)) { menu.open = false; menu.querySelector('summary').focus(); return; } // closes just the ⋯ menu
+    // In a search box with something typed, the browser's Esc clears it; a second Esc closes.
+    if (e.key === 'Escape' && document.activeElement?.matches?.('#rf-panel input[type=search]') && document.activeElement.value) return;
     if (e.key === 'Escape' && !e.defaultPrevented && (panel.contains(document.activeElement) || narrow.matches)) {
       if (!help.hidden) { toggleHelp(); return; }
       setOpen(false); launch.focus(); return;
@@ -5103,7 +5125,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       // Clicked in the moment before startup has restored this search: open once it has, so the
       // drawer lands on the listing you were on rather than on an empty list.
       if (!panel.dataset.rfReady) { ui.openWhenReady = true; return; }
-      setOpen(true); if (!ui.placedNow) ui.run.focus(); // back where you were, else on Search
+      setOpen(true); if (!ui.placedNow) focusOnOpen(); // back where you were, else on Search (or the first thing that's there)
     });
     panel.querySelector('.rf-x').addEventListener('click', () => { setOpen(false); launch.focus(); });
     const help = panel.querySelector('.rf-help'), helpBtn = panel.querySelector('.rf-keys');
@@ -5234,7 +5256,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     placesBox.addEventListener('input', paintPlaces);
     ui.paintPlaces = paintPlaces;
     paintPlaces();
-    wireSticky(panel);
+    wireSticky(panel); wireFocusKeep(panel);
     wirePeek(panel);
     for (const b of panel.querySelectorAll('[data-report]')) b.addEventListener('click', async () => {
       const ok = await copyText(reportText());
@@ -5370,8 +5392,11 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       const b = e.target.closest('[data-chip]');
       const chip = b && ui.activeChips?.[+b.dataset.chip];
       if (!chip) return;
+      const i = +b.dataset.chip, wasFocused = document.activeElement === b;
       const next = without(cfg, chip);
       applyCfg(next);
+      // The chip went with its filter: the one now in its place, the list, or More filters.
+      if (wasFocused) (ui.active.querySelector(`[data-chip="${i}"]`) || ui.active.querySelector(`[data-chip="${i - 1}"]`) || ui.list.querySelector('.rf-item') || ui.more.querySelector('summary'))?.focus();
     });
     panel.querySelector('.rf-agencies').addEventListener('click', (e) => {
       const b = e.target.closest('[data-unhide-ag]');
@@ -5425,6 +5450,20 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     ui.syncSticky();
   };
   toFilters.addEventListener('click', () => ui.toFilters());
+  }
+  // Whatever removes or hides the control that has focus (Undo, an offer's buttons, a banner's ×,
+  // a status button that redraws), focus stays in the drawer: on the status line, else the list,
+  // so the shortcuts and Esc keep working. Clicking elsewhere on the page leaves focus alone.
+  function wireFocusKeep(panel) {
+    ui.status.tabIndex = -1;
+    panel.addEventListener('focusout', (e) => {
+      const was = e.target;
+      setTimeout(() => {
+        if (panel.hidden || (document.activeElement && document.activeElement !== document.body)) return;
+        if (was.isConnected && was.checkVisibility?.() !== false) return; // it's still there: you went elsewhere
+        [ui.status, ui.list.querySelector('.rf-item'), ui.list].find((el) => el?.isConnected && el.checkVisibility?.() !== false)?.focus({ preventScroll: true });
+      }, 0);
+    });
   }
   function wireFold(panel, narrow) {
   const foldBtn = panel.querySelector('.rf-unfold'), controls = panel.querySelector('.rf-controls');
@@ -5780,19 +5819,22 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     item.appendChild(ta);
     ta.focus();
     let done = false;
-    const finish = (save) => {
+    // `refocus`: Enter / Esc go back to the listing's Note button (the editor is gone).
+    const finish = (save, refocus = false) => {
       if (done) return;
       done = true;
       if (save) marks.setNote(id, ta.value);
       ta.remove(); // the keyed paint keeps an unchanged item's node, so the editor goes here
       if (item._rf) item._rf = { ...item._rf, html: '' }; // and the item is drawn again (its note line)
       refreshMarks();
+      if (refocus) (itemEl(id, '[data-act=n]') || ui.list).focus();
     };
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
-      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.stopPropagation(); finish(false, true); }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true, true); }
     });
-    ta.addEventListener('blur', () => finish(true));
+    // A task later: a blur from a redraw in progress (another tab's change) mustn't redraw inside it.
+    ta.addEventListener('blur', () => setTimeout(() => finish(true), 0));
   }
 
   // `only`: the listings whose marks changed, when nothing else on screen can (a star, rating,
@@ -6986,6 +7028,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       setTimeout(ensureVisiblePage, NAV_SETTLE_MS);
       const key = currentKey();
       if (key === lastKey) return; // same search, different page/view
+      if (!key) return; // a listing (or another REA page) between searches isn't leaving: the search keeps running, and what's read stays
       setWarn('saved', ''); // about the previous search
       fillPresets();
       renderSaved();
@@ -7099,7 +7142,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       // A restore's Undo puts back what was stored before it: after another tab has written, that
       // would silently undo the other tab too, so the offer goes.
       if (e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) ui.status.querySelector('.rf-undo-restore')?.remove();
-      if (e.key === MARKS_KEY || e.key === null) { marks.invalidate(); if (document.getElementById('rf-lbar')) renderListingBar(); keepingUndo(() => refreshMarks()); }
+      if (e.key === MARKS_KEY || e.key === null) {
+        marks.invalidate();
+        if (document.getElementById('rf-lbar')) renderListingBar();
+        // A note being typed in the drawer: its save redraws everything, so wait for it.
+        if (!ui.list.querySelector('.rf-note-edit')) keepingUndo(() => refreshMarks());
+      }
         // Settings saved in another tab: take its display settings (places, checklist, weights,
         // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
         if (e.key === CFG_KEY) {

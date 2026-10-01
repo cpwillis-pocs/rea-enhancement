@@ -683,8 +683,11 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await run(page);
     for (const n of [1, 2]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
     await page.click('[data-view=shortlist]');
+    // The print dialog is asked for (Chromium never fires load for a written document).
+    await page.evaluate(() => { const o = window.open; window.open = (...a) => { const w = o.apply(window, a); if (w) w.print = () => { window.__printed = (window.__printed || 0) + 1; }; return w; }; });
     const [pop] = await Promise.all([ctx.waitForEvent('page'), page.click('.rf-menu summary').then(() => page.click('[data-sl=print]'))]);
     await pop.waitForLoadState();
+    await page.waitForFunction(() => window.__printed === 1, null, { timeout: 4000 });
     assert.equal(await pop.$$eval('.l', (e) => e.length), 2);
     assert.match(await pop.title(), /Rental shortlist/);
     console.log('print shortlist: ok');
