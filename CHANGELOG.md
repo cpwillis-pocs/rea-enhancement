@@ -2,6 +2,26 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.35.4
+
+- **Rents read right:** a monthly rent with a weekly figure after it ("$2,600 pcm (600 pw)", "per month including weekly cleaning") is no longer read as weekly, which put it 4x too high. "/mo", "per mnth", "per calender month", "p/f", "per 2 weeks", "per day" and a rent with no "$" ("650 per week") are read too.
+- **Move-in dates read right:** "Available for inspection Sat 10 Oct" or "available to view" is no longer taken as the move-in date. "1-Nov-2026", "01-Nov-26", "Available from December" and "Vacant possession 1st Nov" are read.
+- **Storage full no longer wipes searches:** a remembered search too big to fit even alone is not saved, and the others (and its own last copy) stay. Check all stops there and says which searches it had to drop.
+- **Clicks aren't lost after typing a note:** pressing Shortlist, Hide or ⋯ while a note is open saves the note and does what you pressed, in the drawer and on a listing page.
+- Fixed:
+  - A setting changed in another tab couldn't be changed back in this one; nor could a Building focus after a search change.
+  - Typing in the Shortlist search and switching to Results quickly showed the shortlist there, and Bulk then acted on it.
+  - Check all and Re-check stopped silently when you went to another search.
+  - Focus dropped to the page when another tab wrote while Undo, a checklist item, a What-to-ask answer, the status menu or Compare had it.
+  - Removing your last shortlisted listing and reloading offered it back as a loss.
+  - Leaving a bound preset's search in a new tab didn't put your own filters back.
+  - A restore with a malformed remembered search could break that search's list on every load, or be left half-applied; it now changes nothing if it fails. Restored searches are counted only if kept, and any local ones it pushed out are named.
+  - "No smoking or pets" and "Pets - No" weren't read as no pets; "no gas bills" or "no heating bills" was read as no gas or heating.
+  - "6 or 12 month lease", "Lease: 6, 12 or 24 months" and "52 week lease" weren't read.
+  - "Applications close Tues 6/10" wasn't read; My inspection times didn't read "noon", "after 5:30pm", "before 6am" or "Sun or weekdays" (what the enquiry writes).
+  - The keyword filter treated curly and straight apostrophes as different ("O’Connell").
+- The help panel links the source, terms and privacy policy. README and SECURITY.md state that the script is provided as is, with no warranty, support or response commitment.
+
 ## 2.35.3
 
 - **Searches survive browsing:** opening a listing through REA's own navigation no longer throws away a running search, Re-check or Check all.
