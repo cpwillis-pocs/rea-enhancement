@@ -2,6 +2,10 @@
 
 Versions match the userscript's `@version`; installs auto-update from `main` when it increases.
 
+## 2.36.5
+
+- **Restore can replace what's here:** tick **Replace what's here** in the restore offer to put everything back exactly as the backup had it (shortlist, hides, notes, statuses, ratings, checklists, hidden agencies, presets and saved searches), eg to go back to an earlier state or start clean on another computer. Listings marked since the backup are unmarked; what you've seen (first seen, price and date changes) stays. It says what will change first, and Undo puts it all back. Left unticked, a restore merges as before.
+
 ## 2.36.4
 
 - Fixed: on a Mac, picking a preset or a Bulk action with the keyboard needed Enter twice: once in the system's menu and again after it. Choosing in the system's menu is now the pick; Windows and Linux still wait for Enter while you arrow through.
