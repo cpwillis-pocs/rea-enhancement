@@ -132,7 +132,7 @@ test('extractInspections: tolerant of shapes, drops past, sorts', () => {
 });
 
 test('toDate / extractListed', () => {
-  assert.equal(core.toDate('2026-09-01').getUTCDate(), 1);
+  assert.equal(core.toDate('2026-09-01').getDate(), 1); // bare date is local midnight
   assert.equal(core.toDate({ value: '2026-09-01T00:00:00Z' }).toISOString(), '2026-09-01T00:00:00.000Z');
   assert.equal(core.toDate(1788220800).toISOString(), '2026-09-01T00:00:00.000Z');
   assert.equal(core.toDate('New'), null);
