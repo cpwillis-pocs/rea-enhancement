@@ -147,7 +147,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.fill('#rf-from', '2026-12-01'); await page.dispatchEvent('#rf-from', 'change');
     assert.match(await status(page), /after the "within" window/);
     await page.selectOption('#rf-withinDays', ''); await page.fill('#rf-from', ''); await page.dispatchEvent('#rf-from', 'change');
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page); // the press ends a task later (it holds renders until then)
     await page.fill('#rf-priceMin', '900'); await page.fill('#rf-priceMax', '500'); await page.dispatchEvent('#rf-priceMax', 'change');
     assert.match(await status(page), /Min \$\/wk is above max/);
     console.log('validation messages: ok');
@@ -225,7 +225,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     await run(page);
     await page.hover('.rf-item'); await page.click('.rf-item >> [data-act=s]');
-    await page.click('#rf-more summary'); await page.check('#rf-onlyStarred');
+    await page.click('#rf-more summary'); await settle(page); await page.check('#rf-onlyStarred');
     assert.equal(await count(page), 1);
     await page.click('.rf-item >> [data-act=s]'); // unstar the only one
     assert.equal(await count(page), 0, 'no stale rows under the empty message');
@@ -266,7 +266,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     // A cap at the median move-in cost must keep some listings and drop others.
     const ups = await page.evaluate(() => window.reaFilter.rows().map((r) => r.upfront).filter(Number.isFinite).sort((a, b) => a - b));
     const cap = ups[Math.floor(ups.length / 2)];
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-upfrontMax', String(cap)); await page.dispatchEvent('#rf-upfrontMax', 'change');
     const capped = await count(page);
     assert.ok(capped > 0 && capped < total, `move-in cap filters (${capped} of ${total})`);
@@ -344,7 +344,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     await run(page);
     const total = await count(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.click('[data-amen=pets]');
     assert.equal(await page.getAttribute('[data-amen=pets]', 'aria-label'), 'Pets: required');
     const withPets = await count(page);
@@ -381,7 +381,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-anchor', 'Somewhere'); await page.dispatchEvent('#rf-anchor', 'change');
     assert.match(await status(page), /coordinates in Australia/);
     await page.fill('#rf-anchor', 'https://www.google.com/maps/@-33.8915,151.2767,15z'); await page.dispatchEvent('#rf-anchor', 'change');
@@ -417,7 +417,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('.rf-status .rf-undo');
     assert.equal(await count(page), total);
     await page.click('.rf-item >> .rf-acts-more summary'); await page.click('.rf-item >> [data-act=ag]');
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     assert.equal(await page.$eval('.rf-agencies', (b) => b.hidden), false);
     await page.click('[data-unhide-ag]');
     assert.equal(await count(page), total);
@@ -445,7 +445,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await run(page);
     const ids = await page.$$eval('.rf-item', (e) => e.slice(0, 3).map((x) => x.dataset.id));
     for (const id of ids) { await page.hover(`.rf-item[data-id="${id}"]`); await page.click(`.rf-item[data-id="${id}"] >> [data-act=s]`); }
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-anchor', '-33.8915, 151.2767'); await page.dispatchEvent('#rf-anchor', 'change');
     await page.click('[data-view=shortlist]');
     await page.click('[data-sl=compare]');
@@ -486,7 +486,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.click('[data-amen=pets]');
     const chips = await page.$$eval('.rf-achip', (e) => e.map((x) => x.textContent.trim()));
@@ -557,7 +557,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
     const shown = await count(page);
     await page.selectOption('.rf-bulk', 'star');
@@ -587,7 +587,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-bedsMin', '3'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await page.selectOption('.rf-preset', 'c:save');
     assert.equal(await page.getAttribute('.rf-preset-name', 'aria-label'), 'Preset name');
@@ -636,7 +636,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.click('.rf-types [data-ptype="Townhouse"]');
     await presetSave(page, 'c:save', '-3-bed');
     assert.match(await status(page), /Saved preset "-3-bed"/);
@@ -664,7 +664,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     const pets = () => page.getAttribute('[data-amen=pets]', 'aria-label');
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.click('[data-amen=pets]');
     await presetSave(page, 'c:bind', 'Bondi pets');
     await page.click('.rf-clear');
@@ -753,7 +753,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.selectOption('#rf-sort', 'inspect');
     for (const n of [1, 2, 3, 4]) { await page.hover(`.rf-item:nth-child(${n})`); await page.click(`.rf-item:nth-child(${n}) >> [data-act=s]`); }
     await page.click('[data-view=shortlist]');
@@ -846,7 +846,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-run'); await waitStatus(page, /listings match/);
     await page.waitForFunction(() => document.querySelectorAll('.rf-saved-list li').length === 2);
     assert.match(await page.textContent('.rf-saved-list'), /this search/);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-priceMax', '800'); await page.dispatchEvent('#rf-priceMax', 'change');
     await page.click('.rf-saved summary');
     await page.click('[data-saved-check]');
@@ -880,7 +880,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click('#rf-refresh'); await waitStatus(page, /listings match/);
     await page.waitForSelector(`.rf-item[data-id="${id}"] .rf-avail .rf-was.up`);
     assert.match(await status(page), /1 date changed/);
-    await page.click('#rf-more summary'); await page.check('#rf-changedOnly');
+    await page.click('#rf-more summary'); await settle(page); await page.check('#rf-changedOnly');
     assert.deepEqual(await page.$$eval('.rf-item', (e) => e.map((x) => x.dataset.id)), [id], 'changed-only filter');
     await page.waitForFunction(() => [...document.querySelectorAll('.rf-badge span')].some((b) => /^Avail was /.test(b.textContent)), null, { timeout: 5000 });
     console.log('availability change: ok,', await page.textContent(`.rf-item[data-id="${id}"] .rf-avail`));
@@ -991,7 +991,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.evaluate(() => window.addEventListener('click', (e) => { if (e.target.closest('a')) e.preventDefault(); })); // no new tab in the test
     await page.click(`.rf-item[data-id="${id}"] .rf-card`);
     assert.ok(await marks(page).then((m) => m[id].o), 'opened stored');
-    await page.click('#rf-more summary'); await page.check('#rf-unopenedOnly');
+    await page.click('#rf-more summary'); await settle(page); await page.check('#rf-unopenedOnly');
     assert.equal(await page.$(`.rf-item[data-id="${id}"]`), null, 'opened listing filtered out');
     await page.uncheck('#rf-unopenedOnly');
     assert.match(await page.textContent(`.rf-item[data-id="${id}"]`), /opened just now/);
@@ -1034,7 +1034,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.click(`.rf-item[data-id="${id}"] [data-act=h]`);
     await page.click('.rf-why button:has-text("too small")');
     assert.match(await status(page), /Noted: too small/);
-    await page.click('#rf-more summary'); await page.check('#rf-showHidden');
+    await page.click('#rf-more summary'); await settle(page); await page.check('#rf-showHidden');
     assert.match(await page.textContent(`.rf-item[data-id="${id}"]`), /hidden: too small/);
     await page.uncheck('#rf-showHidden');
     const other = await page.getAttribute('.rf-item', 'data-id');
@@ -1061,7 +1061,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-anchor', '-33.891, 151.274'); await page.dispatchEvent('#rf-anchor', 'change');
     await page.fill('#rf-places', 'Work: -33.8688, 151.2093'); await page.dispatchEvent('#rf-places', 'change');
     await page.waitForFunction(() => /Work \d/.test(document.querySelector('.rf-list').textContent));
@@ -1115,7 +1115,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const first = await page.textContent('.rf-item .rf-meta:has-text("overlap"), .rf-item .rf-meta:has-text("right after")');
     assert.match(first, /overlap|right after/);
     // Lease and building filters (with chips).
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.selectOption('#rf-leaseMin', '12');
     assert.equal(await page.$('.rf-item[data-id="146500004"]'), null, '6-month-only lease dropped');
     assert.ok(await page.$('.rf-achip:has-text("Lease 12+ mo")'));
@@ -1203,7 +1203,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(await item('146500005'), /Deposit taken/);
     assert.match(await item('146500005'), /Professional clean required/);
     const total = await count(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.check('#rf-hideTaken');
     assert.equal(await count(page), total - 1, 'taken listing hidden');
     assert.ok(await page.$('.rf-achip:has-text("Not taken")'));
@@ -1265,7 +1265,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx, SEARCH, { route: serve([], { extras: true }) });
     await run(page);
     const total = await count(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.selectOption('#rf-inspectWhen', 'weekend');
     const labels = await page.$$eval('.rf-item', (items) => items.map((i) => i.textContent.match(/Inspect (\w+)/)?.[1]));
     assert.ok(labels.length > 0 && labels.length < total, `weekend inspections: ${labels.length} of ${total}`);
@@ -1323,7 +1323,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     const byType = await page.evaluate(() => { const n = {}; for (const r of window.reaFilter.rows()) n[r.type] = (n[r.type] || 0) + 1; return n; });
     const names = await page.$$eval('.rf-types [data-ptype]', (b) => b.map((x) => x.dataset.ptype));
     assert.deepEqual(names, Object.keys(byType).sort(), 'one chip per type in the results');
@@ -1452,7 +1452,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const reviewed = Object.values(await marks(page)).filter((e) => e.rv).length;
     assert.equal(reviewed, 2);
     assert.match(await status(page), /listings match/);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     const total = await count(page);
     await page.check('#rf-unreviewedOnly');
     assert.equal(await count(page), total - 2);
@@ -1507,7 +1507,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.match(early, /rows: 6 \(page 1 only: no search run yet\)/, 'selfcheck before a search reads page 1');
     assert.match(early, /price 83%\/\?, .*coordinates 100%/, 'fill rates from page 1, not 0%');
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-priceMax', '600'); await page.dispatchEvent('#rf-priceMax', 'change');
     await page.waitForSelector('div.rc[data-rf-match="0"]');
     const report = await page.evaluate(() => window.reaFilter.selfcheck());
@@ -1533,7 +1533,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.waitForFunction((i) => document.activeElement?.dataset?.id === i, id, { timeout: 3000 });
     const inView = await page.$eval(`.rf-item[data-id="${id}"]`, (el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; });
     assert.ok(inView, 'the listing you were on is in view');
-    await page.click('#rf-more summary'); await page.fill('#rf-bedsMin', '2'); await page.dispatchEvent('#rf-bedsMin', 'change');
+    await page.click('#rf-more summary'); await settle(page); await page.fill('#rf-bedsMin', '2'); await page.dispatchEvent('#rf-bedsMin', 'change');
     await reopen();
     await page.clock.runFor(300);
     assert.notEqual(await page.evaluate(() => document.activeElement?.dataset?.id), id, 'different filters: not restored');
@@ -1814,7 +1814,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await run(page);
     const item = '.rf-item[data-id="146500004"]'; // "6 month lease only. Dishwasher."
     assert.match(await page.$eval(`${item} .rf-watch span`, (el) => el.title), /From the listing text: "[^"]*6 month lease only"/);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-keyword', 'lease'); await page.dispatchEvent('#rf-keyword', 'change');
     await page.waitForSelector(`${item} .rf-kwq`);
     assert.match(await page.textContent(`${item} .rf-kwq`), /matched: .*6 month lease only/);
@@ -2167,7 +2167,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const ctx = await browser.newContext();
     const page = await open(ctx);
     await run(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.selectOption('#rf-inspectWhen', 'weekend');
     const weekend = await count(page);
     assert.equal(await page.isVisible('#rf-inspectFree'), true, 'your times can be set whatever the filter: {mytimes} and the day planner use them too');
@@ -2271,7 +2271,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.equal(await page.getAttribute(`${item} [data-act=whytags]`, 'aria-expanded'), 'true');
     await page.click(`${item} [data-act=whytags]`);
     assert.equal(await page.$(`${item} .rf-whytags`), null, 'toggles closed');
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.click('[data-nowatch=road]');
     await page.waitForFunction((s) => !document.querySelector(s), item);
     assert.ok(await page.$('.rf-achip:has-text("No busy road")'), 'chip shown');
@@ -2313,7 +2313,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     const page = await open(ctx);
     await run(page);
     const total = await count(page);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-cashMax', '4000'); await page.dispatchEvent('#rf-cashMax', 'change');
     await page.waitForFunction((n) => document.querySelectorAll('.rf-item').length < n, total);
     assert.ok(await page.$('.rf-achip:has-text("Cash to move ≤ $4,000")'), 'chip shown');
@@ -2695,7 +2695,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     assert.deepEqual(await page.$$eval('.rf-rea-chip', (e) => e.map((x) => x.textContent)), [
       'Apartment & Unit (leaves out listings your filters keep)', '$500–$900 (leaves out listings your filters keep)',
       '2–3 beds (leaves out listings your filters keep)', 'pets considered (leaves out listings your filters keep)']);
-    await page.click('#rf-more summary');
+    await page.click('#rf-more summary'); await settle(page);
     await page.fill('#rf-priceMax', '1050'); await page.dispatchEvent('#rf-priceMax', 'change');
     await page.fill('#rf-bedsMin', '2'); await page.dispatchEvent('#rf-bedsMin', 'change');
     assert.equal(await page.isVisible('.rf-rea-apply'), true, 'yours differ from REA\'s: offered');
