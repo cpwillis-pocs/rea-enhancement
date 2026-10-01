@@ -4808,7 +4808,12 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (e.key === 'Enter' && browsing) { e.preventDefault(); browsing = false; if (sel.value) fn(); return; }
       if (e.key === 'Escape' && (browsing || sel.value)) e.stopPropagation(); // leaves the menu, not the drawer
       if (e.key === 'Escape' || e.key === 'Tab') { browsing = false; if (sel.value) sel.value = ''; return; }
-      if (/^(?:Arrow(?:Up|Down)|Home|End|Page(?:Up|Down))$/.test(e.key) || (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey)) browsing = true;
+      if (/^(?:Arrow(?:Up|Down)|Home|End|Page(?:Up|Down))$/.test(e.key) || (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+        browsing = true;
+        // The key didn't move the choice: the system's own menu opened (macOS), where choosing is the pick.
+        const was = sel.value;
+        setTimeout(() => { if (sel.value === was) browsing = false; }, 0);
+      }
     });
     sel.addEventListener('change', () => {
       if (!browsing) return fn();

@@ -616,14 +616,23 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.evaluate((u) => history.pushState({}, '', u), SEARCH);
     await page.waitForFunction(() => document.querySelector('[data-amen=pets]').getAttribute('aria-label') === 'Pets: required', null, { timeout: 8000 });
     assert.match(await page.textContent('.rf-preset option'), /Preset: Bondi pets/);
-    // Moving through the menu with the keyboard picks nothing until Enter.
-    await page.focus('.rf-preset');
-    await page.keyboard.press('ArrowDown');
-    // Windows and Linux move a closed menu's choice on ArrowDown; macOS opens its own menu instead.
-    await page.$eval('.rf-preset', (sel) => { if (!sel.value) { sel.selectedIndex = 1; sel.dispatchEvent(new Event('change', { bubbles: true })); } });
-    assert.match(await status(page), /Press Enter for/);
+    // Through the closed menu by keyboard, both ways browsers do it (a synthetic key has no default
+    // action, so this runs the same on any machine). Windows and Linux move the choice with the key:
+    // it waits for Enter. macOS opens its own menu instead, and choosing there is the pick.
+    const arrow = (moved) => page.$eval('.rf-preset', async (sel, moved) => {
+      sel.focus();
+      sel.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      if (!moved) await new Promise((r) => setTimeout(r, 0)); // the menu is open: the choice comes later
+      sel.selectedIndex = [...sel.options].findIndex((o) => o.value === 'a:3-bed');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }, moved);
+    await arrow(true);
+    assert.match(await status(page), /Press Enter for "Apply: 3-bed"/);
     await page.keyboard.press('Escape');
     assert.equal(await page.inputValue('.rf-preset'), '', 'Esc leaves it');
+    await arrow(false);
+    assert.match(await status(page), /Applied preset "3-bed"/, "macOS: chosen in the system's menu, no second Enter");
+    assert.equal(await page.inputValue('#rf-bedsMin'), '3');
     await page.selectOption('.rf-preset', 'd:3-bed');
     await page.click('.rf-ask [data-ask=no]');
     assert.ok((await page.$$eval('.rf-preset option', (o) => o.map((x) => x.value))).includes('a:3-bed'), 'Keep it keeps it');
