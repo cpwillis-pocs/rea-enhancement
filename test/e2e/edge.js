@@ -2138,6 +2138,7 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     await page.keyboard.press('Enter');
     await page.waitForFunction((i) => document.querySelector(`.rf-item[data-id="${i}"] [data-act=s]`)?.getAttribute('aria-pressed') === 'true', id, { timeout: 2000 });
     assert.equal(popups, 0, 'no listing tab opened');
+    await settle(page); // the star's redraw puts focus back a task later (wireFocusKeep): before leaving the drawer
     await page.evaluate(() => document.activeElement.blur());
     await page.keyboard.press('Escape');
     assert.equal(await page.$eval('#rf-panel', (p) => p.hidden), false, "Esc outside the drawer is REA's");
