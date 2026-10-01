@@ -619,6 +619,8 @@ const marks = (p) => p.evaluate((k) => JSON.parse(localStorage.getItem(k) || '{"
     // Moving through the menu with the keyboard picks nothing until Enter.
     await page.focus('.rf-preset');
     await page.keyboard.press('ArrowDown');
+    // Windows and Linux move a closed menu's choice on ArrowDown; macOS opens its own menu instead.
+    await page.$eval('.rf-preset', (sel) => { if (!sel.value) { sel.selectedIndex = 1; sel.dispatchEvent(new Event('change', { bubbles: true })); } });
     assert.match(await status(page), /Press Enter for/);
     await page.keyboard.press('Escape');
     assert.equal(await page.inputValue('.rf-preset'), '', 'Esc leaves it');
