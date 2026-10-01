@@ -3637,8 +3637,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     const m = mapLayout(rows, pins);
     if (!m) return `<div class="rf-market"><div class="rf-plan-head">${viewClose('map', 'Close the map')}None of these listings has a location, so there is nothing to map.</div></div>`;
     const first = m.dots.find((d) => d.r.starred) || m.dots[0]; // one tab stop; arrows move between dots
-    const dot = (d) => `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
-      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}${medianLabel(d.r) ? `, ${medianLabel(d.r)}` : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${medianLabel(d.r) ? ` · ${medianLabel(d.r)}` : ''}`)}</title></circle>`;
+    const dot = (d) => { const med = medianLabel(d.r); return `<circle cx="${d.x}" cy="${d.y}" r="${d.r.starred ? 6 : 4.5}" class="rf-dot rf-dot-${mapTone(d.r)}${d.r.starred ? ' rf-dot-star' : ''}" data-map-id="${esc(d.r.id)}" tabindex="${d === first ? 0 : -1}" role="button"
+      aria-label="${esc(`${d.r.price}, ${d.r.address}${d.r.starred ? ', shortlisted' : ''}${med ? `, ${med}` : ''}`)}"><title>${esc(`${d.r.price} · ${d.r.address}${med ? ` · ${med}` : ''}`)}</title></circle>`; };
     return `<div class="rf-market rf-map"><div class="rf-plan-head">${viewClose('map', 'Close the map')}${plural(m.dots.length, 'listing')} on the map${m.skipped ? ` (${m.skipped} without a location not shown)` : ''}. Click one to go to it.</div>
       <svg viewBox="0 0 ${m.w} ${m.h}" role="group" aria-label="Map of the listings shown">
         ${m.labels.map((l) => `<text x="${l.x}" y="${l.y - 8}" class="rf-map-sub" text-anchor="middle">${esc(l.name)}</text>`).join('')}
@@ -6270,7 +6270,7 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
     setExport(rows.length === 0);
     setLaunchCount(rows.length);
     if (!rows.length) return setEmpty('Nothing matches those filters.');
-    if (ui.mapOn) ui.list.innerHTML = mapHtml(rows, cfg);
+    if (ui.mapOn) { const h = mapHtml(rows, cfg); if (h !== ui.mapDrawn || !ui.list.querySelector(':scope > .rf-map')) { ui.list.innerHTML = h; ui.mapDrawn = h; } } // the same map: kept (and its focus)
     else if (ui.marketOn) ui.list.innerHTML = marketHtml(marketStats(rows), cfg.remember ? trendText(snaps.exportData()[currentKey()]?.trend) : '', { records: agencyRecord(marks.shortlist()), hiddenAg: new Set(marks.hiddenAgencies().map(agencyKey)) }); else paintList(rows);
     if (!ui.keepShown) toListTop(); // a redraw in place (refreshMarks) keeps the scroll: no layout to force
   }
