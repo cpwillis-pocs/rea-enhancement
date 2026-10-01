@@ -2354,7 +2354,14 @@
   };
   // Types, plus values a hand-edited file could get wrong: a sort that exists, real calendar dates.
   const CFG_DATES = new Set(['from', 'to', 'inspectOn', 'leaseEnd', 'noticeGiven', 'moveDate']);
-  const isYmd = (v) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'); return !!d && !isNaN(d) && d.toISOString().startsWith(v); };
+  // Last answer kept: leaseFit asks about the same lease end once per listing on every filter.
+  let ymdLast = null, ymdOk = false;
+  const isYmd = (v) => {
+    if (typeof v === 'string' && v === ymdLast) return ymdOk;
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v + 'T00:00:00Z'), ok = !!d && !isNaN(d) && d.toISOString().startsWith(v);
+    if (typeof v === 'string') { ymdLast = v; ymdOk = ok; }
+    return ok;
+  };
   // Saved settings are only trusted per key and type: a stale or hand-edited value (eg
   // keyword: null) falls back to the default instead of throwing on every render.
   const sanitizeCfg = (c) => (c && typeof c === 'object'
@@ -2371,7 +2378,9 @@
   const DISPLAY_PREFS = ['sort', 'sortDesc', 'anchor', 'places', 'inspectFree', 'packDone', 'moveDone', 'ecrDone', 'slSort', 'slSeenAt', ...SETTINGS.map((x) => x.key)]; // Clear keeps your settings, "from" point, places and free times
 
   const num = (v) => (v === '' || v == null || isNaN(+v) ? null : +v);
-  const byAvail = (a, b) => (a.avail ?? Infinity) - (b.avail ?? Infinity);
+  // getTime(): subtracting Dates goes through valueOf, several times slower in a 1000-listing sort.
+  const availMs = (d) => (d instanceof Date ? d.getTime() : d ?? Infinity);
+  const byAvail = (a, b) => availMs(a.avail) - availMs(b.avail);
   const byPrice = (a, b) => a.priceNum - b.priceNum;
   // Each sort: how two listings compare, and which listings have no value for it (kept last, even
   // reversed: a "Contact agent" rent isn't the dearest). NaN from Infinity - Infinity is falsy, so
@@ -2969,10 +2978,12 @@
 
   // Moving from your current lease: nights paying two rents (overlap) or with nowhere (gap).
   // Your lease covers through `leaseEnd`; the new one starts on its available date (today if now).
+  let endMemo = null; // the lease end's day number: the same for every listing in a filter pass
+  const leaseEndDay = (ymd) => (endMemo?.k === ymd ? endMemo.v : (endMemo = { k: ymd, v: dayNum(ymdStart(ymd)) }).v);
   const leaseFit = (r, leaseEnd, now = new Date()) => {
     if (!isYmd(String(leaseEnd || '')) || !(r.avail instanceof Date) || isNaN(r.avail)) return null;
-    const end = dayNum(ymdStart(leaseEnd)), start = Math.max(dayNum(r.avail), dayNum(now));
-    if (end < dayNum(now)) return null; // your lease already ended: nothing to fit
+    const end = leaseEndDay(leaseEnd), today = dayNum(now), start = Math.max(dayNum(r.avail), today);
+    if (end < today) return null; // your lease already ended: nothing to fit
     const overlap = Math.max(0, end - start + 1), gap = Math.max(0, start - end - 1);
     // An overlap at an unknown rent has an unknown cost (null), not a free one.
     return { overlap, gap, cost: !overlap ? 0 : Number.isFinite(r.priceNum) ? Math.round((overlap * r.priceNum) / 7) : null };
@@ -5462,7 +5473,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (!sel) return;
       const id = sel.closest('.rf-item').dataset.id;
       marks.setStatus(id, sel.value);
-      refreshMarks();
+      // On Results a status shows on its own listing and, as your record, on its agency's others:
+      // only those redraw (the Shortlist's pack and order follow every status, so all of it does).
+      const ak = agencyKey(rowById(id)?.agency);
+      refreshMarks(ui.view === 'shortlist' ? null : [id, ...(ak && cache ? cache.filter((r) => agencyKey(r.agency) === ak).map((r) => r.id) : [])]);
       itemEl(id, 'select[data-app]')?.focus();
     });
 
@@ -7379,6 +7393,13 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       step('opens', watchOpens);
       step('storage warning', () => writeState.listeners.add((ok) => setWarn('storage', ok ? ''
         : `Couldn't save your last change: this site's browser storage is full (this script uses ${fmtBytes(toolBytes(storageOr('localStorage')))}). Delete saved searches or turn off Remember results in Settings, then try again.`)));
+      const syncMarks = () => {
+        ui.marksStale = false;
+        if (document.getElementById('rf-lbar')) renderListingBar();
+        // A note being typed in the drawer: its save redraws everything, so wait for it.
+        if (!ui.list.querySelector('.rf-note-edit')) keepingUndo(() => refreshMarks());
+      };
+      step('sync stale', () => document.addEventListener('visibilitychange', guard('other tab', () => { if (!document.hidden && ui.marksStale) syncMarks(); })));
       step('sync', () => window.addEventListener('storage', guard('other tab', (e) => {
         // Another tab changed the shortlist/hidden/notes: pick it up here.
         if (e.key === PAUSE_KEY) showPause(); // another tab hit a bot check (or its pause ended)
@@ -7389,9 +7410,8 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
       if (e.key === MARKS_KEY || e.key === SNAP_KEY || e.key === PRESETS_KEY || e.key === null) ui.status.querySelector('.rf-undo-restore')?.remove();
       if (e.key === MARKS_KEY || e.key === null) {
         marks.invalidate();
-        if (document.getElementById('rf-lbar')) renderListingBar();
-        // A note being typed in the drawer: its save redraws everything, so wait for it.
-        if (!ui.list.querySelector('.rf-note-edit')) keepingUndo(() => refreshMarks());
+        // A tab in the background redraws once when it's looked at again, not on every change made elsewhere.
+        if (document.hidden) ui.marksStale = true; else syncMarks();
       }
         // Settings saved in another tab: take its display settings (places, checklist, weights,
         // theme…). Filters and sort stay per tab, so two searches can be narrowed differently.
