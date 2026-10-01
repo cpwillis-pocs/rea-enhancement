@@ -6924,10 +6924,10 @@ ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}${askItems(r, amenities).l
   const DRAWER_MIN = 360, DRAWER_MAX = 900, DRAWER_TWO_COL = 760;
   // Installs auto-update silently, so the drawer says once what changed (lint keeps this in step
   // with @version and the changelog). A first install gets WELCOME instead.
-  const WHATS_NEW = { version: '2.35.0', items: [
-    "The Shortlist opens on what's next (approved first) and says what changed since your last visit; the launcher counts what needs doing.",
-    'Tick off the agent\'s answers to What to ask; apply portals join your application pack; Check all says how many new listings match.',
-    'Once approved: what\'s left to pay, and a room-by-room condition report checklist to print.',
+  const WHATS_NEW = { version: '2.36.0', items: [
+    'Search all pages shows listings as each page is read, not after the last one; the list grows where you are.',
+    "Faster everywhere: REA's other pages, a closed drawer and other tabs do far less work, and remembered searches load quicker.",
+    "Compact list: a listing's buttons show over its card on hover instead of pushing the list down.",
   ] };
   const WELCOME = [
     'Set a date (or leave it blank) and press Search all pages to read every page of this search.',
