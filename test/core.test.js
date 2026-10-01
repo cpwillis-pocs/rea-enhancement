@@ -925,6 +925,28 @@ test('2.35.2 audit: an earlier session added is not a cancellation; remembered s
   assert.ok(bad.sizes()[0].lite, 'trimmed text stays marked');
 });
 
+test('2.35.3 audit: real listing phrasing', () => {
+  for (const v of ['$650 - 12 month lease', '$650 | 1 month free', '$650 neg. Min 6 mth lease', '$650 - fortnight free']) assert.equal(core.parsePrice(v), 650, v);
+  assert.equal(core.parsePrice('$2850 p.m.'), 658);
+  assert.equal(core.parsePrice('$2850 per mo'), 658);
+  const now = new Date(2026, 9, 1);
+  assert.equal(core.parseAvail('Available 14th Nov - apply now!', now).getDate(), 14, 'a date beats a call to action');
+  assert.equal(core.parseAvail('Available now', now).getTime(), now.getTime());
+  assert.equal(core.parseAvail('Available 6 weeks from now', now), null);
+  assert.equal(core.applyByOf('Applications close 9th October so apply now', now), '2026-10-09');
+  assert.equal(core.sqmFromText('Master bedroom 16sqm'), null);
+  assert.equal(core.sqmFromText('2 bed apartment of 85sqm'), 85);
+  assert.equal(core.sqmFromText('72m2 internal | 10m2 courtyard'), 72);
+  const am = (t) => core.amenitiesOf({ text: t });
+  assert.deepEqual([am('air-conditioning not included').aircon, am('dishwasher space').dishwasher, am('pets: no').pets], ['no', null, 'no']);
+  assert.ok(core.availFromText('Avail. 12/11/2026', now));
+  assert.equal(core.tzOf({ address: '1 Argent St, Broken Hill NSW 2880' }), 'Australia/Broken_Hill');
+  assert.ok(core.textMatch({ address: '1 Café St, O’Connell' }, "cafe o'connell"));
+  assert.equal(core.buildingKey('Unit 3, 12 Smith Street, Bondi'), core.buildingKey('1/12 Smith St, Bondi'));
+  assert.equal(core.buildingKey('Level 2, 6/12 Smith St, Bondi'), core.buildingKey('1/12 Smith St, Bondi'));
+  assert.equal(core.enquiryText({ address: '1 A St', price: '$600', available: '1 Dec 2026 (from text)' }, 'Free{available}?'), 'Free from 1 Dec 2026?', 'the marker is ours, not the agent\'s');
+});
+
 test('rent now: the difference a week in the list, Compare and CSV; nothing without it', () => {
   const rows = [{ id: 'a', url: 'a', priceNum: 700 }, { id: 'b', url: 'b', priceNum: 600 }, { id: 'c', url: 'c', priceNum: 650 }, { id: 'd', url: 'd' }];
   const cfg = { ...core.DEFAULT_CFG, rentNow: '650' };

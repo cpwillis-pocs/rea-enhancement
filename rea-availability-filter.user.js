@@ -397,7 +397,7 @@
     sqm: typeof d.sq === 'number' ? sqmOk(d.sq) : null, sqmFromText: d.sq != null && d.sqt === 1,
   });
   // Feature signature: "<detector version>:<amenities yes bitmask>:<heads-up bitmask>" in base 36.
-  const FEAT_V = 7; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
+  const FEAT_V = 8; // bump when AMENITIES/WATCHOUTS detection changes, so old signatures aren't compared
   const featSig = (r) => {
     let a = 0, w = 0;
     AMENITIES.forEach((x, i) => { if (r.amen?.[x.id] === 'yes') a |= 1 << i; });
@@ -545,7 +545,7 @@
             if (li) e.li = li;
           }
           if (Number.isFinite(r.priceNum)) {
-            if (e.p != null && e.p !== r.priceNum) {
+            if (e.p != null && e.p !== r.priceNum && r.price !== e.ps) { // the same price text read differently (a parser change) isn't a price change
               // History only once the price actually changes (seeded with the previous price), so
               // the thousands of listings that never change cost nothing extra in storage.
               const ph = Array.isArray(e.ph) && e.ph.length ? e.ph : [[e.pt || e.f || t, clip(e.ps, 80)]];
@@ -833,6 +833,7 @@
     const r = {};
     for (const k of SNAP_FIELDS) r[k] = typeof o?.[k] === 'string' ? clip(o[k], SNAP_TEXT_MAX) : typeof o?.[k] === 'number' || typeof o?.[k] === 'boolean' ? o[k] : '';
     for (const k of ROW_DATES) r[k] = typeof o?.[k] === 'number' ? new Date(o[k]) : null;
+    if (r.avail && r.avail < startOfDay(new Date())) r.avail = startOfDay(new Date()); // "now" on the day it was saved is now today
     r.url = safeUrl(r.url);
     r.img = safeUrl(r.img);
     r.id = isListingId(o?.id) ? String(o.id) : listingId(r.url);
@@ -1206,7 +1207,14 @@
     if (!display) return null;
     const today = startOfDay(now);
     const clamp = (d) => (d < today && !keepPast ? today : d);
-    if (/\b(?:now|immediately|immediate|vacant)\b/i.test(display)) return today;
+    // "Available now" up front is today; a "now" later on ("14th Nov - apply now!", "6 weeks from
+    // now") is a call to action, so a date in the phrase wins and "now" is only the fallback.
+    const NOW = /\b(?:now|immediately|immediate|vacant)\b/i;
+    if (/^\W*(?:available\s*|availability\s*)?(?:from\s*|:\s*)?(?:now|immediately|immediate|vacant)\b/i.test(display)) return today;
+    const d = parseAvailDate(display, today, clamp);
+    return d !== undefined ? d : NOW.test(display) && !/\bfrom now\b/i.test(display) ? today : null;
+  };
+  const parseAvailDate = (display, today, clamp) => {
     const iso = display.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
     if (iso) {
       const d = new Date(+iso[1], +iso[2] - 1, +iso[3]);
@@ -1243,7 +1251,7 @@
     // "1.5" a bathroom count), not "x/7" (a schedule), and not "2/3 bed", "1/2 price", "12/7 days".
     const dm = display.match(/^\W*(?:available\s*)?(?:from\s+|on\s+|date:?\s*)?(\d{1,2})\/(\d{1,2})\b(?![/.-]?\d)(?!\s*(?:days?|price|bed|bath|car|br|off)\b)/i);
     if (dm && dm[2] !== '7') return yearless(+dm[1], +dm[2] - 1, today, clamp);
-    return null;
+    return undefined; // no date in it (null: one that isn't a real date)
   };
 
   // Weekly rent as a number. Ranges take the lower bound; monthly/annual figures are
@@ -1261,9 +1269,11 @@
     const tail = (/^\s*(?:-|–|—|to)\s*$/i.test(parts[0]) && parts.length > 1 ? parts[1] : parts[0]).replace(/\b\d{1,2}(?:[:.]\d\d)?\s*[ap]\.?m\b\.?/gi, ' ');
     const weekly = /\b(pw|p\/w|per\s*week|weekly|a\s*week)\b|\/\s*w(ee)?k\b/i.test(tail);
     if (!weekly) {
-      if (/\b(per\s*(?:calendar\s*)?(?:month|mth)|p\.?\s*c\.?\s*m|pcm|pm|p\/m|monthly|a\s*month|month|mth)\b|\/\s*m(on)?(th)?\b/i.test(tail)) v = (v * 12) / 52;
+      // A bare "month" / "fortnight" counts only right after the figure ("$2,600 month"): later on
+      // it's a lease or a promotion ("- 12 month lease", "1 month free").
+      if (/\b(per\s*(?:calendar\s*)?(?:month|mth|mo)|p\.?\s*c\.?\s*m|pcm|p\.?m\.?|p\/m|monthly|a\s*month)(?![a-z])|\/\s*m(on)?(th)?\b/i.test(tail) || /^\s*(?:\/|each)?\s*(?:calendar\s*)?(?:month|mth)\b/i.test(tail)) v = (v * 12) / 52;
       else if (/\b(per\s*(annum|year)|p\.?\s*a\.?|pa|annually|a\s*year)\b|\/\s*y(ea)?r\b/i.test(tail)) v /= 52;
-      else if (/\b(per\s*fortnight|p\.?\s*f\.?|pf|fortnightly|a\s*fortnight|fortnight)\b|\/\s*f(ort)?n(igh)?t\b/i.test(tail)) v /= 2;
+      else if (/\b(per\s*fortnight|p\.?\s*f\.?|pf|fortnightly|a\s*fortnight)\b|\/\s*f(ort)?n(igh)?t\b/i.test(tail) || /^\s*(?:\/|each)?\s*fortnight\b/i.test(tail)) v /= 2;
       else if (/\b(per\s*night|p\.?\s*n\.?|pn|nightly|a\s*night)\b|\/\s*n(igh)?t\b/i.test(tail)) v *= 7; // short stays
     }
     return Math.round(v);
@@ -1562,8 +1572,11 @@
   };
   const SQM_RE = /(?<![\d,.])(\d{1,2},\d{3}|\d{2,4})(?:\.\d+)?\s*(?:sq\.?\s*m(?:etres?|eters?)?(?![a-z])|m2(?![a-z\d])|m²|square\s*met(?:re|er)s?)/gi;
   const SQM_NOT = /\b(?:land|block|lot|site|allotment|parcel|grounds|acreage|balcon(?:y|ies)|courtyard|terrace|garden|yard|backyard|garage|carport|deck|patio|outdoor|alfresco|rooftop|storage|storeroom|shed|pool)\b/;
+  // A room's size isn't the home's ("master bedroom 16sqm", "kitchen 20 sqm"), but a bedroom count
+  // ("2 bed apartment of 85sqm") is about the home.
+  const SQM_ROOM = /(?<!\b(?:\d+|one|two|three|four|five|six)[\s-]*)\b(?:master|bed(?:room)?|kitchen|bath(?:room)?|ensuite|study|laundry|dining)\b/;
   const SQM_ON = /\bon\s+(?:an?\s+)?(?:approx(?:imately|\.)?\s+|about\s+|over\s+)?$/;
-  const SQM_SPLIT = /[,.;+&()]|\band\b|\bplus\b|\bwith\b/;
+  const SQM_SPLIT = /[,.;+&()|/]|\s[-–—]\s|\band\b|\bplus\b|\bwith\b/;
   const sqmFromText = (text) => {
     const t = String(text || '');
     for (const m of t.matchAll(SQM_RE)) {
@@ -1573,13 +1586,16 @@
       const after = t.slice(m.index + m[0].length, m.index + m[0].length + 30).toLowerCase().split(SQM_SPLIT)[0];
       const before = t.slice(Math.max(0, m.index - 30), m.index).toLowerCase().split(SQM_SPLIT).pop();
       // "set on 650sqm", "house on a 556 m2": a figure the home sits on is land.
-      if (!SQM_NOT.test(after) && !SQM_NOT.test(before) && !SQM_ON.test(before)) return n;
+      if (!SQM_NOT.test(after) && !SQM_NOT.test(before) && !SQM_ON.test(before) && !SQM_ROOM.test(before) && !SQM_ROOM.test(after.slice(0, 12))) return n;
     }
     return null;
   };
   // Shown wherever floor size filters or sorts: most rentals don't state it, and text reading can misfire.
   const SQM_NOTE = "Floor size is only known when REA's details or the listing text state it, and most rentals don't. Listings without a size are left out by Min m² and go last in the Price per m² sort. Sizes read from the text can be wrong (eg a total that includes a balcony).";
   const perSqm = (r) => (Number.isFinite(r.priceNum) && r.sqm > 0 ? Math.round((r.priceNum / r.sqm) * 100) / 100 : null);
+  // The availability as said to someone else (enquiry, copy, calendar, share): without the
+  // drawer's "(from text)" marker.
+  const availOut = (r) => String(r.available || '').replace(/\s*\(from text\)$/, '');
   const sqmLabel = (r) => (r.sqm ? `${r.sqm} m²${r.sqmFromText ? ' (from text)' : ''}` : '');
 
   // Amenities from feature labels + description. Negations are checked first, so "no pets"
@@ -1589,7 +1605,7 @@
   // #region text heuristics
   const AMENITIES = [
     { id: 'pets', label: 'Pets', yes: 'Pets OK',
-      neg: /\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
+      neg: /\bpets?\s*(?:allowed\s*)?[:?]\s*no\b|\b(?:strictly )?no[- ](?:pets?|animals|dogs?(?: or cats?)?)\b|\bpets? (?:are |is |will )?not (?:be )?(?:allowed|permitted|considered|accepted)\b|\bnot (?:pet[- ]friendly|suitable for pets)\b|\b(?:does|do) not (?:allow|permit|accept) pets\b|\bpet[- ]free\b/,
       pos: /\bpets? (?:are )?(?:allowed|welcome|friendly|considered|ok|okay|negotiable|permitted|accepted)\b|\bpet[- ]friendly\b|\bpets? (?:on|by|upon|subject to) (?:application|approval|request)\b|\bpets?\s*:\s*yes\b/ },
     { id: 'furnished', label: 'Furnished', yes: 'Furnished', neg: /(?<!\bor )\bunfurnished\b(?! or furnished)|\bnot furnished\b/,
       pos: /\b(?:fully |partly |partially |semi[- ])?furnished\b/ },
@@ -1640,7 +1656,13 @@
     const text = `${(row.features || []).join(' | ')} | ${row.amenText ?? row.text ?? ''}`.toLowerCase();
     const kv = KV_NO_GATE.test(text); // every kvNo needs this, and most listings have none
     return Object.fromEntries(AMENITIES.map((a) => [a.id, a.gate && ![].concat(a.gate).some((g) => text.includes(g)) ? null
-      : a.neg.test(text) ? 'no' : !a.pos.test(text) ? null : kv && a.kvNo.test(text) ? 'no' : 'yes'])); // kvNo only matches where pos does
+      : a.neg.test(text) ? 'no' : !a.pos.test(text) ? null : kv && a.kvNo.test(text) ? 'no' : amenAfter(a, text)])); // kvNo only matches where pos does
+  };
+  // What follows the mention: "Air-conditioning not included" is a no, "dishwasher space" a maybe.
+  const AMEN_EXCLUDED = /^[\s-]*(?:is |are )?(?:not (?:included|provided|supplied)|excluded)\b/, AMEN_ONLY_ROOM = /^[\s-]*(?:space|provision|ready|plumbing|connection)\b/;
+  const amenAfter = (a, text) => {
+    const m = text.match(a.pos), after = m ? text.slice(m.index + m[0].length, m.index + m[0].length + 30) : '';
+    return AMEN_EXCLUDED.test(after) ? 'no' : AMEN_ONLY_ROOM.test(after) ? null : 'yes';
   };
   // cfg.amenities is "pets:yes,furnished:no": require / exclude per amenity.
   const parseAmenCfg = (v) => Object.fromEntries(String(v || '').split(',').map((p) => p.split(':'))
@@ -1704,7 +1726,7 @@
   };
   // Availability from the description when REA's field is missing: "Available from 1st Nov",
   // "available now", "Availability: 12/11/2026". Not "available for inspection", "available to view".
-  const AVAIL_TEXT = /\bavailab(?:le|ility)\b\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d)){3,32})/i; // a dot between digits is a date ("12.11.2026")
+  const AVAIL_TEXT = /\b(?:availab(?:le|ility)\b|avail\.)\s*(?:(?:from|on|date)\b\s*)?:?\s*(?!for\b|to\b|by\b|upon\b|with\b|in\b|at\b|until\b|soon\b|as\b|if\b|and\b|or\b|the\b)((?:now|immediately)\b|(?:[^.;,\n()]|\.(?=\d)){3,32})/i; // a dot between digits is a date ("12.11.2026")
   // Something else being available (an inspection, the agent, parking) isn't the move-in date.
   const AVAIL_NOT_HOME = /\b(?:inspections?|agents?|viewings?|appointments?|parking|car ?spaces?|garages?|storage|lock-?up|keys?|furniture|nbn|internet)\s*(?:is|are)?\s*$/i;
   const AVAIL_TEXT_G = new RegExp(AVAIL_TEXT.source, 'gi');
@@ -2376,12 +2398,13 @@
     const subKey = (r) => (r.suburb ? `${String(r.suburb).toLowerCase()}|${+r.beds}` : null);
     // Same grouping and median as the market view, so a card's "x% below" agrees with its table.
     const medians = (groups) => new Map(groups.map((g) => [g.key, medianOf(g.rents)]).filter(([, m]) => m != null));
-    const med = medians(groupRents(priced, (r) => (r.surrounding ? null : +r.beds)));
+    const bedKey = (r) => Math.min(+r.beds || 0, 5); // 5+ together, as the market table groups them
+    const med = medians(groupRents(priced, (r) => (r.surrounding ? null : bedKey(r))));
     const multi = new Set(priced.map((r) => String(r.suburb).toLowerCase())).size > 1;
     const sub = multi ? medians(groupRents(priced, subKey)) : new Map();
     for (const r of rows) {
       const sm = r.beds === '' ? undefined : sub.get(subKey(r));
-      const m = sm ?? (r.beds === '' ? undefined : med.get(+r.beds));
+      const m = sm ?? (r.beds === '' ? undefined : med.get(bedKey(r)));
       r.median = m ?? null;
       r.medianScope = sm != null ? r.suburb : '';
       r.vsMedian = m && Number.isFinite(r.priceNum) ? Math.round(((r.priceNum - m) / m) * 100) : null;
@@ -2582,7 +2605,8 @@
   };
   const marketStats = (rows, now = new Date()) => {
     const uniq = dedupe(rows);
-    const byBeds = groupRents(uniq, (r) => (r.beds === '' || r.beds == null ? null : Math.min(+r.beds || 0, 5))).sort((a, b) => a.key - b.key)
+    // The search's own listings (not surrounding suburbs), as cards' medians are.
+    const byBeds = groupRents(uniq, (r) => (r.beds === '' || r.beds == null || r.surrounding ? null : Math.min(+r.beds || 0, 5))).sort((a, b) => a.key - b.key)
       .map(({ key, n, rents, ppb }) => {
         const enough = rents.length >= MEDIAN_MIN;
         return { beds: key, n, priced: rents.length, min: rents[0] ?? null, max: rents[rents.length - 1] ?? null,
@@ -2794,11 +2818,19 @@
 
   // Same building: a unit address without its unit ("5/12 Hall St, Bondi" -> "12 hall st bondi").
   const UNIT_PREFIX = /^\s*(?:(?:(?:unit|apartment|apt|flat|suite|villa|townhouse|lot|shop|studio|penthouse|room)\s*[\w-]+|level\s*\d+)\s*[,\/]?\s*)+|^\s*(?:(?:shop|studio|penthouse|suite)\s+)?[\w-]+\s*\/\s*/i;
+  const STREET_SHORT = { street: 'st', road: 'rd', avenue: 'ave', parade: 'pde', crescent: 'cres', drive: 'dr', place: 'pl', court: 'ct', terrace: 'tce', highway: 'hwy', lane: 'ln', close: 'cl', boulevard: 'bvd', boulevarde: 'bvd' };
   const bKeys = new Map(); // address -> building key: withBuildings/onePerBuilding/filterRows ask per row, per render
   const buildingKey = (address) => {
     const a = String(address || '');
     let k = bKeys.get(a);
-    if (k === undefined) { if (bKeys.size > 20000) bKeys.clear(); bKeys.set(a, (k = UNIT_PREFIX.test(a) ? addressKey(a.replace(UNIT_PREFIX, '')) : '')); }
+    if (k === undefined) {
+      if (bKeys.size > 20000) bKeys.clear();
+      // Every unit prefix off ("Level 2, 6/12 …"), and street types said one way ("Street" = "St").
+      let rest = a;
+      for (let i = 0; i < 3 && UNIT_PREFIX.test(rest); i++) rest = rest.replace(UNIT_PREFIX, '');
+      k = rest !== a ? addressKey(rest.replace(/\b(street|road|avenue|parade|crescent|drive|place|court|terrace|highway|lane|close|boulevarde?)\b/gi, (w) => STREET_SHORT[w.toLowerCase()])) : '';
+      bKeys.set(a, k);
+    }
     return k;
   };
   // One per building keeps the cheapest unit; houses and unit-less addresses always stay.
@@ -3027,7 +3059,7 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
         events.push(['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(i.at)}`,
           `DURATION:PT${INSPECT_MINUTES}M`, `SEQUENCE:${seq}`, `SUMMARY:${icsText(`Inspection: ${r.address || 'rental'}`)}`,
           `LOCATION:${icsText(r.address)}`, geo(r), r.url ? `URL:${r.url}` : '',
-          `DESCRIPTION:${icsText([r.price, r.available && `Available ${r.available}`, r.agency, r.applyVia && `Apply via ${r.applyVia}`, leaseText(r.lease), r.appStatus && `Status: ${r.appStatus}`, r.note].filter(Boolean).join(' | '))}`,
+          `DESCRIPTION:${icsText([r.price, r.available && `Available ${availOut(r)}`, r.agency, r.applyVia && `Apply via ${r.applyVia}`, leaseText(r.lease), r.appStatus && `Status: ${r.appStatus}`, r.note].filter(Boolean).join(' | '))}`,
           ...(alarm > 0 ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(`Inspection: ${r.address || 'rental'}`)}`, `TRIGGER:-PT${Math.round(alarm)}M`, 'END:VALARM'] : []),
           'END:VEVENT'].filter(Boolean));
       }
@@ -3124,7 +3156,7 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
   // `notes`: your notes, application statuses and ratings go too (opt-in: for a partner you're
   // searching with). Links made before these existed decode the same.
   const encodeShare = (rows, { notes = false } = {}) => b64url(JSON.stringify({ a: 'rea-enhancement', v: 1,
-    l: rows.slice(0, SHARE_MAX).map((r) => ({ i: r.id, u: r.url, a: clip(r.address, 120), p: clip(r.price, 60), v: clip(r.available, 40),
+    l: rows.slice(0, SHARE_MAX).map((r) => ({ i: r.id, u: r.url, a: clip(r.address, 120), p: clip(r.price, 60), v: clip(availOut(r), 40),
       b: scalar(r.beds), ba: scalar(r.baths), c: scalar(r.cars), ...(notes && r.note ? { n: clip(r.note, NOTE_MAX) } : {}),
       ...(notes && r.appStatus ? { s: r.appStatus } : {}), ...(notes && r.rating ? { r: r.rating } : {}) })) }));
   const decodeShare = (b) => {
@@ -3169,7 +3201,9 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
   const tzOf = (r) => {
     const k = `${r.state || ''}|${r.address || ''}`;
     if (tzMemo.has(k)) return tzMemo.get(k);
-    const v = STATE_TZ[String(r.state || (String(r.address || '').match(/\b(NSW|ACT|VIC|TAS|QLD|SA|WA|NT)\b(?!.*\b(NSW|ACT|VIC|TAS|QLD|SA|WA|NT)\b)/) || [])[1] || '').toUpperCase()] || null;
+    // Broken Hill (NSW 2880) keeps South Australian time.
+    const v = /\b2880\b/.test(String(r.address || '')) ? 'Australia/Broken_Hill'
+      : STATE_TZ[String(r.state || (String(r.address || '').match(/\b(NSW|ACT|VIC|TAS|QLD|SA|WA|NT)\b(?!.*\b(NSW|ACT|VIC|TAS|QLD|SA|WA|NT)\b)/) || [])[1] || '').toUpperCase()] || null;
     if (tzMemo.size > 20000) tzMemo.clear();
     tzMemo.set(k, v);
     return v;
@@ -3287,9 +3321,10 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
 
   // Shortlist search: every word must appear in the address, note, agency, suburb, price or status.
   const textMatch = (r, q) => {
-    const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const norm = (v) => fold(v).replace(/[’‘`]/g, "'"); // "cafe" finds "Café", "o'connell" finds "O’Connell"
+    const terms = norm(q).split(/\s+/).filter(Boolean);
     if (!terms.length) return true;
-    const hay = [r.address, r.note, r.agency, r.suburb, r.price, r.appStatus, r.type].filter(Boolean).join(' ').toLowerCase();
+    const hay = norm([r.address, r.note, r.agency, r.suburb, r.price, r.appStatus, r.type].filter(Boolean).join(' '));
     return terms.every((t) => hay.includes(t));
   };
 
@@ -3313,7 +3348,7 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
   const enquiryText = (r, template, amenities = '', free = '') => String(template || ENQUIRY_DEFAULT)
     .replace(/\{address\}/g, () => r.address || 'this property').replace(/\{price\}/g, () => r.price || 'price on request') // functions: a $ in the text isn't a pattern
     .replace(/\{available\}/g, () => {
-      const a = String(r.available && r.available !== '-' ? r.available : '').replace(/^available\s*(from\s*)?/i, '').trim();
+      const a = String(r.available && r.available !== '-' ? availOut(r) : '').replace(/^available\s*(from\s*)?/i, '').trim();
       return !a ? '' : /^now$/i.test(a) ? ' now' : ` from ${a}`;
     })
     .replace(/\{inspection\}/g, () => (r.inspections?.[0]?.label ? `I'd like to come to the inspection on ${r.inspections[0].label}. ` : r.byAppt ? 'Could I book a private inspection? ' : 'Could I arrange an inspection? '))
@@ -3322,7 +3357,7 @@ ${plan.rooms.map((room) => `<h2>${esc(room)}</h2><table><tr><th>Item</th><th>Con
 
   // One listing as plain text for a message.
   // "Available 12 Oct · 2 bed, 1 bath, ? car · move-in $3,300": shared by Copy and Print.
-  const factsLine = (r, sep) => [r.available && r.available !== '-' ? `Available ${r.available}` : '',
+  const factsLine = (r, sep) => [r.available && r.available !== '-' ? `Available ${availOut(r)}` : '',
     [r.beds, r.baths, r.cars].some((v) => v !== '' && v != null) ? [`${orQ(r.beds)} bed`, `${orQ(r.baths)} bath`, `${orQ(r.cars)} car`].join(sep) : '',
     Number.isFinite(r.upfront) ? `move-in ${money(r.upfront)}` : ''].filter(Boolean).join(' · ');
   const summaryText = (r) => [
